@@ -4,7 +4,8 @@ Campaign: C06
 Lot: MP-20260911  
 Contract: MP/1  
 Base: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`  
-Branch: `mp-20260911/c06-transformacoes_alvo`
+Branch: `mp-20260911/c06-transformacoes_alvo`  
+Head (implementation): `a416db2ea85c245018dd270171153800e6d494f1`
 
 ## What changed
 
