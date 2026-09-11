@@ -1,0 +1,65 @@
+{
+  "campaign_id": "C10",
+  "head_sha": "PENDING_COMMIT",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "INTEGRATION_PENDING",
+  "criteria": [
+    {
+      "id": "C10-A01",
+      "status": "passed",
+      "evidence": "tests/c10_pipeline/test_a01_contract.py drives validate_request_spec and freeze_result_snapshot on shipped modules/result_contract.py. 16 passed. NaN/pandas → Issue+null; point not rebuilt from arbitration; legacy ValidationResult does not authorize issuance."
+    },
+    {
+      "id": "C10-A02",
+      "status": "passed_with_labeled_peers",
+      "evidence": "tests/c10_pipeline/test_a02_compose.py drives backend.worker.compose_valuation_job / compose_preview. Roles visible before cleaning; categorical subject and sample_ledger survive; PDF failure preserves snapshot; ingest failure does not call search; worker source has no load_data/find_best_model. 9 passed × 2 runs."
+    },
+    {
+      "id": "C10-A03",
+      "status": "passed_with_labeled_peers",
+      "evidence": "tests/c10_pipeline/test_a03_http.py and tests/test_api.py use FastAPI TestClient against backend.api:app. POST /jobs 202; GET result; preview does not search; 4xx for invalid JSON/degree/candidate_cols=[]/non-finite; idempotent resubmit; cancel; interrupted-on-restart; /upload adapter 202; /projects revisions + /batch. 10 passed × 2 runs."
+    },
+    {
+      "id": "C10-A04",
+      "status": "passed_with_labeled_peers",
+      "evidence": "tests/c10_pipeline/test_a04_isolation.py: two jobs on one store keep distinct points/subjects/frozen_project bytes; PDF failure visible on GET with snapshot retrievable. 3 passed."
+    },
+    {
+      "id": "C10-A05",
+      "status": "passed",
+      "evidence": "tests/c10_pipeline/test_a05_security_peers.py: traversal guard, oversized 413, empty file 400, 409 when result absent, labeled vs real peer_kind, AST check that production does not ship JobStore/ingest_market, 503 when C11 import is forced absent. 8 passed."
+    }
+  ],
+  "commands": [
+    {"command": "python3 -m pytest tests/c10_pipeline/test_a01_contract.py -q", "exit_code": 0},
+    {"command": "python3 -m pytest tests/c10_pipeline/test_a02_compose.py -q", "exit_code": 0},
+    {"command": "python3 -m pytest tests/c10_pipeline/test_a02_compose.py -q", "exit_code": 0},
+    {"command": "python3 -m pytest tests/c10_pipeline/test_a03_http.py -q", "exit_code": 0},
+    {"command": "python3 -m pytest tests/c10_pipeline/test_a03_http.py -q", "exit_code": 0},
+    {"command": "python3 -m pytest tests/c10_pipeline/test_a04_isolation.py -q", "exit_code": 0},
+    {"command": "python3 -m pytest tests/c10_pipeline/test_a05_security_peers.py -q", "exit_code": 0},
+    {"command": "python3 -m pytest tests/test_api.py tests/c10_pipeline/ -q", "exit_code": 0}
+  ],
+  "unmet_dependencies": [
+    "C01 ingest_market",
+    "C02 fit_dataset/transform_subject",
+    "C03 assess_normative",
+    "C04 evaluate_fitted/fit_candidate",
+    "C05 search_models",
+    "C07 evaluate_procedure",
+    "C08 render_report(snapshot, report_context)",
+    "C11 JobStore/ProjectStore/LocalTaskRunner (not in audited SHA; not vendored here)",
+    "C12 build_evidence_bundle",
+    "C13 recommend_next_actions",
+    "C14 evaluate_batch"
+  ],
+  "deferred_items": [
+    "End-to-end pipeline with real peer implementations (C17).",
+    "C09 UI poll of GET /jobs/{id}/result instead of WebSocket PDF/base64.",
+    "C15 packaging of MP_CORS_ORIGINS / MP_MAX_UPLOAD_BYTES / MP_CODE_SHA."
+  ],
+  "review_findings": [
+    "Local acceptances A01–A05 passed on shipped C10 functions. Composition and HTTP tests bind labeled contract simulators because peer exports are absent from c92949e. This is INTEGRATION_PENDING, not PASS_E2E and not READY_COMPONENT for the combined pipeline."
+  ]
+}
