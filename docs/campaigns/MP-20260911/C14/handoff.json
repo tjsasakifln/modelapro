@@ -91,7 +91,7 @@
   ],
   "contract_version": "MP/1",
   "dependency_pr": "https://github.com/tjsasakifln/modelapro/pull/9",
-  "head_sha": "b1a00eaeec844f86332d1ae7c862a7c6412b30e3",
+  "head_sha": "1a9f80d6f69c4ea5fefad89c0523e9a3295049f3",
   "acceptance_case": [
     "C14-A01",
     "C14-A02",
