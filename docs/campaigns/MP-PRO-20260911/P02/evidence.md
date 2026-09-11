@@ -36,8 +36,8 @@ PYTHONPATH=. python3 -m pytest tests/c09_frontend tests/pro_workflow/p02 tests/t
 
 | Run | Exit | Resultado |
 | --- | ---: | --- |
-| 1 | 0 | 71 passed (`p02-unit.log`) |
-| 2 | 0 | 71 passed (`p02-unit-2.log`) |
+| 1 | 0 | 75 passed (`p02-unit.txt`) |
+| 2 | 0 | 75 passed (`p02-unit-2.txt`) |
 
 AppTest `frontend/app.py` duas vezes: `p02-launch.log`, exit 0. Headings do percurso presentes; sem «R² Ajustado»; sem banner de certificação.
 
@@ -50,7 +50,7 @@ A04 contra stub HTTP das rotas C11 (não mock do cliente): `p02-a04.log`.
 | P02-A01 | BLOCKED | `playwright` ausente neste ambiente. Log em `p02-playwright-unavailable.log`. Sem traces fabricados. |
 | P02-A02 | IMPLEMENTED_VERIFIED | Corpo POST contém grau canônico e método escolhido; pending ≠ atingido; validação não pedida = não executada. |
 | P02-A03 | IMPLEMENTED_VERIFIED | Token de arquivo; invalidação; preview falha descarta interpretação; POST equivalente bloqueado. |
-| P02-A04 | IMPLEMENTED_PARTIAL | Recuperação canônica, PDF falho ≠ cálculo, lote válido/não suportado/pendente. Lista completa de revisões: INTEGRATION_PENDING (P01). |
+| P02-A04 | IMPLEMENTED_PARTIAL | Recuperação canônica, PDF falho ≠ cálculo, lote válido/não suportado/pendente. GET `/projects/{id}/revisions` na BASE_SHA é **405** (POST-only); o cliente trata 404/405/501 como handoff e reabre a revisão selecionada via GET `/jobs/{id}/result`. Lista histórica completa: INTEGRATION_PENDING (P01). |
 | P02-A05 | IMPLEMENTED_PARTIAL | 1366 e viewport estreito no presenter. `workflow_context` via fixture rotulada; live = INTEGRATION_PENDING (P01). |
 | P02-A06 | IMPLEMENTED_VERIFIED | Tabela abaixo. Hipótese de produtividade até piloto. |
 
@@ -84,7 +84,7 @@ Ver `delivery.json` (`handoffs`). Resumo:
 
 ## Capturas
 
-- `p02-unit.txt` / `p02-unit-2.txt` (71 passed, exit 0, duas execuções)
+- `p02-unit.txt` / `p02-unit-2.txt` (75 passed, exit 0, duas execuções)
 - `p02-launch.txt` (AppTest duas vezes, exit 0)
 - `p02-a04.txt`
 - `p02-playwright-unavailable.txt`

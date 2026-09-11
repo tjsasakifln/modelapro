@@ -85,8 +85,8 @@
       "PYTHONPATH=. python3 -m pytest tests/c09_frontend tests/pro_workflow/p02 tests/test_forms_heuristics.py -q --tb=short"
     ],
     "runs": [
-      {"file": "p02-unit.log", "exit_code": 0, "passed": 71},
-      {"file": "p02-unit-2.log", "exit_code": 0, "passed": 71}
+      {"file": "p02-unit.txt", "exit_code": 0, "passed": 75},
+      {"file": "p02-unit-2.txt", "exit_code": 0, "passed": 75}
     ],
     "launch": {"file": "p02-launch.log", "exit_code": 0},
     "a04": {"file": "p02-a04.log", "note": "stub HTTP das rotas C11, não mock do cliente"}
@@ -111,8 +111,8 @@
     },
     "P02-A04": {
       "status": "IMPLEMENTED_PARTIAL",
-      "verified": "save/select/reload/recover/PDF fail/batch item states contra stub HTTP das rotas reais",
-      "integration_pending": "GET /projects/{id}/revisions (lista completa) — BASE_SHA só devolve a revisão atual em GET /projects/{id}"
+      "verified": "save/select/reload/recover/PDF fail/batch item states contra stub HTTP das rotas reais; GET /revisions 405 tratado como rota ausente; Reabrir esta revisão recupera GET /jobs/{id}/result",
+      "integration_pending": "GET /projects/{id}/revisions (lista completa) — BASE_SHA registra só POST; GET devolve 405 Method Not Allowed"
     },
     "P02-A05": {
       "status": "IMPLEMENTED_PARTIAL",
@@ -128,9 +128,10 @@
     {
       "producer": "P01",
       "consumer": "P02",
-      "change": "Expor GET /projects/{project_id}/revisions com a lista imutável de revisões.",
+      "change": "Expor GET /projects/{project_id}/revisions com a lista imutável de revisões. Na BASE_SHA o path só aceita POST e GET devolve 405.",
       "method": "GET",
       "path": "/projects/{project_id}/revisions",
+      "base_sha_status": 405,
       "example_request": null,
       "example_response": {
         "schema_version": "MP/1",

@@ -415,6 +415,35 @@ def main() -> None:
         except (ApiConnectionError, ApiResponseError) as exc:
             st.error(str(exc))
 
+    open_rev = project_actions.get("open_revision_id") or None
+    if open_rev:
+        project_id = (
+            (st.session_state.p02_selected_project or {}).get("project_id")
+            or side.get("project_id")
+            or project_actions.get("create_project_id")
+        )
+        if not project_id:
+            st.error("Selecione um projeto antes de reabrir a revisão.")
+        else:
+            try:
+                outcome = client.reopen_revision(
+                    project_id,
+                    open_rev,
+                    st.session_state.p02_revisions,
+                )
+                if not outcome.get("recovered"):
+                    st.info(outcome.get("reason") or "Revisão histórica indisponível nesta BASE_SHA.")
+                    if outcome.get("handoff"):
+                        st.session_state.p02_revisions_handoff = outcome["handoff"]
+                else:
+                    st.caption(
+                        f"Revisão {outcome.get('revision_id')} recuperada via {outcome.get('via')} "
+                        "— não pelo texto da tela."
+                    )
+                    persist_client_to_session(st.session_state, client)
+            except (ApiConnectionError, ApiResponseError) as exc:
+                st.error(str(exc))
+
     save_project_id = side.get("project_id") or project_actions.get("create_project_id")
     if art_actions.get("save"):
         project_id = save_project_id

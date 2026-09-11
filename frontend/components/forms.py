@@ -31,8 +31,11 @@ from .workflow import (
     mapping_binding_token,
     normalize_minimum_grade,
     normalize_projects_list,
+    list_route_unavailable,
+    pick_revision,
     policies_on_the_wire,
     preview_failure_clears_interpretation,
+    revision_recovery_plan,
     schema_fingerprint,
     should_block_duplicate_submit,
     unused_columns_view,
@@ -955,38 +958,14 @@ class JobClient:
     def list_revisions(self, project_id: str) -> dict:
         """GET /projects/{id}/revisions if the producer exposes it; else latest only.
 
-        BASE_SHA has GET /projects/{id} (latest revision) and POST .../revisions.
-        A list route is a P01 handoff when missing — this client does not invent it.
+        BASE_SHA registers POST /projects/{id}/revisions only. GET on that path
+        is 405 Method Not Allowed (not 404). A list route is a P01 handoff —
+        this client does not invent it.
         """
         response = self._call("GET", f"/projects/{project_id}/revisions")
         payload = _json_or_text(response)
-        if response.status_code == 404:
-            items = []
-            try:
-                latest = self.get_project(project_id)
-                revision = latest.get("revision") if isinstance(latest, Mapping) else None
-                if isinstance(revision, Mapping):
-                    items = [revision]
-            except ApiResponseError:
-                items = []
-            return {
-                "project_id": project_id,
-                "revisions": items,
-                "list_route_available": False,
-                "integration": "INTEGRATION_PENDING",
-                "handoff": {
-                    "producer": "P01",
-                    "method": "GET",
-                    "path": f"/projects/{project_id}/revisions",
-                    "example_response": {
-                        "schema_version": SCHEMA_VERSION,
-                        "project_id": project_id,
-                        "revisions": [
-                            {"revision_id": "rev-…", "created_at": "ISO-8601", "job_id": "job-…"}
-                        ],
-                    },
-                },
-            }
+        if list_route_unavailable(response.status_code):
+            return self._revisions_without_list_route(project_id, http_status=response.status_code)
         if response.status_code >= 400:
             raise ApiResponseError(
                 f"Revisões indisponíveis (HTTP {response.status_code}).",
@@ -1012,6 +991,95 @@ class JobClient:
             "revisions": [payload] if payload else [],
             "list_route_available": True,
             "integration": None,
+        }
+
+    def _revisions_without_list_route(self, project_id: str, *, http_status: int) -> dict:
+        items = []
+        try:
+            latest = self.get_project(project_id)
+            revision = latest.get("revision") if isinstance(latest, Mapping) else None
+            if isinstance(revision, Mapping):
+                items = [revision]
+        except ApiResponseError:
+            items = []
+        return {
+            "project_id": project_id,
+            "revisions": items,
+            "list_route_available": False,
+            "http_status": http_status,
+            "integration": "INTEGRATION_PENDING",
+            "handoff": {
+                "producer": "P01",
+                "method": "GET",
+                "path": f"/projects/{project_id}/revisions",
+                "base_sha_note": "POST-only on BASE_SHA; GET returns 405 Method Not Allowed.",
+                "example_response": {
+                    "schema_version": SCHEMA_VERSION,
+                    "project_id": project_id,
+                    "revisions": [
+                        {"revision_id": "rev-…", "created_at": "ISO-8601", "job_id": "job-…"}
+                    ],
+                },
+            },
+        }
+
+    def reopen_revision(
+        self,
+        project_id: str,
+        revision_id: str,
+        revisions_payload: Optional[Mapping[str, Any]] = None,
+    ) -> dict:
+        """Recover the selected revision via GET /jobs/{id}/result or GET /projects/{id}.
+
+        Never reconstructs from on-screen text. Historical revisions beyond the
+        latest require the P01 list route.
+        """
+        picked = pick_revision(revisions_payload, revision_id)
+        if picked is None:
+            latest = self.get_project(project_id)
+            candidate = latest.get("revision") if isinstance(latest, Mapping) else None
+            if isinstance(candidate, Mapping):
+                labels = {
+                    str(candidate.get("revision_id") or ""),
+                    str(candidate.get("job_id") or ""),
+                    str((candidate.get("snapshot_ref") or {}).get("job_id") or ""),
+                }
+                if str(revision_id) in labels:
+                    picked = dict(candidate)
+            if picked is None:
+                return {
+                    "recovered": False,
+                    "from_screen_text": False,
+                    "integration": "INTEGRATION_PENDING",
+                    "reason": (
+                        "A revisão selecionada não é a atual e GET "
+                        f"/projects/{project_id}/revisions não está na BASE_SHA."
+                    ),
+                    "handoff": {
+                        "producer": "P01",
+                        "method": "GET",
+                        "path": f"/projects/{project_id}/revisions",
+                    },
+                }
+        plan = revision_recovery_plan({"project_id": project_id, "revision": picked})
+        if plan.get("job_id"):
+            status = self.recover(plan["job_id"])
+            return {
+                "recovered": True,
+                "from_screen_text": False,
+                "via": f"GET /jobs/{plan['job_id']}/result",
+                "job_id": plan["job_id"],
+                "revision_id": picked.get("revision_id") or revision_id,
+                "snapshot": self.last_snapshot,
+                "status": status,
+            }
+        return {
+            "recovered": True,
+            "from_screen_text": False,
+            "via": "GET /projects/{id}",
+            "job_id": None,
+            "revision_id": picked.get("revision_id") or revision_id,
+            "frozen": picked,
         }
 
     def get_project(self, project_id: str) -> dict:

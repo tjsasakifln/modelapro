@@ -764,6 +764,49 @@ def normalize_projects_list(payload: Any) -> list:
     return []
 
 
+def list_route_unavailable(status_code: Optional[int]) -> bool:
+    """BASE_SHA registers POST /projects/{id}/revisions only; GET is 405, not 404."""
+    try:
+        code = int(status_code) if status_code is not None else 0
+    except (TypeError, ValueError):
+        return False
+    return code in {404, 405, 501}
+
+
+def revisions_from_payload(payload: Any) -> list:
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        return list(payload)
+    if isinstance(payload, Mapping):
+        items = payload.get("revisions")
+        if isinstance(items, list):
+            return list(items)
+        if isinstance(payload.get("revision"), Mapping):
+            return [payload["revision"]]
+    return []
+
+
+def pick_revision(payload: Any, revision_id: Optional[str]) -> Optional[dict]:
+    """Select a revision mapping by revision_id or job_id. Never screen text."""
+    if not revision_id:
+        return None
+    wanted = str(revision_id)
+    for item in revisions_from_payload(payload):
+        if not isinstance(item, Mapping):
+            if str(item) == wanted:
+                return {"revision_id": str(item)}
+            continue
+        labels = (
+            item.get("revision_id"),
+            item.get("job_id"),
+            (item.get("snapshot_ref") or {}).get("job_id") if isinstance(item.get("snapshot_ref"), Mapping) else None,
+        )
+        if any(str(label) == wanted for label in labels if label is not None):
+            return dict(item)
+    return None
+
+
 def revision_recovery_plan(project_payload: Optional[Mapping[str, Any]]) -> dict:
     """Recover canonical frozen_project / job result — never screen text."""
     payload = project_payload or {}
