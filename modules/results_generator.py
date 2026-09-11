@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
 
@@ -29,7 +29,19 @@ import seaborn as sns
 
 from .config_manager import config
 from .logging_manager import logger
+from .report_presenter.formula import compose_model_equation
+from .report_presenter.search_coverage import interpret_search
+from .report_presenter.series import assess_chart_series
 from .results import ModelResult
+
+DISPLAY_ROUNDING_DECIMALS = 2
+
+ISSUANCE_REASON_LABELS = {
+    "no_automatic_report_approval": "Esta minuta não constitui aprovação automática de laudo.",
+    "grau_is_not_issuance_readiness": "O grau calculado não equivale a prontidão de emissão.",
+    "documentary_declared_is_not_verified_proof": "Documento apenas declarado não é comprovação.",
+    "draft": "Minuta em rascunho, sujeita a revisão profissional.",
+}
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -318,6 +330,97 @@ def _redact_mapping(value: Any, *, depth: int = 0) -> Any:
     return _safe_text(value)
 
 
+def _issuance_reason_text(reason: Any) -> str:
+    text = _safe_text(reason)
+    if not text:
+        return ""
+    return ISSUANCE_REASON_LABELS.get(text, ISSUANCE_REASON_LABELS.get(text.lower(), text))
+
+
+def _group_issues(issues: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: List[Dict[str, Any]] = []
+    index: Dict[Tuple[str, str, str], int] = {}
+    for issue in issues:
+        key = (
+            str(issue.get("origin_bucket") or ""),
+            str(issue.get("code") or ""),
+            str(issue.get("message") or ""),
+        )
+        if key not in index:
+            index[key] = len(grouped)
+            grouped.append(dict(issue))
+            continue
+        current = grouped[index[key]]
+        seen = set(current.get("affected_ids") or [])
+        for rid in issue.get("affected_ids") or []:
+            if rid not in seen:
+                current.setdefault("affected_ids", []).append(rid)
+                seen.add(rid)
+    return grouped
+
+
+def _metrics_block(model: Mapping[str, Any], statistical: Mapping[str, Any]) -> Dict[str, Any]:
+    metrics_src = model.get("metrics") if isinstance(model.get("metrics"), Mapping) else {}
+    if not metrics_src:
+        metrics_src = {
+            k: statistical.get(k)
+            for k in ("r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson")
+            if statistical.get(k) is not None
+        }
+        if statistical.get("f_pvalue") is not None and "f_pvalue" not in metrics_src:
+            metrics_src["f_pvalue"] = statistical.get("f_pvalue")
+    present = bool(metrics_src)
+    return {
+        "present": present,
+        "source": "model.metrics" if isinstance(model.get("metrics"), Mapping) and model.get("metrics") else (
+            "validation.statistical" if present else ""
+        ),
+        "external": False,
+        "r2": _fmt(_as_finite_number(metrics_src.get("r2")), 4) if present else "—",
+        "r2_adjusted": _fmt(_as_finite_number(metrics_src.get("r2_adjusted")), 4) if present else "—",
+        "f_statistic": _fmt(_as_finite_number(metrics_src.get("f_statistic")), 3) if present else "—",
+        "f_pvalue": _fmt(_as_finite_number(metrics_src.get("f_pvalue")), 4) if present else "—",
+        "durbin_watson": _fmt(
+            _as_finite_number(
+                metrics_src.get("durbin_watson") or metrics_src.get("autocorrelation_durbin_watson")
+            ),
+            3,
+        )
+        if present
+        else "—",
+        "note": (
+            "Indicadores de ajustamento da amostra utilizada (não são desempenho de validação externa)."
+            if present
+            else "Indicadores de ajustamento não foram fornecidos neste snapshot."
+        ),
+    }
+
+
+def _context_sources(ctx: Mapping[str, Any], provenance: Mapping[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Split human sources from technical hashes. Do not invent market URLs."""
+    human: List[Dict[str, Any]] = []
+    technical: List[Dict[str, Any]] = []
+    raw = ctx.get("sources")
+    if isinstance(raw, Mapping) and not any(k in raw for k in ("id", "label", "citation", "name")):
+        for key, value in raw.items():
+            technical.append({"id": str(key), "label": str(key), "citation": _safe_text(value)})
+        return human, technical
+    for src in _as_list(raw):
+        if isinstance(src, Mapping):
+            entry = {
+                "id": _safe_text(src.get("id") or ""),
+                "label": _safe_text(src.get("label") or src.get("name") or ""),
+                "citation": _safe_text(src.get("citation") or src.get("description") or ""),
+            }
+            if str(entry["id"]).lower() in {"input_sha256", "dataset_sha256", "code_sha"}:
+                technical.append(entry)
+            else:
+                human.append(entry)
+        else:
+            human.append({"id": "", "label": _safe_text(src), "citation": ""})
+    return human, technical
+
+
 def _origin_bucket(origin: Any) -> str:
     text = str(origin or "other").strip().lower()
     if text in ORIGIN_BUCKETS:
@@ -399,6 +502,40 @@ def _document_items(raw: Any) -> List[Dict[str, Any]]:
                         )
             for item in _as_list(raw.get("items")):
                 items.extend(_document_items([item]))
+            for key, nested in raw.items():
+                if key in {
+                    "declared",
+                    "present",
+                    "verified",
+                    "pending",
+                    "items",
+                    "status",
+                    "note",
+                    "provenance",
+                }:
+                    continue
+                if isinstance(nested, Mapping) and (
+                    nested.get("evidence_status") or nested.get("status") or nested.get("grade") is not None
+                ):
+                    extra = dict(nested)
+                    extra.setdefault("name", key)
+                    extra.setdefault("id", key)
+                    items.extend(_document_items(extra))
+            return items
+        nested_docs = [
+            (key, nested)
+            for key, nested in raw.items()
+            if isinstance(nested, Mapping)
+            and key
+            not in {"status", "note", "provenance", "evidence", "calculation", "source"}
+            and (nested.get("evidence_status") or nested.get("status") or "grade" in nested)
+        ]
+        if nested_docs and not raw.get("name") and not raw.get("id"):
+            for key, nested in nested_docs:
+                extra = dict(nested)
+                extra.setdefault("name", key)
+                extra.setdefault("id", key)
+                items.extend(_document_items(extra))
             return items
         status = str(raw.get("status") or raw.get("evidence_status") or "declared")
         status_norm = {
@@ -433,13 +570,21 @@ def _document_items(raw: Any) -> List[Dict[str, Any]]:
 
 def _next_action_dict(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, Mapping):
+        limitations_raw = raw.get("limitations")
+        if isinstance(limitations_raw, list):
+            limitations_items = [_safe_text(x) for x in limitations_raw if str(x).strip()]
+        elif limitations_raw:
+            limitations_items = [_safe_text(limitations_raw)]
+        else:
+            limitations_items = []
         return {
             "code": _safe_text(raw.get("code") or ""),
             "priority": _safe_text(raw.get("priority") or ""),
             "reason": _safe_text(raw.get("reason") or ""),
             "next_step": _safe_text(raw.get("next_step") or ""),
             "evidence_refs": [str(x) for x in _as_list(raw.get("evidence_refs"))],
-            "limitations": _safe_text(raw.get("limitations") or ""),
+            "limitations": "; ".join(limitations_items),
+            "limitations_items": limitations_items,
         }
     return {
         "code": "",
@@ -448,6 +593,7 @@ def _next_action_dict(raw: Any) -> Dict[str, Any]:
         "next_step": "",
         "evidence_refs": [],
         "limitations": "",
+        "limitations_items": [],
     }
 
 
@@ -536,14 +682,19 @@ def _ledger_rows(
         justification = info.get("justification") or ""
         label = info.get("label") or ""
         values = info.get("values") or {}
+        storage_values = {
+            str(k): format_snapshot_number(v) if _as_finite_number(v) is not None else _safe_text(v)
+            for k, v in values.items()
+        }
         rows.append(
             {
                 "row_id": rid,
-                "source": source if source else "Pendência: fonte não informada",
+                "source": source if source else "Fonte não informada no contexto do relatório",
                 "justification": justification if justification else default_justification,
                 "label": label,
                 "values": values,
-                "value_cells": [values.get(k, "") for k in sorted(values.keys())],
+                "storage_values": storage_values,
+                "value_cells": [storage_values.get(k, values.get(k, "")) for k in sorted(values.keys())],
             }
         )
     return rows
@@ -637,17 +788,24 @@ def build_report_view(
     excluded_value_columns = [
         c for c in _value_columns(excluded_rows) if c.lower() not in {"nome", "name", "label", "rotulo", "rótulo"}
     ]
-    for row in used_rows:
-        row["value_cells"] = [row["values"].get(k, "") for k in used_value_columns]
-    for row in excluded_rows:
-        row["value_cells"] = [row["values"].get(k, "") for k in excluded_value_columns]
+    for n, row in enumerate(used_rows, start=1):
+        row["seq"] = n
+        storage = row.get("storage_values") or {}
+        row["value_cells"] = [storage.get(k, row["values"].get(k, "")) for k in used_value_columns]
+    for n, row in enumerate(excluded_rows, start=1):
+        row["seq"] = n
+        storage = row.get("storage_values") or {}
+        row["value_cells"] = [storage.get(k, row["values"].get(k, "")) for k in excluded_value_columns]
 
-    issues = [_issue_dict(i) for i in _as_list(snapshot.get("issues"))]
+    issues = _group_issues([_issue_dict(i) for i in _as_list(snapshot.get("issues"))])
     issues_by_origin: Dict[str, List[Dict[str, Any]]] = {
         key: [] for key in ("normative", "statistical", "documentary", "search", "inference", "other")
     }
     for issue in issues:
         issues_by_origin.setdefault(issue["origin_bucket"], []).append(issue)
+    priority_limitations = [
+        issue for issue in issues if str(issue.get("severity") or "").lower() in {"error", "warning"}
+    ]
 
     precisao_status = str(precisao.get("status") or "not_computed")
     precisao_grade = precisao.get("grade")
@@ -665,27 +823,13 @@ def build_report_view(
         seen_docs.add(key)
         unique_docs.append(doc)
 
-    sources = []
-    for src in _as_list(ctx.get("sources")):
-        if isinstance(src, Mapping):
-            sources.append(
-                {
-                    "id": _safe_text(src.get("id") or ""),
-                    "label": _safe_text(src.get("label") or src.get("name") or ""),
-                    "citation": _safe_text(src.get("citation") or src.get("description") or ""),
-                }
-            )
-        else:
-            sources.append({"id": "", "label": _safe_text(src), "citation": ""})
-
-    search_exhaustive = search.get("exhaustive")
-    search_mode = search.get("mode") or search.get("kind")
-    approximate = search_exhaustive is False or (
-        isinstance(search_mode, str)
-        and search_mode.lower() in {"approximate", "heuristic", "top_n", "fallback", "non_exhaustive"}
-    )
-    search_limitations = []
-    for item in _as_list(search.get("limitations") or search.get("limitation") or ctx.get("search_limitations")):
+    sources, technical_sources = _context_sources(ctx, provenance)
+    search_info = interpret_search(search)
+    search_exhaustive = search_info["exhaustive"]
+    search_mode = search_info["mode"]
+    approximate = search_info["approximate"]
+    search_limitations = list(search_info["limitations"])
+    for item in _as_list(ctx.get("search_limitations")):
         text_item = _safe_text(item)
         if text_item and text_item not in search_limitations:
             search_limitations.append(text_item)
@@ -694,29 +838,39 @@ def build_report_view(
     ]
     if statistical.get("limitations"):
         inference_limitations.extend(_safe_text(x) for x in _as_list(statistical.get("limitations")))
+    if search_info["summary"] and search_info["approximate"]:
+        inference_limitations.append(search_info["summary"])
 
     next_actions = [_next_action_dict(a) for a in _as_list(snapshot.get("next_actions"))]
 
     issuance_status = str(issuance.get("status") or "draft")
     if issuance_status not in ISSUANCE_LABELS:
         issuance_status = "draft"
-    issuance_reasons = [_safe_text(r) for r in _as_list(issuance.get("reasons"))]
+    issuance_reasons = [
+        _issuance_reason_text(r) for r in _as_list(issuance.get("reasons")) if _issuance_reason_text(r)
+    ]
 
-    metrics_src = model.get("metrics") if isinstance(model.get("metrics"), Mapping) else {}
-    metrics = {
-        "r2": _fmt(_as_finite_number(metrics_src.get("r2")), 4) if metrics_src else "—",
-        "r2_adjusted": _fmt(_as_finite_number(metrics_src.get("r2_adjusted")), 4) if metrics_src else "—",
-        "f_statistic": _fmt(_as_finite_number(metrics_src.get("f_statistic")), 3) if metrics_src else "—",
-        "f_pvalue": _fmt(_as_finite_number(metrics_src.get("f_pvalue")), 4) if metrics_src else "—",
-        "durbin_watson": _fmt(
-            _as_finite_number(
-                metrics_src.get("durbin_watson") or metrics_src.get("autocorrelation_durbin_watson")
-            ),
-            3,
-        )
-        if metrics_src
-        else "—",
-    }
+    metrics = _metrics_block(model, statistical)
+    equation = compose_model_equation(model, target_col=str(target.get("column") or ""))
+    chart_series = assess_chart_series(ctx, used_row_ids=used_ids)
+    external_validation = None
+    procedure = validation.get("procedure") or validation.get("evaluation") or snapshot.get("evaluation")
+    if isinstance(procedure, Mapping) and procedure:
+        method = str(procedure.get("method") or procedure.get("kind") or "").strip().lower()
+        if method and method not in {"none", "not_requested", "skipped"}:
+            external_validation = {
+                "present": True,
+                "method": _safe_text(procedure.get("method") or procedure.get("kind") or ""),
+                "summary": _safe_text(procedure.get("summary") or procedure.get("detail") or ""),
+                "metrics": procedure.get("metrics") if isinstance(procedure.get("metrics"), Mapping) else {},
+            }
+        elif method in {"none", "not_requested", "skipped"}:
+            external_validation = {
+                "present": False,
+                "method": method,
+                "summary": "Validação externa não foi solicitada neste pedido. Isso não é defeito da minuta exploratória.",
+                "metrics": {},
+            }
 
     market = ctx.get("market_descriptive") or ctx.get("market_summary")
     market_rows = []
@@ -752,7 +906,13 @@ def build_report_view(
     subject = ctx.get("subject") if isinstance(ctx.get("subject"), Mapping) else {}
     subject_items = [(str(k), subject[k]) for k in subject]
 
-    model_id = model.get("model_id") or model.get("id") or model.get("number") or provenance.get("model_id")
+    model_id = (
+        model.get("model_id")
+        or model.get("id")
+        or model.get("number")
+        or model.get("candidate_id")
+        or provenance.get("model_id")
+    )
     model_revision = model.get("revision") or provenance.get("model_revision") or provenance.get("revision")
     model_sha = model.get("model_sha256") or provenance.get("model_sha256")
     code_sha = snapshot.get("code_sha") or provenance.get("code_sha")
@@ -793,6 +953,14 @@ def build_report_view(
         "MP1_N_EXCLUDED": format_snapshot_number(n_excluded),
         "MP1_ISSUANCE": issuance_status,
         "MP1_PRECISAO_STATUS": precisao_status,
+        "MP1_FUNDAMENTACAO_GRADE": (
+            str(int(fundamentacao["grade"]))
+            if isinstance(fundamentacao.get("grade"), int)
+            else "PENDENTE"
+        ),
+        "MP1_PRECISAO_GRADE": (
+            str(int(precisao_grade)) if isinstance(precisao_grade, int) else "PENDENTE"
+        ),
     }
     frozen_lines = [f"{key}={value}" for key, value in frozen.items()]
 
@@ -871,9 +1039,12 @@ def build_report_view(
         "inspection_date": inspection_date,
         "inspection_date_display": inspection_date or _pending("data de vistoria não informada"),
         "generated_at": generated_at or _pending("data de emissão da minuta não informada"),
+        "generated_at_raw": generated_at,
         "sources": sources,
+        "technical_sources": technical_sources,
         "job_id": _safe_text(job_id),
         "project_id": _safe_text(project_id),
+        "priority_limitations": priority_limitations,
         "point": point,
         "point_display": format_value_with_unit(point, unit) if not unit_pending else (
             format_snapshot_number(point) if point is not None else "—"
@@ -929,24 +1100,51 @@ def build_report_view(
         "search_exhaustive": search_exhaustive,
         "search_mode": _safe_text(search_mode) if search_mode else "",
         "search_approximate": approximate,
-        "search_budget": _safe_text(search.get("budget")) if search.get("budget") is not None else "",
-        "search_coverage": _safe_text(search.get("coverage")) if search.get("coverage") is not None else "",
-        "search_objective": _safe_text(search.get("objective") or ""),
-        "combinations_tested": search.get("combinations_tested") or search.get("evaluated"),
-        "search_message": _safe_text(search.get("message") or ""),
+        "search_coverage_known": search_info["coverage_known"],
+        "search_budget": (
+            _safe_text(search_info["budget"]) if search_info["budget"] is not None else (
+                _safe_text(search.get("budget")) if search.get("budget") is not None else ""
+            )
+        ),
+        "search_coverage": (
+            _safe_text(search_info["enumeration"])
+            if search_info["enumeration"]
+            else (_safe_text(search.get("coverage")) if search.get("coverage") is not None else "")
+        ),
+        "search_objective": _safe_text(search_info["objective"] or search.get("objective") or ""),
+        "combinations_tested": search_info["evaluated"] or search.get("combinations_tested") or search.get("evaluated"),
+        "search_possible": search_info["possible"],
+        "search_summary": search_info["summary"],
+        "search_message": _safe_text(search_info["message"] or search.get("message") or ""),
         "search_limitations": search_limitations,
         "inference_limitations": inference_limitations,
-        "formula": _safe_text(model.get("formula") or ""),
+        "formula": _safe_text(equation["formula"]),
+        "formula_display": _safe_text(equation["formula_display"]),
+        "formula_storage": _safe_text(equation["formula_storage"]),
+        "formula_source": equation["source"],
+        "formula_present": equation["present"],
+        "fitting_scale": equation["fitting_scale"],
+        "formula_log_scale": equation["log_scale"],
+        "formula_notes": equation["notes"],
+        "transform_rows": equation["transform_rows"],
+        "variable_meanings": equation["variable_meanings"],
         "coef_rows": _coef_rows(model),
         "metrics": metrics,
+        "metrics_present": metrics["present"],
+        "chart_series": chart_series,
+        "chart_available": chart_series["plot"],
+        "chart_absence_reason": chart_series["reason"],
+        "chart_warning": chart_series.get("warning"),
+        "external_validation": external_validation,
         "market_summary_rows": market_rows,
         "market_summary_n": market_n,
         "annexes": annexes,
         "subject_items": subject_items,
         "has_subject": bool(subject_items),
         "alternatives": alternatives,
-        "model_id": _safe_text(model_id) if model_id else "Pendência: número do modelo não informado",
-        "model_revision": _safe_text(model_revision) if model_revision else "Pendência: revisão do modelo não informada",
+        "model_id": _safe_text(model_id) if model_id else "",
+        "model_revision": _safe_text(model_revision) if model_revision else "",
+        "display_rounding_decimals": DISPLAY_ROUNDING_DECIMALS,
         "model_sha": _safe_text(model_sha) if model_sha else "",
         "code_sha": _safe_text(code_sha) if code_sha else "",
         "input_sha256": _safe_text(input_sha) if input_sha else "",
@@ -977,6 +1175,10 @@ def _charts_from_series(
     fitted: Any,
     residuals: Any,
     observed: Any = None,
+    *,
+    axis_fitted: str = "Valores ajustados",
+    axis_resid: str = "Resíduos",
+    axis_observed: str = "Valores observados",
 ) -> Dict[str, str]:
     charts: Dict[str, str] = {}
     fitted_arr = np.asarray(fitted, dtype=float) if fitted is not None else np.array([])
@@ -991,15 +1193,15 @@ def _charts_from_series(
     plt.figure(figsize=_CHART_FIGSIZE)
     sns.scatterplot(x=fitted_arr, y=resid_arr)
     plt.axhline(y=0, color="r", linestyle="--")
-    plt.xlabel("Valores ajustados")
-    plt.ylabel("Resíduos")
+    plt.xlabel(axis_fitted)
+    plt.ylabel(axis_resid)
     plt.title("Resíduos versus valores ajustados")
     plt.tight_layout()
     charts["residuals_vs_fitted"] = _figure_to_base64()
 
     plt.figure(figsize=_CHART_FIGSIZE)
     sns.histplot(resid_arr, kde=True)
-    plt.xlabel("Resíduos")
+    plt.xlabel(axis_resid)
     plt.ylabel("Frequência")
     plt.title("Histograma dos resíduos")
     plt.tight_layout()
@@ -1010,8 +1212,8 @@ def _charts_from_series(
     min_val = float(min(observed_arr.min(), fitted_arr.min()))
     max_val = float(max(observed_arr.max(), fitted_arr.max()))
     plt.plot([min_val, max_val], [min_val, max_val], color="r", linestyle="--", label="Bissetriz (y = x)")
-    plt.xlabel("Preços observados")
-    plt.ylabel("Valores estimados pelo modelo")
+    plt.xlabel(axis_observed)
+    plt.ylabel(axis_fitted)
     plt.title("Observado versus estimado")
     plt.legend()
     plt.tight_layout()
@@ -1031,20 +1233,47 @@ def _attach_charts(
     ctx = _as_mapping(report_context)
     if ctx.get("charts") and isinstance(ctx.get("charts"), Mapping):
         charts.update({k: v for k, v in ctx["charts"].items() if v})
-    if not charts.get("observed_vs_estimated") or not charts.get("residuals_vs_fitted"):
+    series = view.get("chart_series") or assess_chart_series(
+        ctx, used_row_ids=view.get("used_ids") or []
+    )
+    view["chart_series"] = series
+    view["chart_available"] = bool(series.get("plot"))
+    view["chart_absence_reason"] = series.get("reason") or ""
+    view["chart_warning"] = series.get("warning")
+    if series.get("warning"):
+        warning_issue = _issue_dict(
+            {
+                "code": series["warning"].get("code") or "REPORT_CHARTS_MISALIGNED",
+                "severity": "warning",
+                "origin": "report",
+                "message": (
+                    f"{series['warning'].get('message')}. Os gráficos não foram plotados. "
+                    "O cálculo do snapshot permanece inalterado."
+                ),
+                "affected_ids": [],
+                "evidence": {"chart": True},
+            }
+        )
+        existing_codes = {i.get("code") for i in view.get("issues") or []}
+        if warning_issue["code"] not in existing_codes:
+            view.setdefault("issues", []).append(warning_issue)
+            bucket = warning_issue["origin_bucket"]
+            view.setdefault("issues_by_origin", {}).setdefault(bucket, []).append(warning_issue)
+            view["has_issues"] = True
+    if series.get("plot") and (
+        not charts.get("observed_vs_estimated") or not charts.get("residuals_vs_fitted")
+    ):
         try:
-            if ctx.get("fitted_values") is not None and ctx.get("residuals") is not None:
-                generated = _charts_from_series(
-                    ctx.get("fitted_values"),
-                    ctx.get("residuals"),
-                    ctx.get("observed_values"),
-                )
-                for key, val in generated.items():
-                    charts.setdefault(key, val)
-            elif model_result is not None:
-                generated = ResultsGenerator.generate_charts(model_result)
-                for key, val in generated.items():
-                    charts.setdefault(key, val)
+            generated = _charts_from_series(
+                series.get("fitted"),
+                series.get("residuals"),
+                series.get("observed"),
+                axis_fitted=series.get("axis_fitted") or "Valores ajustados",
+                axis_resid=series.get("axis_resid") or "Resíduos",
+                axis_observed=series.get("axis_observed") or "Valores observados",
+            )
+            for key, val in generated.items():
+                charts.setdefault(key, val)
         except Exception as exc:  # charts must not abort a valid snapshot PDF
             logger.error("Error generating report charts: %s", exc)
             view.setdefault("issues", []).append(
@@ -1059,6 +1288,13 @@ def _attach_charts(
                     }
                 )
             )
+    elif (not series.get("plot")) and model_result is not None and not charts:
+        try:
+            generated = ResultsGenerator.generate_charts(model_result)
+            for key, val in generated.items():
+                charts.setdefault(key, val)
+        except Exception as exc:
+            logger.error("Error generating report charts: %s", exc)
     view["charts"] = charts
     view["chart_b64"] = charts.get("observed_vs_estimated")
     return view

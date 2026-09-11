@@ -40,6 +40,7 @@ CODE_PRECISION_UNCLASSIFIED = "precision_unclassified"
 CODE_IMPROVE_FIT_QUALITY = "improve_fit_quality"
 CODE_REVIEW_VALUE_SENSITIVITY = "review_value_sensitivity"
 CODE_INCOMPATIBLE_ALTERNATIVE_COMPARISON = "incompatible_alternative_comparison"
+CODE_CONSIDER_EXTERNAL_VALIDATION = "consider_external_validation"
 
 # Integridade (unidade/parse, preço imputado/ambíguo, artefato, data-base)
 # precede sugestão cosmética de ajuste (R²).
@@ -57,6 +58,7 @@ P_ASSUMPTION = 75
 P_INCOMPATIBLE = 80
 P_SENSITIVITY = 85
 P_FIT_QUALITY = 90
+P_OPTIONAL_VALIDATION = 95
 
 _LIMIT_NO_PERCENT = "Sem dados suficientes para estimar o ganho desta ação."
 _LIMIT_NO_DEFICIT = (
@@ -90,6 +92,18 @@ _DECLARED_STATUSES = frozenset(
         "declared-only",
         "informada",
         "informado",
+    }
+)
+
+_PENDING_STATUSES = frozenset(
+    {
+        "pending",
+        "pendente",
+        "not_verified",
+        "nao_verificado",
+        "unverified",
+        "missing",
+        "ausente",
     }
 )
 
@@ -198,6 +212,7 @@ def recommend_next_actions(
     drafts.extend(_actions_from_subject(snapshot, feature_schema))
     drafts.extend(_actions_from_item_pendencies(snapshot))
     drafts.extend(_actions_from_alternatives(snapshot))
+    drafts.extend(_actions_from_unrequested_validation(snapshot))
 
     merged = _consolidate(drafts)
     merged.sort(key=lambda row: (int(row["priority"]), str(row["code"])))
@@ -333,6 +348,15 @@ def _actions_from_issues(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]:
 
 def _validation(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
     return _mapping(snapshot.get("validation"))
+
+
+def _workflow_context(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
+    provenance = _mapping(snapshot.get("provenance"))
+    wc = provenance.get("workflow_context")
+    if isinstance(wc, Mapping):
+        return wc
+    wc = snapshot.get("workflow_context")
+    return wc if isinstance(wc, Mapping) else {}
 
 
 def _iter_fundamentacao_items(snapshot: Mapping[str, Any]) -> Iterable[Mapping[str, Any]]:
@@ -702,26 +726,39 @@ def _actions_from_precision(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]
     return []
 
 
+def _is_pending_doc(node: Mapping[str, Any]) -> bool:
+    for key in ("evidence_status", "status", "provenance", "verification_status"):
+        if _status_in(node.get(key), _PENDING_STATUSES):
+            return True
+    return False
+
+
 def _actions_from_documentary(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]:
     documentary = _mapping(_validation(snapshot).get("documentary"))
     refs: List[Any] = []
     declared = False
     if documentary:
-        if _is_declared(documentary):
+        if _is_declared(documentary) or _is_pending_doc(documentary):
             declared = True
             refs.append(
                 {
                     "kind": "field",
                     "path": "validation.documentary",
-                    "status": documentary.get("status") or documentary.get("provenance"),
+                    "status": documentary.get("status") or documentary.get("provenance") or documentary.get("evidence_status"),
                 }
             )
         items = documentary.get("items")
         seq = items if isinstance(items, list) else (list(items.values()) if isinstance(items, Mapping) else [])
         for item in seq:
-            if isinstance(item, Mapping) and _is_declared(item):
+            if isinstance(item, Mapping) and (_is_declared(item) or _is_pending_doc(item)):
                 declared = True
                 refs.append(_item_ref(item, "validation.documentary.items"))
+        for key, nested in documentary.items():
+            if key in {"items", "status", "note", "provenance", "declared", "present", "verified", "pending"}:
+                continue
+            if isinstance(nested, Mapping) and (_is_declared(nested) or _is_pending_doc(nested)):
+                declared = True
+                refs.append(_item_ref({**nested, "id": nested.get("id") or key}, "validation.documentary"))
     if not declared:
         return []
     tmpl = _TEMPLATE_BY_CODE[CODE_DOCUMENT_SOURCE]
@@ -775,6 +812,42 @@ def _actions_from_reference_date(snapshot: Mapping[str, Any]) -> List[Dict[str, 
     ]
 
 
+def _actions_from_unrequested_validation(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    policy = None
+    path = None
+    provenance = _mapping(snapshot.get("provenance"))
+    workflow = _workflow_context(snapshot)
+    candidates = (
+        (snapshot.get("evaluation_policy"), "evaluation_policy"),
+        (snapshot.get("evaluation"), "evaluation"),
+        (provenance.get("evaluation_policy"), "provenance.evaluation_policy"),
+        (provenance.get("evaluation"), "provenance.evaluation"),
+        (workflow.get("evaluation_policy"), "provenance.workflow_context.evaluation_policy"),
+        (workflow.get("evaluation"), "provenance.workflow_context.evaluation"),
+    )
+    for value, label in candidates:
+        if isinstance(value, Mapping):
+            policy = value
+            path = label
+            break
+    if policy is None:
+        return []
+    method = str(policy.get("method") or policy.get("kind") or "").strip().lower()
+    if method not in {"none", "not_requested", "skipped"}:
+        return []
+    tmpl = _TEMPLATE_BY_CODE[CODE_CONSIDER_EXTERNAL_VALIDATION]
+    return [
+        _action(
+            CODE_CONSIDER_EXTERNAL_VALIDATION,
+            tmpl["priority"],
+            tmpl["reason"],
+            tmpl["next_step"],
+            [{"kind": "field", "path": path or "evaluation_policy", "method": method}],
+            tmpl["limitations"],
+        )
+    ]
+
+
 def _iter_artifact_states(snapshot: Mapping[str, Any]) -> Iterable[Tuple[str, Mapping[str, Any]]]:
     for container in (
         snapshot.get("artifact_states"),
@@ -819,9 +892,26 @@ def _actions_from_artifacts(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]
 
 
 def _subject_mapping(snapshot: Mapping[str, Any]) -> Tuple[Mapping[str, Any], bool]:
+    candidates: List[Mapping[str, Any]] = []
     for key in ("subject_raw", "subject"):
         if key in snapshot and isinstance(snapshot[key], Mapping):
-            return snapshot[key], True
+            candidates.append(snapshot[key])
+    wc = _workflow_context(snapshot)
+    for key in ("subject_raw", "subject"):
+        if isinstance(wc.get(key), Mapping):
+            candidates.append(wc[key])
+    merged: Dict[str, Any] = {}
+    nonempty = False
+    for cand in candidates:
+        for key, value in cand.items():
+            if key not in merged:
+                merged[key] = value
+            if value not in (None, ""):
+                nonempty = True
+    if nonempty:
+        return merged, True
+    if candidates:
+        return merged, True
     return {}, False
 
 
@@ -889,17 +979,31 @@ def _actions_from_item_pendencies(snapshot: Mapping[str, Any]) -> List[Dict[str,
         ident = item.get("item")
         status = _norm_code(item.get("evidence_status") or item.get("status"))
         if ident in (1, "1", "item_1", "item1") and status in {"pending", "not_applicable"}:
-            tmpl = _TEMPLATE_BY_CODE[CODE_PROVIDE_SUBJECT_CHARACTERISTIC]
-            out.append(
-                _action(
-                    CODE_PROVIDE_SUBJECT_CHARACTERISTIC,
-                    tmpl["priority"],
-                    tmpl["reason"],
-                    tmpl["next_step"],
-                    [_item_ref(item, "validation.fundamentacao.items")],
-                    tmpl["limitations"],
+            subject, present = _subject_mapping(snapshot)
+            if present and subject:
+                tmpl = _TEMPLATE_BY_CODE[CODE_DOCUMENT_SOURCE]
+                out.append(
+                    _action(
+                        CODE_DOCUMENT_SOURCE,
+                        tmpl["priority"],
+                        "A caracterização documental do imóvel avaliando permanece pendente de comprovação; as características já informadas no contexto não são apagadas por isso.",
+                        tmpl["next_step"],
+                        [_item_ref(item, "validation.fundamentacao.items")],
+                        tmpl["limitations"],
+                    )
                 )
-            )
+            else:
+                tmpl = _TEMPLATE_BY_CODE[CODE_PROVIDE_SUBJECT_CHARACTERISTIC]
+                out.append(
+                    _action(
+                        CODE_PROVIDE_SUBJECT_CHARACTERISTIC,
+                        tmpl["priority"],
+                        tmpl["reason"],
+                        tmpl["next_step"],
+                        [_item_ref(item, "validation.fundamentacao.items")],
+                        tmpl["limitations"],
+                    )
+                )
         if ident in (4, "4", "item_4", "item4") and (
             status in {"pending"} or item.get("grade") == 0
         ):
@@ -964,10 +1068,15 @@ def _actions_from_alternatives(snapshot: Mapping[str, Any]) -> List[Dict[str, An
     for alt in alts:
         point = _finite_point(alt.get("value") if "value" in alt else alt.get("point"))
         identity = _alternative_identity(alt)
-        if point is None or not _identity_complete(identity):
+        if point is None:
+            # Specification alternative without a value is not a numeric comparison.
+            continue
+        if not _identity_complete(identity):
             incomplete.append(alt)
             continue
         complete.append((identity, alt, point))
+    if not complete and not incomplete:
+        return []
 
     out: List[Dict[str, Any]] = []
     identities = {item[0] for item in complete}
@@ -1258,6 +1367,21 @@ _TEMPLATE_BY_CODE: Dict[str, Dict[str, Any]] = {
             "Não classificável não equivale a grau calculado nem a intervalo normativo extra.",
         ],
     },
+    CODE_CONSIDER_EXTERNAL_VALIDATION: {
+        "priority": P_OPTIONAL_VALIDATION,
+        "reason": (
+            "A validação externa não foi solicitada neste pedido. Isso não é defeito "
+            "da minuta exploratória."
+        ),
+        "next_step": (
+            "Se o uso pretender grau ou emissão, considerar uma validação externa "
+            "com partição reservada. A omissão desta etapa não bloqueia a minuta exploratória."
+        ),
+        "limitations": [
+            "Ação opcional: não impede revisão da minuta nem inventa desempenho externo.",
+            "Erro de ajustamento da amostra utilizada não é desempenho de validação externa.",
+        ],
+    },
     CODE_IMPROVE_FIT_QUALITY: {
         "priority": P_FIT_QUALITY,
         "reason": (
@@ -1266,7 +1390,8 @@ _TEMPLATE_BY_CODE: Dict[str, Dict[str, Any]] = {
         ),
         "next_step": (
             "Revisar especificação, qualidade dos dados e adequação do modelo ao uso. "
-            "Não alterar a codificação nem o preço observado só para forçar enquadramento ou o coeficiente de determinação."
+            "Não alterar a codificação nem o preço observado só para forçar enquadramento ou o coeficiente de determinação. "
+            "Não excluir dado apenas para aumentar o R² ou atingir grau."
         ),
         "limitations": [
             _LIMIT_NO_PERCENT,
@@ -1294,4 +1419,5 @@ __all__ = [
     "CODE_IMPROVE_FIT_QUALITY",
     "CODE_REVIEW_VALUE_SENSITIVITY",
     "CODE_INCOMPATIBLE_ALTERNATIVE_COMPARISON",
+    "CODE_CONSIDER_EXTERNAL_VALIDATION",
 ]
