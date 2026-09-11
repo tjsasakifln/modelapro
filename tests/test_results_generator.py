@@ -196,7 +196,8 @@ class TestMarketSummaryRendering:
         assert 'html_string' in captured and captured['html_string'] is not None
 
         html = captured['html_string']
-        assert "Diagnóstico do Mercado" in html
+        assert "Descritiva amostral" in html
+        assert "não é diagnóstico substantivo completo do mercado" in html.lower()
         assert "area" in html
         # Sanity: the n reported in market_summary must show up too.
         assert str(market_summary['n']) in html
@@ -222,4 +223,4 @@ class TestMarketSummaryRendering:
         )
 
         assert pdf_bytes is not None
-        assert "Diagnóstico do Mercado" not in captured['html_string']
+        assert "Descritiva amostral" not in captured['html_string']
