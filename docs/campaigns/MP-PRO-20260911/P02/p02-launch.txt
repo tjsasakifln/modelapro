@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/tjsasakifln/code/modela-pro-p02
+configfile: pyproject.toml
+plugins: hypothesis-6.167.1, cov-7.1.0, asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+tests/c09_frontend/test_app_launch.py .                                  [ 50%]
+tests/pro_workflow/p02/test_launch.py .                                  [100%]
+
+============================== 2 passed in 3.59s ===============================
+EXITL:0
