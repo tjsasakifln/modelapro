@@ -1,0 +1,168 @@
+{
+  "campaign_id": "C16",
+  "contract_version": "MP/1",
+  "synthetic_only": true,
+  "oracle_policy": "Expected observations come from tests/fixtures/independent/oracles.py, cited edition/source, or an explicit MP/1 invariant. They are never taken from the SUT output and never copy a defective audit rule.",
+  "cases": [
+    {
+      "id": "C16-F01",
+      "cenario": "Planilha sintética de 30 linhas com 5 células de preco vazias (f01_missing_target.csv). Oráculo: n_observed_target = 25, média só das 25 observações.",
+      "achado": "F01",
+      "observacao_esperada": "Nenhum valor-alvo ausente é imputado. sample.observed_target == 25 e sample.received == 30. Linhas sem preco saem do treino com disposition/reason no row_ledger; a média das observadas não vira preço das ausentes.",
+      "criterio": "C16-A01 C16-A02",
+      "proprietario": "C01",
+      "oracle": "count_observed_target + f01_independent_n; MP/1 missing_policy.target never impute",
+      "fixture": "f01_missing_target.csv"
+    },
+    {
+      "id": "C16-F02",
+      "cenario": "Três corpora: pt-BR (R$ 1.234,56 = 1234.56), en-US (1,234.56 = 1234.56), token ambíguo 1.234 sem locale.",
+      "achado": "F02",
+      "observacao_esperada": "parse_number(..., 'pt-BR') e parse_number(..., 'en-US') independentes. Locale ausente em token ambíguo permanece pendente/erro estruturado, não fallback silencioso para o formato brasileiro.",
+      "criterio": "C16-A01",
+      "proprietario": "C01",
+      "oracle": "oracles.parse_number / is_ambiguous_number",
+      "fixture": "f02_locale_ptbr.csv,f02_locale_enus.csv,f02_ambiguous.csv"
+    },
+    {
+      "id": "C16-F03",
+      "cenario": "Mercado com bairro em {Centro, Norte, Sul}. Avaliando com bairro=Industrial (categoria ausente do treino).",
+      "achado": "F03",
+      "observacao_esperada": "transform_subject marca supported=false (ou issue) para categoria não vista no treino. Codificação all-zero (categoria de referência Centro) NÃO é autorização para Industrial. UI deve aceitar variáveis-base categóricas no avaliando.",
+      "criterio": "C16-A01",
+      "proprietario": "C02",
+      "oracle": "conjunto de categorias do CSV de treino; Industrial ∉ {Centro, Norte, Sul}",
+      "fixture": "f03_categories.csv"
+    },
+    {
+      "id": "C16-F04",
+      "cenario": "y = 1000*area, area amostral [50, 100]. Sujeito A area=150 (faixa ampliada, preço 150000 fora da amostra). Sujeito B area=90 (in_sample, preço in_sample). Sujeito C area=250 (fora da faixa ampliada).",
+      "achado": "F04",
+      "observacao_esperada": "faixa_ampliada e efeito_monetario são classificados separadamente. Item 4 normativo sobre características não substitui o relato do efeito no preço predito. Fonte NBR 14653-2:2011 com verification_status=pending para o fator 0.5–2.",
+      "criterio": "C16-A01 C16-A02",
+      "proprietario": "C03",
+      "oracle": "oracles.faixa_ampliada + oracles.efeito_monetario + linear_price",
+      "fixture": "f04_extrapolation.csv"
+    },
+    {
+      "id": "C16-F05",
+      "cenario": "29 pontos em y=1000*area e 1 ponto (area=80, preco=800000) extremo.",
+      "achado": "F05",
+      "observacao_esperada": "outlier_policy padrão report_only: n usado = n recebido até haver reviewed_exclusions identificadas. Exclusão automática por Cook/resíduo sem política declarada é defeito. Ledger de used/excluded row ids obrigatório.",
+      "criterio": "C16-A01",
+      "proprietario": "C04",
+      "oracle": "MP/1 outlier_policy default report_only; contagem independente de linhas do CSV",
+      "fixture": "f05_exclusions.csv"
+    },
+    {
+      "id": "C16-F06",
+      "cenario": "Dois candidatos: grau 2 com r2_adj 0.50 vs grau 1 com r2_adj 0.99. Ranking em escalas distintas de y não é comparável.",
+      "achado": "F06",
+      "observacao_esperada": "Chave de ranking prefere grau, depois r2 na unidade original. search_audit distingue enumeração do espaço, avaliação completa e critério de ranking.",
+      "criterio": "C16-A01",
+      "proprietario": "C05",
+      "oracle": "tupla (grau, r2_original); MP/1 search_audit fields",
+      "fixture": "market_minimal.csv"
+    },
+    {
+      "id": "C16-F07",
+      "cenario": "Upload inválido, cálculo falho e job em curso.",
+      "achado": "F07",
+      "observacao_esperada": "Estados queued|running|succeeded|failed|cancelled|interrupted. Issues com severity info|warning|error. HTTP 200 de 'processing started' não é sucesso do cálculo. Métrica ausente não vira 0.",
+      "criterio": "C16-A01 C16-A03",
+      "proprietario": "C10",
+      "oracle": "MP/1 job states + Issue schema",
+      "fixture": null
+    },
+    {
+      "id": "C16-F08",
+      "cenario": "PDF/dossiê de um modelo ajustado com market_data de 250 linhas e colunas de identificação sintéticas.",
+      "achado": "F08",
+      "observacao_esperada": "Amostra usada e excluída aparece no relatório ou no evidence bundle com hashes. Truncar a planilha em 200 linhas exige nota E cópia integral noutro artefato. PDF magic %PDF.",
+      "criterio": "C16-A01 C16-A03",
+      "proprietario": "C08",
+      "oracle": "len(market)=250; PDF header; C12 manifest row completeness",
+      "fixture": "generated:250 rows"
+    },
+    {
+      "id": "C16-F09",
+      "cenario": "RequestSpec sem reference_date e sem target_unit.",
+      "achado": "F09",
+      "observacao_esperada": "Datas e unidade desconhecidas permanecem pending. Não presumir BRL, BRL/m2 ou data atual. format_currency com R$ não é default de unidade do snapshot.",
+      "criterio": "C16-A01",
+      "proprietario": "C10",
+      "oracle": "oracles.unknown_unit_must_remain_pending / unknown_date_must_remain_pending",
+      "fixture": "market_minimal.csv"
+    },
+    {
+      "id": "C16-F10",
+      "cenario": "Falha de cálculo (arquivo sem variável independente, ou transform inválida) e payload completed.",
+      "achado": "F10",
+      "observacao_esperada": "value.point é null + issue, nunca 0 substituto. JSON sem NaN/Infinity. Não há 'laudo aprovado automaticamente'.",
+      "criterio": "C16-A01",
+      "proprietario": "C10",
+      "oracle": "MP/1 ResultSnapshot value.point null on failure; RFC 8259",
+      "fixture": null
+    },
+    {
+      "id": "C16-F11",
+      "cenario": "Busca em market_minimal com 2 preditores.",
+      "achado": "F11",
+      "observacao_esperada": "search_audit registra possible, generated, evaluated, rejected, budget, coverage, objective. combinations_tested sozinho não prova enumeração exaustiva do critério.",
+      "criterio": "C16-A01",
+      "proprietario": "C05",
+      "oracle": "MP/1 SearchResult.search_audit",
+      "fixture": "market_minimal.csv"
+    },
+    {
+      "id": "C16-F12",
+      "cenario": "Transformer.apply_transformation([0,1,4], 'sqrt') e avaliando idade=0 com coluna de treino estritamente positiva.",
+      "achado": "F12",
+      "observacao_esperada": "sqrt(0)=0 (math.sqrt). success True e valores [0,1,2]. ln(0) continua indefinido. Espaço de busca NÃO exclui sqrt só porque o avaliando é zero.",
+      "criterio": "C16-A02",
+      "proprietario": "C06",
+      "oracle": "math.sqrt(0)==0; math.log undefined at 0",
+      "fixture": "f12_sqrt0.csv"
+    },
+    {
+      "id": "C16-F13",
+      "cenario": "POST /upload (legado) ou POST /jobs; recuperar resultado sem WebSocket.",
+      "achado": "F13",
+      "observacao_esperada": "GET /jobs/{id}/result devolve snapshot ou HTTP explícito. Notifier do worker é o mesmo objeto do /ws. Conclusão não depende de permanecer conectado ao WS.",
+      "criterio": "C16-A03",
+      "proprietario": "C11",
+      "oracle": "MP/1 GET result; identity of notifier objects",
+      "fixture": "market_minimal.csv"
+    },
+    {
+      "id": "C16-F14",
+      "cenario": "Duas execuções / dois projetos locais no mesmo processo.",
+      "achado": "F14",
+      "observacao_esperada": "JobStore/ProjectStore isolam snapshots. DataLoader de um job não vaza dataframe para o outro. Sem pickle arbitrário de usuário.",
+      "criterio": "C16-A03",
+      "proprietario": "C11",
+      "oracle": "MP/1 JobStore + isolation invariant",
+      "fixture": "market_minimal.csv"
+    },
+    {
+      "id": "C16-F15",
+      "cenario": "Consumir o processo de instalação limpa publicado por C15 (scripts/c15_local ou docs C15).",
+      "achado": "F15",
+      "observacao_esperada": "Instalação reproduzível executada pelo script C15, não reimplementada aqui. Se C15 não publicou o processo: não executado com UNMET_DEPENDENCY:C15.",
+      "criterio": "C16-A03",
+      "proprietario": "C15",
+      "oracle": "existência e execução do processo C15",
+      "fixture": null
+    },
+    {
+      "id": "C16-F16",
+      "cenario": "find_best_model(..., candidate_cols=[]) e POST com candidate_cols_json=[] .",
+      "achado": "F16",
+      "observacao_esperada": "Erro explícito: nenhuma variável autorizada. [] não é 'todas as colunas'. candidate_cols=null permanece seleção automática por papel.",
+      "criterio": "C16-A01 C16-A02",
+      "proprietario": "C10",
+      "oracle": "oracles.empty_candidate_cols_is_none_authorized; MP/1 candidate_cols=[]",
+      "fixture": "f16_empty_selection.csv"
+    }
+  ]
+}

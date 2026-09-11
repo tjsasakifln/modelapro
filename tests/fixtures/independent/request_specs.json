@@ -1,0 +1,119 @@
+{
+  "schema_comment": "MP/1 RequestSpec fixtures for C16. These are inputs to real/peer APIs when present; they are not executed against a C16-owned simulator except in tests/acceptance/test_contract_sim_mp1.py (labeled contract-sim).",
+  "minimal_auto": {
+    "schema_version": "MP/1",
+    "target_col": "preco",
+    "candidate_cols": null,
+    "roles": {
+      "preco": "target",
+      "area": "predictor",
+      "quartos": "predictor"
+    },
+    "units": {
+      "preco": null,
+      "area": null
+    },
+    "import_options": {
+      "locale": "auto",
+      "delimiter": ",",
+      "encoding": "utf-8"
+    },
+    "missing_policy": {
+      "target": "never_impute",
+      "predictors": "complete_case"
+    },
+    "outlier_policy": {
+      "mode": "report_only",
+      "reviewed_exclusions": []
+    },
+    "search_policy": {
+      "mode": "exhaustive",
+      "budget": null,
+      "objective": "grau_then_r2_original",
+      "seed": 16
+    },
+    "evaluation_policy": {
+      "method": "holdout",
+      "seed": 16
+    },
+    "reference_date": null,
+    "inspection_date": null,
+    "target_unit": "",
+    "applicant": "synthetic-c16",
+    "purpose": "independent-oracle-corpus"
+  },
+  "empty_selection": {
+    "schema_version": "MP/1",
+    "target_col": "preco",
+    "candidate_cols": [],
+    "roles": {
+      "preco": "target",
+      "area": "excluded",
+      "quartos": "excluded",
+      "vagas": "excluded"
+    },
+    "units": {},
+    "import_options": {
+      "locale": "pt-BR",
+      "delimiter": ",",
+      "encoding": "utf-8"
+    },
+    "missing_policy": {
+      "target": "never_impute",
+      "predictors": "complete_case"
+    },
+    "outlier_policy": {
+      "mode": "report_only",
+      "reviewed_exclusions": []
+    },
+    "search_policy": {
+      "mode": "exhaustive",
+      "budget": null,
+      "objective": "grau_then_r2_original",
+      "seed": 16
+    },
+    "evaluation_policy": {
+      "method": "holdout",
+      "seed": 16
+    },
+    "reference_date": null,
+    "inspection_date": null,
+    "target_unit": "",
+    "applicant": "synthetic-c16",
+    "purpose": "empty-candidate-cols"
+  },
+  "pt_br": {
+    "schema_version": "MP/1",
+    "target_col": "preco",
+    "candidate_cols": ["area"],
+    "roles": {"preco": "target", "area": "predictor"},
+    "units": {},
+    "import_options": {"locale": "pt-BR", "delimiter": ",", "encoding": "utf-8"},
+    "missing_policy": {"target": "never_impute", "predictors": "complete_case"},
+    "outlier_policy": {"mode": "report_only", "reviewed_exclusions": []},
+    "search_policy": {"mode": "exhaustive", "budget": null, "objective": "grau_then_r2_original", "seed": 16},
+    "evaluation_policy": {"method": "holdout", "seed": 16},
+    "reference_date": null,
+    "inspection_date": null,
+    "target_unit": "",
+    "applicant": "synthetic-c16",
+    "purpose": "locale-pt-BR"
+  },
+  "en_us": {
+    "schema_version": "MP/1",
+    "target_col": "preco",
+    "candidate_cols": ["area"],
+    "roles": {"preco": "target", "area": "predictor"},
+    "units": {},
+    "import_options": {"locale": "en-US", "delimiter": ",", "encoding": "utf-8"},
+    "missing_policy": {"target": "never_impute", "predictors": "complete_case"},
+    "outlier_policy": {"mode": "report_only", "reviewed_exclusions": []},
+    "search_policy": {"mode": "exhaustive", "budget": null, "objective": "grau_then_r2_original", "seed": 16},
+    "evaluation_policy": {"method": "holdout", "seed": 16},
+    "reference_date": null,
+    "inspection_date": null,
+    "target_unit": "",
+    "applicant": "synthetic-c16",
+    "purpose": "locale-en-US"
+  }
+}

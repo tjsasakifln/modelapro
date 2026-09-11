@@ -1,0 +1,16 @@
+{
+  "comment": "Harness classification. Prefix match on pytest nodeid. contract-sim is never E2E evidence.",
+  "default_kind": "unit",
+  "rules": [
+    {"prefix": "tests/acceptance/test_contract_sim_mp1.py", "kind": "contract-sim"},
+    {"prefix": "tests/acceptance/test_e2e_http.py", "kind": "e2e"},
+    {"prefix": "tests/acceptance/test_e2e_ui.py", "kind": "e2e"},
+    {"prefix": "tests/acceptance/test_e2e_pdf.py", "kind": "e2e"},
+    {"prefix": "tests/acceptance/test_e2e_project_batch.py", "kind": "e2e"},
+    {"prefix": "tests/acceptance/test_operational.py", "kind": "e2e"},
+    {"prefix": "tests/acceptance/test_corpus_mapping.py", "kind": "unit"},
+    {"prefix": "tests/acceptance/test_oracles_f01_f16.py", "kind": "unit"},
+    {"prefix": "tests/test_audit_fixes.py", "kind": "unit"},
+    {"prefix": "tests/test_full_flow.py", "kind": "unit"}
+  ]
+}

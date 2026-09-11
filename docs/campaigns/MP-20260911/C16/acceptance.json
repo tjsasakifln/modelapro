@@ -1,0 +1,85 @@
+{
+  "campaign_id": "C16",
+  "head_sha": "PENDING_COMMIT",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "READY_COMPONENT",
+  "criteria": [
+    {
+      "id": "C16-A01",
+      "status": "READY_COMPONENT",
+      "evidence": "tests/fixtures/independent/mapping.json covers F01-F16 with cenario/achado/observacao_esperada/criterio/proprietario. Synthetic CSVs only. tests/acceptance/test_corpus_mapping.py passed twice."
+    },
+    {
+      "id": "C16-A02",
+      "status": "READY_COMPONENT",
+      "evidence": "sqrt(0) tests expect math.sqrt(0)==0 via Transformer.apply_transformation and search-space inclusion. Missing-price tests expect observed n=25 from the file, not after mean fill. F04 test distinguishes faixa_ampliada vs efeito_monetario. These assertions fail against c92949e (honest baseline), they are not relaxed."
+    },
+    {
+      "id": "C16-A03",
+      "status": "INTEGRATION_PENDING",
+      "evidence": "E2E cases in tests/acceptance/test_e2e_*.py and test_operational.py call the real FastAPI app, ResultsGenerator, DataLoader, OptimalCombinationFinder. PDF magic %PDF passed on a real search. GET /jobs/{id}/result is not registered (reprovado). UI is NOT_RUN (Python playwright missing). C15 install process not published. Simulators live only in test_contract_sim_mp1.py."
+    },
+    {
+      "id": "C16-A04",
+      "status": "READY_COMPONENT",
+      "evidence": "pytest twice: 37 failed, 22 passed, exit 1, identical failure sets. Harness twice: 22/21/16/0, disjoint, zero skip/xfail. Live API twice: POST /upload 200 processing-started, GET /jobs 404. No oracle copies SUT output."
+    },
+    {
+      "id": "C16-A05",
+      "status": "READY_COMPONENT",
+      "evidence": "scripts/c16_acceptance/run_harness.py prints aprovados, reprovados, nao_executados, SHA, case ids. C17 command in scripts/c16_acceptance/README.md."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/test_audit_fixes.py tests/test_full_flow.py tests/acceptance/ -q --tb=short",
+      "exit_code": 1,
+      "runs": 2,
+      "note": "37 failed, 22 passed both runs"
+    },
+    {
+      "command": "python3 scripts/c16_acceptance/run_harness.py --output c16_summary.json",
+      "exit_code": 1,
+      "runs": 2,
+      "note": "exit 1 reflects recorded baseline reprovados; summary counts 22/21/16 disjoint"
+    },
+    {
+      "command": "uvicorn backend.api:app --host 127.0.0.1 --port 18016 then POST /upload market_minimal.csv and GET /jobs/x/result",
+      "exit_code": 0,
+      "runs": 2,
+      "note": "upload 200 processing started; GET result 404 both runs"
+    }
+  ],
+  "unmet_dependencies": [
+    "C01 ingest_market",
+    "C02 fit_dataset/transform_subject",
+    "C10 POST /jobs GET /jobs/{id}/result freeze_result_snapshot",
+    "C11 JobStore ProjectStore LocalTaskRunner",
+    "C12 build_evidence_bundle",
+    "C14 evaluate_batch",
+    "C15 scripts/c15_local",
+    "Python playwright package for Streamlit E2E (Node playwright is present)"
+  ],
+  "deferred_items": [
+    "PASS_E2E is C17 against the composite SHA using this harness",
+    "UI headless drive once Python playwright + a free port 8000 are available"
+  ],
+  "review_findings": [
+    {
+      "owner": "C17",
+      "finding": "No GitHub PRs for MP-20260911 were published at C16 review time; cannot adversarially review public PR artifacts.",
+      "evidence": "github__list_pull_requests tjsasakifln/modelapro returned []"
+    },
+    {
+      "owner": "C06",
+      "finding": "Unpublished worktree edits change apply_transformation toward a richer result with failure_code. MP/1 keeps the 2-tuple seam. C06 sqrt(0) success oracle agrees with C16-A02.",
+      "evidence": "modela-pro-c06 tests/c06_transformations/test_a01_x_domains.py; no PR"
+    },
+    {
+      "owner": "C11",
+      "finding": "WebSocketNotifier is a singleton; send_notification returns if active_connections is empty, so a completed job is unrecoverable without a live /ws client. GET /jobs/{id}/result is not registered.",
+      "evidence": "modules/websocket_notifier.py __new__ singleton; backend/api.py routes are /health and /upload only"
+    }
+  ]
+}
