@@ -223,3 +223,37 @@ def test_projects_revisions_immutable_and_batch_uses_evaluate_batch():
     assert batch.status_code == 202, batch.text
     assert "evaluate_batch" in log.names()
     assert runner.submitted
+
+
+def test_batch_idempotency_hashes_subjects_not_just_count():
+    """Same n, different subjects must not reuse the first job or skip evaluate_batch."""
+    _store, _projects, runner, log, _peers = install_labeled_runtime()
+    client = TestClient(app)
+    payload = {"schema_version": "MP/1", "request_spec": complete_request_spec(), "frozen": True}
+    created = client.post("/projects/p-batch/revisions", json=payload)
+    assert created.status_code == 201, created.text
+    rev_id = created.json()["revision_id"]
+
+    first = client.post(
+        "/projects/p-batch/batch",
+        json={"subjects": [{"area": 1}, {"area": 2}], "revision_id": rev_id},
+    )
+    second = client.post(
+        "/projects/p-batch/batch",
+        json={"subjects": [{"area": 9}, {"area": 8}], "revision_id": rev_id},
+    )
+    replay = client.post(
+        "/projects/p-batch/batch",
+        json={"subjects": [{"area": 1}, {"area": 2}], "revision_id": rev_id},
+    )
+    assert first.status_code == 202, first.text
+    assert second.status_code == 202, second.text
+    assert replay.status_code == 202, replay.text
+    job_a = first.json()["job_id"]
+    job_b = second.json()["job_id"]
+    assert job_a != job_b
+    assert replay.json()["job_id"] == job_a
+    assert replay.json().get("idempotent_replay") is True
+    assert log.names().count("evaluate_batch") == 2
+    assert runner.submitted.count(job_a) == 1
+    assert runner.submitted.count(job_b) == 1

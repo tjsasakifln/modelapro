@@ -19,7 +19,7 @@
     {
       "id": "C10-A03",
       "status": "passed_with_labeled_peers",
-      "evidence": "tests/c10_pipeline/test_a03_http.py and tests/test_api.py use FastAPI TestClient against backend.api:app. POST /jobs 202; GET result; preview does not search; 4xx for invalid JSON/degree/candidate_cols=[]/non-finite; idempotent resubmit; cancel; interrupted-on-restart; /upload adapter 202; /projects revisions + /batch. 10 passed × 2 runs."
+      "evidence": "tests/c10_pipeline/test_a03_http.py and tests/test_api.py use FastAPI TestClient against backend.api:app. POST /jobs 202; GET result; preview does not search; 4xx for invalid JSON/degree/candidate_cols=[]/non-finite; idempotent resubmit; cancel; interrupted-on-restart; /upload adapter 202; /projects revisions + /batch. Batch idempotency hashes canonical subjects (not only n); two same-length distinct lists each call evaluate_batch. 11 passed × 2 runs."
     },
     {
       "id": "C10-A04",

@@ -1022,9 +1022,28 @@ async def project_batch(project_id: str, request: Request):
         "n_subjects": len(subjects),
         "code_sha": current_code_sha(),
     }
-    key = hashlib.sha256(
-        dumps_strict({"project_id": project_id, "revision_id": revision_id, "n": len(subjects)}).encode()
-    ).hexdigest()
+    try:
+        key_material = dumps_strict(
+            {
+                "project_id": project_id,
+                "revision_id": revision_id,
+                "subjects": subjects,
+                "request_spec": request_spec_for_peers(spec) if spec is not None else None,
+            }
+        )
+    except (TypeError, ValueError) as exc:
+        return _issues_response(
+            400,
+            "batch subjects are not strict JSON",
+            [
+                make_issue(
+                    "INVALID_JSON",
+                    f"cannot canonicalize subjects for idempotency: {exc}",
+                    origin="c10.api",
+                )
+            ],
+        )
+    key = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
     record = _create_job_record(
         job_store, idempotency_key="batch:" + key, project_id=project_id, payload=payload
     )
@@ -1081,6 +1100,7 @@ async def project_batch(project_id: str, request: Request):
             "job_id": job_id,
             "status_url": f"/jobs/{job_id}",
             "state": record.get("state") or "queued",
+            "idempotent_replay": not record.get("created"),
         },
     )
 

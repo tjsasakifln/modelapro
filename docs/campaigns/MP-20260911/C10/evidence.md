@@ -37,7 +37,7 @@ C10_REPO=. python3 /tmp/grok-goal-76b230f431bd/implementer/c10_consumer.py
 | A03 HTTP (run 1 and 2) | 0 (10 passed × 2) |
 | A04 isolation | 0 (3 passed) |
 | A05 security/peers | 0 (8 passed) |
-| Full C10 selection | 0 (49 passed) |
+| Full C10 selection | 0 (50 passed; includes batch subject-hash idempotency) |
 | Fresh consumer import | 0 (`CONSUMER_OK 150000.0 preco`) |
 
 Python: 3.12.3. pytest: 9.1.1.
