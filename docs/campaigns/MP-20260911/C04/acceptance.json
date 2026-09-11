@@ -1,6 +1,6 @@
 {
   "campaign_id": "C04",
-  "head_sha": "PENDING_COMMIT",
+  "head_sha": "6194a020ad28e5ea6b0970e15b1190338b2e6252",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
   "component_status": "INTEGRATION_PENDING",
