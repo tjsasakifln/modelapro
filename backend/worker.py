@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import io
 import math
 import os
 import subprocess
 import traceback
+import zipfile
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -34,6 +36,14 @@ from modules.result_contract import (
     request_spec_for_peers,
     validate_job_status_progress,
 )
+from modules.pro_workflow.report_context import aligned_fit_series, formula_from_coefficients
+from modules.pro_workflow.residual_state import (
+    CALCULATION_VERSION,
+    extract_residual_state,
+    json_safe_residual_state,
+    residual_state_is_complete,
+)
+from modules.pro_workflow.workflow_context import build_workflow_context
 from modules.results import adapt_validation_result
 from modules.websocket_notifier import WebSocketNotifier
 
@@ -434,6 +444,7 @@ def build_report_context(
     prepared_dataset: Any,
     used_row_ids: Sequence[str],
     excluded_row_ids: Sequence[str],
+    winner_fit: Any = None,
 ) -> dict:
     """Data actually used/excluded plus the request dates. Does not refit."""
     sample_ledger = _as_dict(_get(prepared_dataset, "sample_ledger")) or {}
@@ -441,6 +452,25 @@ def build_report_context(
     row_ledger = list(ledger) if isinstance(ledger, (list, tuple)) else (_as_dict(ledger) or {})
     used_rows = _rows_for_ids(input_bundle, used_row_ids)
     excluded_rows = _rows_for_ids(input_bundle, excluded_row_ids)
+    spec_dict = _as_dict(_get(winner_fit, "candidate_spec")) or {} if winner_fit is not None else {}
+    y_name = spec_dict.get("y_transformation")
+    if isinstance(y_name, Mapping):
+        y_name = y_name.get("name")
+    series = aligned_fit_series(
+        winner_fit,
+        used_row_ids=list(used_row_ids),
+        target_unit=request_spec.get("target_unit"),
+        y_transform_name=str(y_name) if y_name else None,
+    ) if winner_fit is not None else {
+        "fitted_values": None,
+        "residuals": None,
+        "observed_values": None,
+        "series_row_ids": list(used_row_ids),
+        "series_scale": None,
+        "series_unit": request_spec.get("target_unit"),
+        "available": False,
+        "reason": "fit_unavailable",
+    }
     return {
         "schema_version": SCHEMA_VERSION,
         "reference_date": request_spec.get("reference_date"),
@@ -460,6 +490,14 @@ def build_report_context(
             "dataset_sha256": _get(prepared_dataset, "dataset_sha256"),
         },
         "attachments": [],
+        "fitted_values": series.get("fitted_values"),
+        "residuals": series.get("residuals"),
+        "observed_values": series.get("observed_values"),
+        "series_row_ids": series.get("series_row_ids") or list(used_row_ids),
+        "series_scale": series.get("series_scale"),
+        "series_unit": series.get("series_unit"),
+        "series_available": bool(series.get("available")),
+        "series_reason": series.get("reason"),
     }
 
 
@@ -475,6 +513,7 @@ def build_frozen_project(
     normative: Any,
     artifact_refs: Mapping[str, Any],
     sample_ledger: Any,
+    search_audit: Any = None,
 ) -> dict:
     candidate_spec = _as_dict(_get(winner_fit, "candidate_spec")) or {}
     feature_schema = _as_dict(_get(prepared_dataset, "feature_schema")) or _as_dict(
@@ -483,35 +522,59 @@ def build_frozen_project(
     encoder_state = _as_dict(_get(prepared_dataset, "encoder_state")) or _as_dict(
         _get(winner_fit, "encoder_state")
     ) or {}
+    residual_state = json_safe_residual_state(extract_residual_state(winner_fit))
+    diagnostics = _as_dict(_get(winner_fit, "diagnostics")) or {}
+    feature_order = list(
+        residual_state.get("feature_order")
+        or (_as_dict(_get(winner_fit, "model_state")) or {}).get("feature_order")
+        or diagnostics.get("design_columns")
+        or (_as_dict(_get(winner_fit, "coefficients")) or {}).keys()
+    )
     model_state = {
         "coefficients": _as_dict(_get(winner_fit, "coefficients")) or {},
-        "diagnostics": _as_dict(_get(winner_fit, "diagnostics")) or {},
+        "diagnostics": diagnostics,
         "target_transform_state": _as_dict(_get(winner_fit, "target_transform_state")) or {},
         "model_sha256": _get(winner_fit, "model_sha256"),
         "status": _get(winner_fit, "status"),
         "used_row_ids": list(_get(winner_fit, "used_row_ids") or _get(prepared_dataset, "row_ids") or []),
-        "n": _get(winner_fit, "n") or (_as_dict(_get(winner_fit, "diagnostics")) or {}).get("n"),
-        "k": _get(winner_fit, "k") or (_as_dict(_get(winner_fit, "diagnostics")) or {}).get("k"),
-        "feature_order": list(
-            (_as_dict(_get(winner_fit, "model_state")) or {}).get("feature_order")
-            or (_as_dict(_get(winner_fit, "coefficients")) or {}).keys()
-        ),
+        "excluded_row_ids": list(_get(winner_fit, "excluded_row_ids") or []),
+        "n": residual_state.get("n") or _get(winner_fit, "n") or diagnostics.get("n"),
+        "k": residual_state.get("k") or _get(winner_fit, "k") or diagnostics.get("k"),
+        "df_resid": residual_state.get("df_resid") or diagnostics.get("df_resid"),
+        "feature_order": feature_order,
+        "residual_std": residual_state.get("residual_std"),
+        "residual_scale": residual_state.get("residual_scale"),
+        "scale_convention": residual_state.get("scale_convention"),
+        "xtx_inv": residual_state.get("xtx_inv"),
+        "xtx_inv_kind": residual_state.get("xtx_inv_kind"),
+        "has_intercept": residual_state.get("has_intercept") if residual_state.get("has_intercept") is not None else diagnostics.get("has_intercept"),
+        "intercept_column": residual_state.get("intercept_column") or diagnostics.get("intercept_column"),
+        "residual_state": residual_state,
+        "calculation_version": CALCULATION_VERSION,
+        "residual_state_complete": residual_state_is_complete(residual_state),
     }
     declared_scope = (
         (request_spec.get("search_policy") or {}).get("model_scope")
         or request_spec.get("model_scope")
     )
+    audit = _as_dict(search_audit) or {}
     # Presence of a subject_design for prediction is not subject-conditioned
     # selection. Only an explicit subject_specific policy binds the freeze.
-    if declared_scope == "subject_specific":
+    # The actual conditioning flag is recorded separately from the scope label.
+    if declared_scope == "subject_specific" or audit.get("selection_scope") == "subject_specific":
         model_scope = "subject_specific"
+        raw = _as_dict(_get(subject_design, "raw_values")) or {}
         subject_constraints = {
             "selection_subject_id": _get(subject_design, "subject_id"),
-            "bound_variables": {},
+            "bound_variables": dict(raw),
+            "dropped_transforms": audit.get("dropped_transforms_due_to_subject") or {},
         }
     else:
         model_scope = "population_model"
         subject_constraints = {}
+    selection_conditioned = audit.get("selection_conditioned_on_subject")
+    if selection_conditioned is None:
+        selection_conditioned = model_scope == "subject_specific"
     locale = str((_as_dict(request_spec.get("import_options")) or {}).get("locale") or "auto")
     axes = _axes_from_fit(
         winner_fit,
@@ -546,6 +609,7 @@ def build_frozen_project(
         "model_spec": candidate_spec,
         "model_state": model_state,
         "model_scope": model_scope,
+        "selection_conditioned_on_subject": bool(selection_conditioned),
         "subject_constraints": subject_constraints,
         "domain": {
             "kind": "sample_used",
@@ -560,7 +624,10 @@ def build_frozen_project(
         "provenance": {
             "code_sha": current_code_sha(),
             "composed_by": "c10.worker",
+            "calculation_version": CALCULATION_VERSION,
         },
+        "calculation_version": CALCULATION_VERSION,
+        "residual_state": residual_state,
     }
 
 
@@ -1069,6 +1136,7 @@ def compose_valuation_job(
             "report.pdf": {"state": "pending", "error": None},
             "evidence_manifest.json": {"state": "pending", "error": None},
             "frozen_project.json": {"state": "pending", "error": None},
+            "evidence_bundle.zip": {"state": "pending", "error": None},
         },
         "stage": STAGE_INGEST,
         "progress": None,
@@ -1241,6 +1309,7 @@ def compose_valuation_job(
         prepared_dataset=prepared,
         used_row_ids=used_row_ids,
         excluded_row_ids=excluded_row_ids,
+        winner_fit=winner_fit,
     )
 
     snapshot_issues: List[dict] = []
@@ -1257,6 +1326,17 @@ def compose_valuation_job(
     mapped_validation = _map_validation(normative, assessment, procedure)
 
     model_block = _model_identity(winner_fit, prepared, assessment)
+    formula = formula_from_coefficients(
+        model_block.get("coefficients") or {},
+        list(((_as_dict(_get(winner_fit, "diagnostics")) or {}).get("design_columns"))
+             or (model_block.get("coefficients") or {}).keys()),
+        target_name=str(spec.get("target_col") or "y"),
+    )
+    if formula:
+        model_block["formula"] = formula
+    diagnostics_fit = _as_dict(_get(winner_fit, "diagnostics")) or {}
+    if diagnostics_fit:
+        model_block["diagnostics"] = diagnostics_fit
     search_audit = _as_dict(_get(search_result, "search_audit")) or {}
     alternatives = _json_safe_alternatives(_get(search_result, "alternatives") or [])
 
@@ -1294,6 +1374,15 @@ def compose_valuation_job(
             "peers": {k: {"kind": v[0], "ref": v[1]} for k, v in context["peers_used"].items() if v[0] != "missing"},
             "sample_ledger_present": sample_ledger is not None,
             "subject_categorical_survived": _subject_categorical_survived(subject_design, context["subject_raw"]),
+            "calculation_version": CALCULATION_VERSION,
+            "workflow_context": build_workflow_context(
+                request_spec=spec,
+                subject_raw=context.get("subject_raw"),
+                validation=mapped_validation,
+                search_audit=search_audit,
+                limitation_codes=list((_as_dict(_get(assessment, "statistical")) or {}).get("limitations") or []),
+                issues=snapshot_issues,
+            ),
         },
     }
     # Restore estimand only on target, not inside value (value shape is exact).
@@ -1387,6 +1476,18 @@ def compose_valuation_job(
                 pack.setdefault("y_transformation", y_tr)
             if cand_spec:
                 pack.setdefault("candidate_spec", cand_spec)
+            residual_for_pack = json_safe_residual_state(extract_residual_state(winner_fit))
+            if residual_for_pack:
+                pack.setdefault("residual_context", residual_for_pack)
+                pack.setdefault("residual_state", residual_for_pack)
+            pack.setdefault("feature_schema", _as_dict(_get(prepared, "feature_schema")) or _as_dict(_get(winner_fit, "feature_schema")))
+            pack.setdefault("encoder_state", _as_dict(_get(prepared, "encoder_state")) or _as_dict(_get(winner_fit, "encoder_state")))
+            pack.setdefault("request_spec", request_spec_for_peers(spec))
+            pack.setdefault("missing_policy", spec.get("missing_policy"))
+            pack.setdefault("outlier_policy", spec.get("outlier_policy"))
+            pack.setdefault("search_policy", spec.get("search_policy"))
+            pack.setdefault("evaluation_policy", spec.get("evaluation_policy"))
+            pack.setdefault("source_bytes", file_bytes)
             manifest = builder(
                 snapshot, bundle, prepared, pack, output_dir
             )
@@ -1396,6 +1497,24 @@ def compose_valuation_job(
             context["artifact_states"]["evidence_manifest.json"] = {"state": "ready", "error": None}
             artifact_refs["evidence_manifest.json"] = {"sha256": sha256_bytes(payload)}
             _save_artifact(job_store, job_id, "evidence_manifest.json", payload)
+            if output_dir:
+                try:
+                    zip_bytes = _zip_directory(output_dir)
+                    context["artifact_bytes"]["evidence_bundle.zip"] = zip_bytes
+                    context["artifact_states"]["evidence_bundle.zip"] = {"state": "ready", "error": None}
+                    artifact_refs["evidence_bundle.zip"] = {"sha256": sha256_bytes(zip_bytes)}
+                    _save_artifact(job_store, job_id, "evidence_bundle.zip", zip_bytes)
+                except Exception as zip_exc:
+                    logger.warning("evidence_bundle.zip failed; calculation preserved: %s", zip_exc)
+                    context["artifact_states"]["evidence_bundle.zip"] = {
+                        "state": "failed",
+                        "error": make_issue(
+                            "EVIDENCE_ZIP_FAILED",
+                            f"evidence_bundle.zip could not be packed: {zip_exc}",
+                            origin="c10.worker",
+                            evidence={"exception_type": type(zip_exc).__name__},
+                        ),
+                    }
         except Exception as exc:
             logger.warning("evidence bundle failed; snapshot preserved: %s", exc)
             err = make_issue(
@@ -1427,6 +1546,7 @@ def compose_valuation_job(
         normative=normative,
         artifact_refs=artifact_refs,
         sample_ledger=sample_ledger,
+        search_audit=search_audit,
     )
     try:
         frozen_bytes = dumps_strict(frozen_project).encode("utf-8")
@@ -1589,6 +1709,21 @@ def _normalize_actions(actions: Any) -> List[dict]:
             }
         )
     return out
+
+
+def _zip_directory(root: str) -> bytes:
+    """Pack a local evidence directory into a downloadable zip. Paths stay relative."""
+    buf = io.BytesIO()
+    base = os.path.abspath(root)
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for dirpath, _dirnames, filenames in os.walk(base):
+            for name in filenames:
+                full = os.path.join(dirpath, name)
+                rel = os.path.relpath(full, base).replace("\\", "/")
+                if rel.startswith(".."):
+                    continue
+                zf.write(full, arcname=rel)
+    return buf.getvalue()
 
 
 def _save_artifact(job_store: Any, job_id: str, name: str, data: bytes) -> None:

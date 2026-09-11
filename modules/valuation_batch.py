@@ -30,6 +30,17 @@ from collections import deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from modules.pro_workflow.residual_state import (
+    CALCULATION_VERSION,
+    LIMITATION_INCOMPLETE,
+    LIMITATION_MALFORMED,
+    LIMITATION_NO_INTERVALS,
+    apply_mean_prediction_intervals,
+    extract_residual_state,
+    json_safe_residual_state,
+    residual_state_is_complete,
+)
+
 SCHEMA_VERSION = "MP/1"
 MODEL_SCOPE_SUBJECT_SPECIFIC = "subject_specific"
 MODEL_SCOPE_POPULATION = "population_model"
@@ -319,6 +330,13 @@ def compute_reuse_key(frozen_project: Any, request_spec: Any = None) -> str:
         "normative_version": frozen.get("normative_version"),
         "model_scope": scope,
         "subject_constraints": constraints,
+        "calculation_version": frozen.get("calculation_version")
+        or model_state.get("calculation_version")
+        or CALCULATION_VERSION,
+        "residual_state_status": (_as_mapping(model_state.get("residual_state")).get("status")
+                                  or ("complete" if model_state.get("xtx_inv") else "incomplete")),
+        "feature_order": model_state.get("feature_order"),
+        "xtx_inv_kind": model_state.get("xtx_inv_kind"),
     }
     return _sha256_text(_canonical_dumps(material))
 
@@ -764,6 +782,17 @@ def builtin_inverse_target_prediction(
                 "Intervalos invertidos pela transformação do alvo; IC normativo "
                 "só é atribuído quando C06 publica método validado."
             )
+            # Retransformed log endpoints are not a monetary mean CI.
+            retransformed = out.get("mean_ci80")
+            out["mean_ci80"] = None
+            out["prediction_interval"] = None
+            return {
+                "value": out,
+                "estimand": st.get("estimand") or "exp(E[log Y|X])",
+                "limitations": limitations,
+                "interval_interpretation": None,
+                "retransformed_interval": retransformed,
+            }
         return {
             "value": out,
             "estimand": st.get("estimand") or "original_unit",
@@ -930,24 +959,23 @@ def builtin_evaluate_fitted(
     n = int(model_state.get("n") or fit.get("n") or 0)
     k = int(model_state.get("k") or max(0, len(coefficients) - (1 if "const" in coefficients else 0)))
     df = n - k - (1 if "const" in coefficients else 0)
-    residual_std = _finite_or_none(model_state.get("residual_std"))
-    xtx_inv = model_state.get("xtx_inv")
-    mean_ci = None
-    pred_int = None
-    se_mean = None
-    tcrit = _t_critical(df, MEAN_CI_LEVEL) if df > 0 else None
-    if residual_std is not None and tcrit is not None and isinstance(xtx_inv, list) and feature_order:
-        x_vec = [float(row_values.get(name, 1.0 if name == "const" else 0.0)) for name in feature_order]
-        try:
-            if len(xtx_inv) == len(x_vec) and all(len(r) == len(x_vec) for r in xtx_inv):
-                quad = _dot(x_vec, _matvec(xtx_inv, x_vec))
-                if quad >= 0:
-                    se_mean = residual_std * math.sqrt(quad)
-                    mean_ci = _interval(point_t - tcrit * se_mean, point_t + tcrit * se_mean, {"level": MEAN_CI_LEVEL})
-                    se_pred = residual_std * math.sqrt(max(0.0, 1.0 + quad))
-                    pred_int = _interval(point_t - tcrit * se_pred, point_t + tcrit * se_pred, {"level": MEAN_CI_LEVEL})
-        except Exception:
-            se_mean = None
+    residual_state = model_state.get("residual_state") or fit.get("residual_state")
+    if not residual_state_is_complete(residual_state):
+        residual_state = json_safe_residual_state(extract_residual_state(fit))
+    interval_block = apply_mean_prediction_intervals(
+        row_values, residual_state, point_transformed=point_t
+    )
+    mean_ci = interval_block.get("mean_ci80")
+    pred_int = interval_block.get("prediction_interval")
+    se_mean = interval_block.get("se_mean")
+    residual_std = _finite_or_none(
+        (_as_mapping(residual_state).get("residual_std") if isinstance(residual_state, Mapping) else None)
+        or model_state.get("residual_std")
+    )
+    df_resid = _finite_or_none((_as_mapping(residual_state).get("df_resid") if isinstance(residual_state, Mapping) else None))
+    if df_resid is not None:
+        df = int(df_resid) if df_resid == int(df_resid) else df_resid
+    interval_limitations = list(interval_block.get("limitations") or [])
 
     transformed_value = {
         "point": point_t,
@@ -964,9 +992,30 @@ def builtin_evaluate_fitted(
         value = dict(empty_value())
         value.update(_as_mapping(inverted.get("value")))
         limitations = list(inverted.get("limitations") or [])
+        estimand = inverted.get("estimand")
     else:
         value = _as_mapping(inverted) if isinstance(inverted, Mapping) else empty_value()
         limitations = []
+        estimand = None
+    for item in interval_limitations:
+        if item not in limitations:
+            limitations.append(item)
+
+    y_name = ""
+    if isinstance(y_state, Mapping):
+        y_name = str(y_state.get("name") or "")
+    elif isinstance(y_state, str):
+        y_name = y_state
+    y_name = y_name.lower()
+    log_target = y_name in {"ln", "log", "logarithm"}
+    if log_target:
+        # exp(E[log Y|X]) is not a monetary mean CI. Do not invent one.
+        if inverted.get("interval_interpretation") not in {None, "mean_ci80"}:
+            value["mean_ci80"] = None
+        if estimand and estimand not in {"E[Y|X]"}:
+            value["mean_ci80"] = None
+            if "interval_not_mean_ci80" not in limitations:
+                limitations.append("interval_not_mean_ci80")
 
     point = _finite_or_none(value.get("point"))
     if point is None:
@@ -983,12 +1032,22 @@ def builtin_evaluate_fitted(
     arb = _interval(point * (1.0 - ARBITRATION_FRACTION), point * (1.0 + ARBITRATION_FRACTION), {"fraction": ARBITRATION_FRACTION})
     value["arbitration_interval"] = arb
     mean_ci80 = value.get("mean_ci80") if isinstance(value.get("mean_ci80"), Mapping) else None
+    # Incomplete residual state does not authorize a ±15% band as admissible precision.
     if mean_ci80 and arb:
         lo = max(float(mean_ci80["lower"]), float(arb["lower"]))
         hi = min(float(mean_ci80["upper"]), float(arb["upper"]))
         value["admissible_interval"] = _interval(lo, hi) if lo <= hi else None
-    elif arb:
-        value["admissible_interval"] = arb
+    else:
+        value["admissible_interval"] = None
+        if mean_ci80 is None and (LIMITATION_NO_INTERVALS in limitations or LIMITATION_INCOMPLETE in limitations or LIMITATION_MALFORMED in limitations):
+            issues.append(
+                _issue(
+                    LIMITATION_NO_INTERVALS,
+                    "warning",
+                    "c14.evaluate_fitted",
+                    "Intervalos estatísticos indisponíveis: estado residual incompleto ou malformado; faixa percentual não é IC.",
+                )
+            )
 
     statistical = {
         "n": n or None,
@@ -998,6 +1057,8 @@ def builtin_evaluate_fitted(
         "se_mean": se_mean,
         "limitations": limitations,
         "target_unit": spec.get("target_unit"),
+        "estimand": estimand,
+        "residual_state_status": (_as_mapping(residual_state).get("status") if isinstance(residual_state, Mapping) else None),
     }
     return {
         "candidate_id": candidate_id,
@@ -1609,6 +1670,7 @@ def restore_candidate_fit(frozen: Mapping[str, Any]) -> Dict[str, Any]:
         "n": state.get("n"),
         "k": state.get("k"),
         "feature_order": list(_as_list(state.get("feature_order"))),
+        "residual_state": state.get("residual_state") or frozen.get("residual_state"),
         "issues": [],
     }
 

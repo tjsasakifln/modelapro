@@ -339,6 +339,7 @@ class CompletenessLedger:
         declared: bool = False,
         source: Optional[str] = None,
         evidence: Optional[Mapping[str, Any]] = None,
+        absence_kind: Optional[str] = None,
     ) -> None:
         if status not in COMPLETENESS_STATUSES:
             raise ValueError(f"invalid completeness status {status!r}")
@@ -350,6 +351,10 @@ class CompletenessLedger:
             "source": source,
             "evidence": dict(evidence) if evidence else {},
         }
+        if absence_kind:
+            item["absence_kind"] = str(absence_kind)
+        elif status == COMPLETENESS_MISSING:
+            item["absence_kind"] = "not_provided"
         self._items[component] = item
 
     def get(self, component: str) -> Optional[Dict[str, Any]]:

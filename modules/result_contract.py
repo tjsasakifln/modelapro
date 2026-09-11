@@ -25,9 +25,13 @@ role; [] is an explicit error (no authorized predictors).
 
 Additive optional RequestSpec fields (documented, not required):
 - declared_documentary: {item1_grade, item3_grade} ints 1..3 or null
-- search_policy.target_degree: 1|2|3|null
+- search_policy.target_degree: 1|2|3|null (historical alias)
+- search_policy.minimum_fundamentacao_grade: 1|2|3|null (canonical for this lote)
 Unknown extra keys are preserved (additive compatibility) and not
-reinterpreted.
+reinterpreted. Historical grade aliases
+(minimum_fundamentacao_grade, min_fundamentacao_grade, target_degree)
+are folded at this boundary into search_policy.minimum_fundamentacao_grade.
+Conflicting present values are a structured conflict, not silent precedence.
 """
 
 from __future__ import annotations
@@ -76,7 +80,12 @@ ELIGIBILITY_STATUSES = frozenset(
 )
 
 ALLOWED_ARTIFACT_NAMES = frozenset(
-    {"report.pdf", "evidence_manifest.json", "frozen_project.json"}
+    {
+        "report.pdf",
+        "evidence_manifest.json",
+        "frozen_project.json",
+        "evidence_bundle.zip",
+    }
 )
 
 DEGREE_MIN = 1
@@ -812,14 +821,7 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
             "search_policy.mode must be a non-empty string",
             [make_issue("TYPE_ERROR", "search_policy.mode must be a non-empty string")],
         )
-    target_degree = None
-    if "target_degree" in search_policy:
-        target_degree = _validate_degree(
-            search_policy.get("target_degree"), field="search_policy.target_degree"
-        )
     spec["search_policy"] = dict(search_policy)
-    if "target_degree" in search_policy:
-        spec["search_policy"]["target_degree"] = target_degree
 
     evaluation_policy = spec.get("evaluation_policy")
     if not isinstance(evaluation_policy, Mapping):
@@ -854,6 +856,15 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
             )],
         )
     spec["evaluation_policy"] = dict(evaluation_policy)
+
+    from modules.pro_workflow.grade_policy import normalize_grade_aliases
+
+    normalize_grade_aliases(
+        spec,
+        validate_degree=_validate_degree,
+        request_spec_error=RequestSpecError,
+        make_issue=make_issue,
+    )
 
     spec["reference_date"] = _parse_iso_date(spec.get("reference_date"), field="reference_date")
     spec["inspection_date"] = _parse_iso_date(spec.get("inspection_date"), field="inspection_date")

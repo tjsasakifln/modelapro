@@ -1,0 +1,30 @@
+{
+  "producer": "P01",
+  "lote": "MP-PRO-20260911",
+  "consumers": ["P02", "P03", "P04"],
+  "additive_http": {
+    "GET /jobs/{id}/artifacts/evidence_bundle.zip": {
+      "allowlist": "modules.result_contract.ALLOWED_ARTIFACT_NAMES",
+      "media_type": "application/json or zip bytes via existing artifact route",
+      "safe_name": "evidence_bundle.zip",
+      "p02_ui": "out of P01 scope"
+    }
+  },
+  "workflow_context": {
+    "path": "ResultSnapshot.provenance.workflow_context",
+    "optional_on_old_snapshots": true,
+    "schema_version": "MP-PRO/1",
+    "grade_requirement_status": ["not_requested", "met", "not_met", "pending", "error"],
+    "selection_scope": ["population_model", "subject_specific", "unknown"],
+    "producer_classifies": true,
+    "consumer_does_not_reclassify": true
+  },
+  "report_context": {
+    "path": "job context report_context (not duplicated on every HTTP snapshot)",
+    "series": ["fitted_values", "residuals", "observed_values", "series_row_ids"],
+    "scale": ["series_scale", "series_unit"],
+    "alignment": "series_row_ids == used_row_ids"
+  },
+  "canonical_grade_key": "search_policy.minimum_fundamentacao_grade",
+  "example": "docs/campaigns/MP-PRO-20260911/P01/sanitized_snapshot_context.example.json"
+}
