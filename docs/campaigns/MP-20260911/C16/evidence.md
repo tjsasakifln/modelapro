@@ -3,6 +3,7 @@
 Campaign: C16  
 Contract: MP/1  
 Base: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`  
+Corpus commit: `875f70408d3d65cda24f2082f565e6fee9511f66`  
 Branch: `mp-20260911/c16-oraculos_aceite_independente`  
 Status: READY_COMPONENT (corpus/harness honest and executable; production defects F01–F16 are **not** claimed fixed).  
 PASS_E2E: not claimed (C17 only, composite SHA).
