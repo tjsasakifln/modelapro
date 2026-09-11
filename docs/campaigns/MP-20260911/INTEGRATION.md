@@ -75,7 +75,7 @@ O script grava `git rev-parse HEAD` **antes** de qualquer pytest.
 | I07 | Corrigido | `report_context.used_rows` com valores; `snapshot.model.coefficients` |
 | I08 | Corrigido | `delivered_matches_used` compara fit vs assessment; mutação de `used_row_ids` falha o match |
 | I09 | Pendente (Windows) | Linux: WeasyPrint probe ok + PDF gerado. Windows CI C15: `--check-pdf` exit 1 (libgobject). Não declarar PDF Windows. |
-| I10 | Parcial | Matriz abaixo (achado original ≠ ID C16). Oráculos C17 no composto; harness C16 do snapshot antigo não é evidência deste SHA. |
+| I10 | Parcial | Matriz abaixo (achado original ≠ ID C16). Harness C16 executado neste composto: 47/11/1 no SHA `d755b0b`. |
 | I11 | Declarado | RMSE de treino não é generalização; modo limitado não afirma ótimo global (`exact_optimum_guaranteed` false). |
 
 Auditoria original vs C16 (mesmo problema, IDs diferentes):
@@ -101,18 +101,27 @@ Auditoria original vs C16 (mesmo problema, IDs diferentes):
 
 ## Resultado
 
-Preenchido após o commit de integração e a execução no mesmo SHA (ver `ACCEPTANCE_MATRIX.json`).
+Todas as contagens abaixo são do SHA de produto **`d755b0bf957341d7dd35a29ec3a209ad566e5567`**, `PYTHONPATH` vazio, Linux. Não misturar com SHA anterior.
 
-- `TECHNICAL_E2E`: **PASS** no fluxo C17 A–J / `tests/c17_integration` (Linux, sem simuladores C10).
-- `NORMATIVE_VERIFICATION`: `PARTIAL` — regras calculadas pela C03 com edição/fonte; cláusulas em `docs/campaigns/MP-20260911/C03/unverified_rules.md` permanecem pendentes. Não é “norma inteira certificada”.
-- `DELIVERY`: **DRAFT_WITH_BLOCKERS** — harness C16 no SHA `b960892` teve 44 aprovados / 14 reprovados / 1 não executado (Playwright). Falhas C16/legado listadas em `ACCEPTANCE_MATRIX.json` (`legacy_failures_separated`); não são skip/xfail.
+- `TECHNICAL_E2E`: **PASS** — cenários A–J executados em `tests/c17_integration/test_scenarios_a_j.py` nesse SHA (28 testes C17: 28 aprovados / 0 reprovados / 0 skip), sem simuladores C10.
+- `NORMATIVE_VERIFICATION`: `PARTIAL` — NBR 14653-2:2011 item 4 e tabelas calculadas; cláusulas em `docs/campaigns/MP-20260911/C03/unverified_rules.md` pendentes. Não é norma inteira certificada.
+- `DELIVERY`: **DRAFT_WITH_BLOCKERS**
 - `MAIN_MERGED`: NO
 - `DEPLOYED`: NO
 
-Contagens **não misturadas**:
-- C17 integração: 28 aprovados / 0 reprovados / 0 skip (no SHA anunciado na PR, reexecutar após este glue).
-- Campanha+originais em `b960892` (antes do glue C04/C14/C10): 499 / 28 / 1 skip.
-- C16 harness em `b960892`: 44 / 14 / 1 não executado / 0 violação A04.
+### Contagens disjuntas (SHA `d755b0b`)
+
+| Suite | Aprovados | Reprovados | Não executados / skip |
+| --- | ---: | ---: | ---: |
+| C17 `tests/c17_integration` (inclui A–J) | 28 | 0 | 0 |
+| Campanha C01–C15 + originais + C17 | 513 | 14 | 1 skip (`C15_INSTALL_SMOKE` wheel) |
+| Harness C16 | 47 | 11 | 1 (Playwright UI) |
+
+C16: total 59, conjuntos disjuntos, `violacoes_a04` skip/xfail = 0.
+
+Reprovados C16 nesse SHA: WS fan-out (C11 recusa payload sem job), `find_best_model` legado sem winner, `DataLoader` não descarta linha sem preço, lote C16 `assessments is None`, dois POST idênticos reusam `job_id`, oráculos F01/F04/F05/F11 contra API/loader pré-MP/1.
+
+Reprovados campanha (14): C09 AppTest timeout 20s; C14 a01 (2) grau C03 pending vs fixture; `test_nbr14653` (3); `test_audit_fixes` (3); `test_full_flow` (2); `test_verification` (3). Nenhum skip/xfail para esconder A–J.
 
 ## Próximo ato humano
 
