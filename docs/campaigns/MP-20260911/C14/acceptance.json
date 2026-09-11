@@ -1,6 +1,8 @@
 {
   "campaign_id": "C14",
   "head_sha": "b1a00eaeec844f86332d1ae7c862a7c6412b30e3",
+  "evidence_sha": "8b4843e17d3d52e568717f8746c3abe3648e12b2",
+  "pr_url": "https://github.com/tjsasakifln/modelapro/pull/9",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
   "result": "READY_COMPONENT",
