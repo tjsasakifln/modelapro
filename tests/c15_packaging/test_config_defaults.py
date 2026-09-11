@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
+from dotenv import load_dotenv
 
 from modules.config_manager import (
     LOOPBACK_HOSTS,
@@ -10,6 +14,8 @@ from modules.config_manager import (
     is_loopback_host,
     validate_config,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _ENV_KEYS = (
     "APP_NAME",
@@ -135,3 +141,29 @@ def test_nbr_reference_constants_preserved(monkeypatch):
     assert cfg.MIN_R2 == 0.75
     assert cfg.MAX_ONE_HOT_CATEGORIES == 50
     assert cfg.CAMPO_ARBITRIO == 0.15
+
+
+def test_blank_jobs_and_projects_dir_default_under_data_dir(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("DATA_DIR", "./data")
+    monkeypatch.setenv("JOBS_DIR", "")
+    monkeypatch.setenv("PROJECTS_DIR", "  ")
+    cfg = build_config()
+    assert cfg.JOBS_DIR == os.path.join("./data", "jobs")
+    assert cfg.PROJECTS_DIR == os.path.join("./data", "projects")
+
+
+def test_shipped_env_example_loads_via_dotenv(monkeypatch):
+    """Copying .env.example (JOBS_DIR=/PROJECTS_DIR= empty) must not fail config load."""
+    _clear(monkeypatch)
+    example = REPO_ROOT / ".env.example"
+    assert example.is_file()
+    loaded = load_dotenv(example, override=True)
+    assert loaded is True
+    cfg = build_config()
+    assert cfg.API_HOST in LOOPBACK_HOSTS
+    assert cfg.REDIS_ENABLED is False
+    assert cfg.LOCAL_AUTH_TOKEN == ""
+    assert cfg.JOBS_DIR == os.path.join(cfg.DATA_DIR, "jobs")
+    assert cfg.PROJECTS_DIR == os.path.join(cfg.DATA_DIR, "projects")
+    validate_config(cfg)

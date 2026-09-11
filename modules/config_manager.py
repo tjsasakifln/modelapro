@@ -70,8 +70,9 @@ def _env_str(name: str, default: str, *, allow_empty: bool = True) -> str:
 
 
 def _nested_dir(name: str, parent: str, nested: str) -> str:
+    """Blank env values (as in a copied .env.example) are treated as unset."""
     raw = os.getenv(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return os.path.join(parent, nested) if parent else ""
     return raw.strip()
 

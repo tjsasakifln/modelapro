@@ -71,6 +71,7 @@ The skipped test in the default C15 suite is `test_clean_venv_install_imports_re
 - Frontend is `python -m streamlit run <installed-or-checkout frontend/app.py> --server.address 127.0.0.1`.
 - Two launches: `/health` → HTTP 200 `{"status":"healthy"}`; backend `--host 127.0.0.1`; frontend process cmdline contains `streamlit run`, not `frontend.app:main`.
 - Config defaults: `API_HOST=127.0.0.1`, explicit CORS list, `REDIS_ENABLED=false`, C10/C11 keys (`DATA_DIR`, limits, concurrency, empty `LOCAL_AUTH_TOKEN`) validated.
+- Copying shipped `.env.example` (blank `JOBS_DIR=` / `PROJECTS_DIR=`) loads via dotenv without `ValueError`; those keys default to `DATA_DIR/jobs` and `DATA_DIR/projects`. Test: `test_shipped_env_example_loads_via_dotenv`.
 - Logs: `RotatingFileHandler` + filter that drops client-payload extras.
 
 **Handoff:** `backend/api.py` still hardcodes `allow_origins=["*"]` (C10). Bind host already uses `config.API_HOST`.
