@@ -48,7 +48,7 @@
   "tests": {
     "command": "python3 -m pytest tests/c08_report tests/c13_decisions tests/test_results_generator.py tests/pro_workflow/p03 -q --tb=line",
     "exit_code": 0,
-    "passed": 54,
+    "passed": 55,
     "failed": 0,
     "log": "scratch p03_pytest.txt"
   },

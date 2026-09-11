@@ -21,7 +21,9 @@
 python3 -m pytest tests/c08_report tests/c13_decisions tests/test_results_generator.py tests/pro_workflow/p03 -q --tb=line
 ```
 
-54 passed, exit 0 (Python 3.12.3, pytest, WeasyPrint 70.0). Log: scratch `p03_pytest.txt`.
+55 passed, exit 0 (Python 3.12.3, pytest, WeasyPrint 70.0). Log: scratch `p03_pytest.txt`.
+
+Séries com comprimento diferente de `used_row_ids` são recusadas mesmo sem `series_row_ids` (`REPORT_CHARTS_LENGTH_MISMATCH`); o caso 210 linhas / 30 pontos não gera gráfico.
 
 C08 e C13 herdados continuam verdes. P03-A01–A06 em `tests/pro_workflow/p03/` chamam as funções publicadas (não reimplementação).
 

@@ -155,6 +155,21 @@ def assess_chart_series(
         )
         return result
 
+    n_used = len(used_ids)
+    if n_used and n_fit != n_used:
+        result["warning"] = {
+            "code": "REPORT_CHARTS_LENGTH_MISMATCH",
+            "message": (
+                f"Comprimentos incompatíveis: fitted_values={n_fit}, "
+                f"used_row_ids={n_used}."
+            ),
+        }
+        result["reason"] = (
+            "As séries de gráfico não têm o mesmo comprimento da amostra utilizada "
+            "e não foram plotadas. O cálculo do snapshot permanece inalterado."
+        )
+        return result
+
     if row_ids is not None:
         if len(row_ids) != n_fit:
             result["warning"] = {
