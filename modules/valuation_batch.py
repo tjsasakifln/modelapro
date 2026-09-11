@@ -26,7 +26,8 @@ import importlib
 import json
 import math
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 SCHEMA_VERSION = "MP/1"
@@ -2024,15 +2025,26 @@ def evaluate_batch(
 
     _emit("batch_started")
 
+    cancel_flag = threading.Event()
+
     def _is_cancelled() -> bool:
+        if cancel_flag.is_set():
+            return True
         if cancel_requested is None:
             return False
         try:
-            return bool(cancel_requested())
+            if bool(cancel_requested()):
+                cancel_flag.set()
+                return True
         except Exception:
             return False
+        return False
 
     def _run_index(idx: int) -> Tuple[int, Dict[str, Any]]:
+        # Queued executor tasks that have not started must not become success
+        # after cancel. In-flight evaluate_one calls keep their real status.
+        if _is_cancelled():
+            return idx, _pending_item(unique_subjects[idx], frozen, reuse_key, "cancelled")
         return idx, _evaluate_one(
             frozen=frozen,
             subject=unique_subjects[idx],
@@ -2041,6 +2053,16 @@ def evaluate_batch(
             adapters=resolved_adapters,
             reuse_key=reuse_key,
         )
+
+    def _record_item(idx: int, item: Mapping[str, Any]) -> None:
+        nonlocal completed_count
+        items[idx] = item
+        if item.get("status") in COMPLETED_STATUSES:
+            completed_count += 1
+            _emit(
+                "item_completed",
+                {"subject_id": item["subject_id"], "item_status": item["status"]},
+            )
 
     if _is_cancelled():
         cancelled = True
@@ -2059,26 +2081,51 @@ def evaluate_batch(
                         items[rest] = _pending_item(unique_subjects[rest], frozen, reuse_key, "cancelled")
                 break
             _idx, item = _run_index(idx)
-            items[_idx] = item
-            completed_count += 1
-            _emit("item_completed", {"subject_id": item["subject_id"], "item_status": item["status"]})
+            _record_item(_idx, item)
     elif to_run:
+        # Submit at most `workers` at a time. After cancel, do not submit the
+        # remainder; those stay pending (never success). In-flight tasks that
+        # already entered evaluate_one keep their real completed status.
+        queue = deque(to_run)
+        in_flight: set = set()
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {}
-            for idx in to_run:
+
+            def _submit_available() -> None:
+                while queue and len(in_flight) < workers:
+                    if _is_cancelled():
+                        return
+                    idx = queue.popleft()
+                    in_flight.add(pool.submit(_run_index, idx))
+
+            _submit_available()
+            while in_flight:
+                done, not_done = wait(in_flight, return_when=FIRST_COMPLETED)
+                in_flight = set(not_done)
+                for fut in done:
+                    idx, item = fut.result()
+                    _record_item(idx, item)
                 if _is_cancelled():
                     cancelled = True
-                    items[idx] = _pending_item(unique_subjects[idx], frozen, reuse_key, "cancelled")
-                    continue
-                futures[pool.submit(_run_index, idx)] = idx
-            for fut in as_completed(futures):
-                idx, item = fut.result()
-                items[idx] = item
-                completed_count += 1
-                _emit("item_completed", {"subject_id": item["subject_id"], "item_status": item["status"]})
+                    break
+                _submit_available()
+            if cancelled:
+                if in_flight:
+                    drained, _ = wait(in_flight)
+                    for fut in drained:
+                        idx, item = fut.result()
+                        _record_item(idx, item)
+                    in_flight.clear()
+                while queue:
+                    idx = queue.popleft()
+                    if items[idx] is None:
+                        items[idx] = _pending_item(
+                            unique_subjects[idx], frozen, reuse_key, "cancelled"
+                        )
             for idx in to_run:
                 if items[idx] is None:
-                    items[idx] = _pending_item(unique_subjects[idx], frozen, reuse_key, "cancelled")
+                    items[idx] = _pending_item(
+                        unique_subjects[idx], frozen, reuse_key, "cancelled"
+                    )
 
     final_items: List[Dict[str, Any]] = []
     for idx, item in enumerate(items):

@@ -25,7 +25,7 @@ Owned paths: `modules/valuation_batch.py`, `tests/c14_batch/`, `benchmarks/c14_b
 
 ```
 python3 -m pytest tests/c14_batch/ -q
-# 16 passed, exit 0 (run twice)
+# 17 passed, exit 0 (run twice)
 python3 benchmarks/c14_batch/run_benchmark.py -n 40 --seed 20260911
 # exit 0, reused_oracle_mismatches=0
 ```
@@ -37,7 +37,7 @@ Versions (isolated worktree at the audited base): python 3.12.3, pytest 9.1.1, p
 - C14-A01: `tests/c14_batch/test_a01_domain_independence.py` — in-domain vs out-of-domain keep independent fundamentação/precisão; documentary lists are not copied; subject-specific model is not silent population reuse. Fresh consumer in scratch `c14_consumer.log` shows grades 3 vs null, points 350000 vs null.
 - C14-A02: `tests/c14_batch/test_a02_unknown_category.py` — unknown category fails only that item; summary counts succeeded/failed/pending; item remains in the list; value is null not zero.
 - C14-A03: `tests/c14_batch/test_a03_reuse_key.py` — mutating input hash, dataset hash, exclusions, schema, transformation, unit, policy, normative version, or subject-specific constraints changes the key; filename/n_rows do not; identical inputs reproduce; duplicate ids and resume do not duplicate items.
-- C14-A04: `tests/c14_batch/test_a04_cancel_resume.py` — cancel after the first item leaves the rest pending; resume preserves the completed item (including a tampered stored point, proving no rewrite) and evaluates only pending ones; progress is completed/total.
+- C14-A04: `tests/c14_batch/test_a04_cancel_resume.py` — cancel after the first item leaves the rest pending; resume preserves the completed item (including a tampered stored point, proving no rewrite) and evaluates only pending ones; progress is completed/total. Parallel `max_workers=4` on 5 subjects after the first `item_completed` is `cancelled` with unstarted items `pending` (not all-success).
 - C14-A05: `tests/c14_batch/test_a05_parity.py` — batch `value.point` matches both the independent linear oracle and the individual `evaluate_fitted` path in BRL. Benchmark records preprocess/fit/evaluate/memory; no productivity multiplier is claimed.
 
 ## Benchmark (measurement, not a claim)

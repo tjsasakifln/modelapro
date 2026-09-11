@@ -102,3 +102,51 @@ def test_max_workers_is_capped_locally():
     result = evaluate_batch(frozen, subjects, spec, max_workers=64)
     assert result["max_workers"] <= 8
     assert result["items"][0]["status"] == STATUS_SUCCEEDED
+
+
+def test_parallel_cancel_does_not_submit_remaining_as_success():
+    """C14-A04 with max_workers>1: cancel after the first completion must not
+    promote unstarted items to success (the pool used to submit every index
+    before cancel_requested could fire)."""
+    frozen = make_frozen_project()
+    spec = make_request_spec()
+    subjects = [
+        make_subject(f"p{i}", area=70.0 + i, bairro="Centro")
+        for i in range(5)
+    ]
+    seen = {"n": 0}
+
+    def cancel_after_first() -> bool:
+        return seen["n"] >= 1
+
+    def progress(payload):
+        if payload.get("event") == "item_completed":
+            seen["n"] += 1
+
+    result = evaluate_batch(
+        frozen,
+        subjects,
+        spec,
+        progress_callback=progress,
+        cancel_requested=cancel_after_first,
+        max_workers=4,
+    )
+    statuses = [item["status"] for item in result["items"]]
+    assert result["state"] == "cancelled"
+    assert STATUS_PENDING in statuses
+    assert statuses.count(STATUS_SUCCEEDED) < 5
+    assert result["summary"]["pending"] >= 1
+    assert result["summary"]["succeeded"] + result["summary"]["failed"] + result["summary"]["unsupported"] < 5
+    for item in result["items"]:
+        if item["status"] == STATUS_PENDING:
+            assert item["value"]["point"] is None
+            assert item["status"] != STATUS_SUCCEEDED
+    assert result["summary"]["total"] == 5
+    # Resume still evaluates only the proven pending items.
+    reopened = evaluate_batch(frozen, subjects, spec, resume_from=result, max_workers=4)
+    assert len(reopened["items"]) == 5
+    assert reopened["summary"]["pending"] == 0
+    for prev, nxt in zip(result["items"], reopened["items"]):
+        if prev["status"] in {STATUS_SUCCEEDED, "failed", "unsupported"}:
+            assert nxt["value"]["point"] == prev["value"]["point"]
+            assert nxt["status"] == prev["status"]

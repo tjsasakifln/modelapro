@@ -25,7 +25,7 @@
     {
       "id": "C14-A04",
       "status": "passed",
-      "evidence": "tests/c14_batch/test_a04_cancel_resume.py: cancel after first item leaves others pending and state=cancelled; resume preserves the completed stored point (tamper-evident, no rewrite) and evaluates only pending; progress is completed/total in [0,1]; max_workers capped at 8."
+      "evidence": "tests/c14_batch/test_a04_cancel_resume.py: sequential cancel after first item leaves others pending; parallel max_workers=4 on 5 subjects after first item_completed yields state=cancelled with unstarted items pending (never all-success); resume preserves completed points and evaluates only pending; progress is completed/total in [0,1]; max_workers capped at 8."
     },
     {
       "id": "C14-A05",
@@ -37,7 +37,7 @@
     {
       "command": "python3 -m pytest tests/c14_batch/ -q",
       "exit_code": 0,
-      "note": "16 passed; repeated immediately, 16 passed, exit 0"
+      "note": "17 passed; repeated immediately, 17 passed, exit 0"
     },
     {
       "command": "python3 benchmarks/c14_batch/run_benchmark.py -n 40 --seed 20260911",
@@ -62,6 +62,7 @@
     "Author review: did not wrap find_best_model(avaliando_raw=...) as lote reuse.",
     "Author review: eligible is not issuance authorization.",
     "Author review: no second database, no user pickle, no consolidated PDF.",
-    "Independent reviewer not invoked in this session; distinguish from author review."
+    "Independent reviewer not invoked in this session; distinguish from author review.",
+    "Skeptic: parallel path used to submit every index before cancel_requested could fire; now submits at most max_workers and leaves unstarted items pending."
   ]
 }
