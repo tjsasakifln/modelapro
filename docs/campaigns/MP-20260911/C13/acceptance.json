@@ -1,0 +1,70 @@
+{
+  "campaign_id": "C13",
+  "head_sha": "PENDING_COMMIT",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "INTEGRATION_PENDING",
+  "criteria": [
+    {
+      "id": "C13-A01",
+      "status": "pass",
+      "evidence": "tests/c13_decisions/test_recommend_next_actions.py::test_c13_a01_k4_n26_deficit_four_does_not_guarantee_global_grade; déficit esperado derivado no teste como 6*(4+1)-26; reason contém Déficit de 4 para este item e ressalva de grau global. Sem n/k/regra verificada: test_c13_a01_deficit_not_computed_without_n_k_and_verified_rule."
+    },
+    {
+      "id": "C13-A02",
+      "status": "pass",
+      "evidence": "test_c13_a02_imputed_price_outranks_r2_and_influence_is_not_removal: resolve_imputed_or_ambiguous_price.priority < improve_fit_quality.priority; review_influential_point instrui investigar e contém 'não remover automaticamente'; nenhum code de remoção."
+    },
+    {
+      "id": "C13-A03",
+      "status": "pass",
+      "evidence": "test_c13_a03_four_distinct_codes_for_pending_kinds: precision_not_computed, precision_unclassified, document_source, recover_failed_artifact são quatro códigos distintos, isolados e no snapshot combinado."
+    },
+    {
+      "id": "C13-A04",
+      "status": "pass",
+      "evidence": "test_c13_a04_no_invented_inferences_and_duplicates_keep_evidence: snapshot vazio sem percentuais inventados; dois PARSE_ERROR consolidam em uma resolve_unit_or_parse com evidências r1/r2 e preco/area."
+    },
+    {
+      "id": "C13-A05",
+      "status": "pass",
+      "evidence": "test_c13_a05_alternatives_require_compatible_unit_date_estimand: BRL vs BRL/m2 não compara 100000/8500 e não rotula IC; mesmas unidade/data/estimand geram review_value_sensitivity (sensibilidade, não precisão normativa)."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c13_decisions/ -q",
+      "exit_code": 0,
+      "detail": "12 passed; Python 3.12.3; pytest 9.1.1"
+    },
+    {
+      "command": "python3 -c 'from modules.decision_support import recommend_next_actions; ...' (launch 1)",
+      "exit_code": 0,
+      "detail": "LAUNCH_OK; Déficit de 4; não garante o grau global"
+    },
+    {
+      "command": "python3 -c 'from modules.decision_support import recommend_next_actions; ...' (launch 2)",
+      "exit_code": 0,
+      "detail": "LAUNCH_OK; lista idêntica à launch 1"
+    }
+  ],
+  "unmet_dependencies": [
+    "C10 deve invocar recommend_next_actions no rascunho e preencher next_actions antes de freeze_result_snapshot.",
+    "C08 deve apresentar a mesma lista no relatório, sem recalcular.",
+    "C09 deve apresentar a mesma lista na interface, sem recalcular."
+  ],
+  "deferred_items": [
+    "Composição ponta a ponta e PASS_E2E cabem à C17 após publicação das frentes.",
+    "Não há result_contract.py neste HEAD de base; testes usam mapeamentos MP/1."
+  ],
+  "review_findings": [
+    {
+      "severity": "info",
+      "finding": "Autorrevisão: biblioteca isolada, sem import de nbr14653_validation nem cliente LLM. Integração C10/C08/C09 propositalmente fora desta PR."
+    },
+    {
+      "severity": "info",
+      "finding": "Aliases de issue.code são documentados no handoff; um literal inédito só gera ação se o campo estrutural correspondente estiver preenchido."
+    }
+  ]
+}

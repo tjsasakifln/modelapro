@@ -1,0 +1,64 @@
+{
+  "producer": "C13",
+  "consumers": ["C10", "C08", "C09"],
+  "exported_interface": "modules.decision_support.recommend_next_actions(snapshot, feature_schema=None) -> list[Action]",
+  "action_schema": {
+    "code": "str (stable)",
+    "priority": "int (lower is more urgent)",
+    "reason": "str",
+    "next_step": "str",
+    "evidence_refs": "list",
+    "limitations": "list[str]"
+  },
+  "stable_codes": [
+    "resolve_unit_or_parse",
+    "resolve_imputed_or_ambiguous_price",
+    "provide_subject_characteristic",
+    "document_source",
+    "review_influential_point",
+    "investigate_extrapolation",
+    "improve_sample_support",
+    "check_assumption",
+    "define_reference_date",
+    "recover_failed_artifact",
+    "precision_not_computed",
+    "precision_unclassified",
+    "improve_fit_quality",
+    "review_value_sensitivity",
+    "incompatible_alternative_comparison"
+  ],
+  "issue_code_aliases": {
+    "resolve_imputed_or_ambiguous_price": ["IMPUTED_TARGET", "IMPUTED_PRICE", "AMBIGUOUS_PRICE", "TARGET_IMPUTED"],
+    "resolve_unit_or_parse": ["PARSE_ERROR", "UNIT_PENDING", "UNIT_AMBIGUOUS", "TARGET_UNIT_PENDING"],
+    "review_influential_point": ["INFLUENTIAL_OBSERVATION", "HIGH_COOKS_DISTANCE", "HIGH_LEVERAGE"],
+    "investigate_extrapolation": ["EXTRAPOLATION", "SUBJECT_OUT_OF_SAMPLE"],
+    "improve_sample_support": ["SAMPLE_INSUFFICIENT", "INSUFFICIENT_N"],
+    "check_assumption": ["HETEROSCEDASTICITY", "NON_NORMAL_RESIDUALS", "ASSUMPTION_VIOLATION"],
+    "document_source": ["DECLARED_ONLY_SOURCE", "DOCUMENTARY_DECLARED"],
+    "recover_failed_artifact": ["PDF_FAILED", "ARTIFACT_FAILED", "PDF_RENDER_ERROR"],
+    "precision_not_computed": ["PRECISION_NOT_COMPUTED"],
+    "precision_unclassified": ["PRECISION_UNCLASSIFIED"],
+    "improve_fit_quality": ["LOW_R2", "IMPROVE_R2", "R2_MARGINAL"],
+    "provide_subject_characteristic": ["MISSING_SUBJECT_CHARACTERISTIC", "ITEM1_PENDING"],
+    "define_reference_date": ["REFERENCE_DATE_MISSING", "DATE_BASE_PENDING"]
+  },
+  "required_callsite": {
+    "C10": "Chamar recommend_next_actions(draft_snapshot, feature_schema=...) no rascunho validado e gravar a lista em next_actions ANTES de freeze_result_snapshot. Não mutar snapshot já hasheado para incluir hash de PDF.",
+    "C08": "Apresentar snapshot['next_actions'] no relatório/PDF sem recalcular e sem ocultar issues originais.",
+    "C09": "Apresentar a mesma lista snapshot['next_actions'] na interface, sem reordenar por narrativa nem omitir ações de integridade."
+  },
+  "contract_version": "MP/1",
+  "dependency_pr": null,
+  "head_sha": "PENDING_COMMIT",
+  "acceptance_case": {
+    "id": "C13-A01",
+    "input": "k=4, n=26, regra verificada 6(k+1) no item de quantidade de dados",
+    "expect": "uma ação improve_sample_support com déficit 4 para este item e ressalva de que não garante o grau global"
+  },
+  "notes": [
+    "C13 consome fatos já verificados de C03/C07; não chama NBRValidator nem classifica grau.",
+    "feature_schema é opcional e só detecta característica do sujeito ausente.",
+    "priority menor é mais urgente: preço imputado (10) precede improve_fit_quality (90).",
+    "Campos estruturais também disparam ações: validation.precisao.status, validation.documentary.status, artifact_states.*.state=failed, reference_date null, alternatives."
+  ]
+}
