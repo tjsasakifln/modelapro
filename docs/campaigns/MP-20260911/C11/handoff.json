@@ -1,6 +1,7 @@
 {
   "campaign_id": "C11",
   "contract_version": "MP/1",
+  "head_sha": "16778f2382a2fc5b1e2cecbd6f15ade9ebf5f5b3",
   "producer": "C11",
   "exported_interface": {
     "JobStore": "modules.job_store.JobStore",

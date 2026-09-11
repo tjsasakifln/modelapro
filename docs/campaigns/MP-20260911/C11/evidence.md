@@ -3,6 +3,7 @@
 Campaign: C11  
 Contract: MP/1  
 Base: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`  
+Head (implementation): `16778f2382a2fc5b1e2cecbd6f15ade9ebf5f5b3`  
 Branch: `mp-20260911/c11-persistencia_execucoes`  
 Python: 3.12.3  
 Store: stdlib `sqlite3` + atomic JSON/bytes under an injectable root (default `MODELA_STORE_ROOT` or `~/.local/share/modelapro/store`). Tests use `tmp_path` only.

@@ -1,6 +1,6 @@
 {
   "campaign_id": "C11",
-  "head_sha": "PENDING_COMMIT",
+  "head_sha": "16778f2382a2fc5b1e2cecbd6f15ade9ebf5f5b3",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
   "status": "READY_COMPONENT",
