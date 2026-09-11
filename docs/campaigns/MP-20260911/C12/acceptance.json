@@ -21,7 +21,7 @@
     {
       "id": "C12-A03",
       "status": "pass",
-      "evidence": "tests/c12_evidence/test_a03_reproduction.py and two CLI runs: point 110000.0 and supported intervals recovered from disk within declared tolerance; identical primary numbers; legacy formula-only package returns point=null (exit 3), never the memorized snapshot value."
+      "evidence": "tests/c12_evidence/test_a03_reproduction.py: linear package recovers point 110000.0 and supported intervals; y=ln + interval_scale=original centers mean_ci80 on exp(Xb) (~19930) not on Xb (~9.9); missing t_crit/std_error with a declared supported method yields ok=false and CLI nonzero; legacy formula-only returns point=null (exit 3)."
     },
     {
       "id": "C12-A04",
@@ -38,7 +38,7 @@
     {
       "command": "python3 -m pytest tests/c12_evidence/ -q",
       "exit_code": 0,
-      "note": "13 passed on clean worktree at base c92949e"
+      "note": "15 passed on C12 worktree (includes y=ln original-unit interval centering)"
     },
     {
       "command": "python3 scripts/c12_reproduce/reproduce.py --bundle {scratch}/bundle  # run 1",
@@ -68,7 +68,7 @@
     {
       "kind": "author_review",
       "severity": "info",
-      "detail": "Local acceptances C12-A01..A05 passed against shipped functions and the CLI. No independent reviewer subagent was attached to this session."
+      "detail": "Adversarial panel: interval_scale=original with y=ln had been banding around Xb. Fixed by centering original-scale bands on the original-unit point and failing ok/CLI when declared supported intervals are missing or not in the original unit."
     },
     {
       "kind": "integration",

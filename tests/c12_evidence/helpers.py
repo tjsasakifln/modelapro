@@ -270,6 +270,59 @@ def make_complete_evaluation(n: int = 220, n_excluded: int = 10) -> Dict[str, An
     }
 
 
+def make_log_target_evaluation(n: int = 220, n_excluded: int = 10) -> Dict[str, Any]:
+    """Synthetic log-linear evaluation with original-unit residual context.
+
+    The fitted equation is ln(preco) = 9 + 0.01*area + 0.05*quartos. Residual
+    std_error / intervals are declared on the original (BRL) scale so
+    reconstruction must center original-unit bands on exp(Xb), not on Xb.
+    """
+    ev = make_complete_evaluation(n=n, n_excluded=n_excluded)
+    ln_const = 9.0
+    ln_area = 0.01
+    ln_quartos = 0.05
+    std_error_original = 400.0
+    point_transformed = ln_const + ln_area * SUBJECT_AREA + ln_quartos * SUBJECT_QUARTOS
+    point_original = math.exp(point_transformed)
+    x0 = [1.0, SUBJECT_AREA, SUBJECT_QUARTOS]
+    lev = (
+        x0[0] * XTX_INV[0][0] * x0[0]
+        + x0[1] * XTX_INV[1][1] * x0[1]
+        + x0[2] * XTX_INV[2][2] * x0[2]
+    )
+    se_mean = std_error_original * math.sqrt(lev)
+    se_pred = std_error_original * math.sqrt(1.0 + lev)
+    mean_ci80 = {
+        "lower": point_original - T_CRIT * se_mean,
+        "upper": point_original + T_CRIT * se_mean,
+    }
+    pred = {
+        "lower": point_original - T_CRIT * se_pred,
+        "upper": point_original + T_CRIT * se_pred,
+    }
+    coefficients = {"const": ln_const, "area": ln_area, "quartos": ln_quartos}
+    ev["snapshot"]["model"]["coefficients"] = dict(coefficients)
+    ev["snapshot"]["model"]["y_transformation"] = {"name": "ln"}
+    ev["snapshot"]["value"]["point"] = point_original
+    ev["snapshot"]["value"]["mean_ci80"] = mean_ci80
+    ev["snapshot"]["value"]["prediction_interval"] = pred
+    ev["artifacts"]["coefficients"] = dict(coefficients)
+    ev["artifacts"]["y_transformation"] = {"name": "ln"}
+    ev["artifacts"]["residual_context"] = {
+        "interval_method": "ols_mean_and_prediction",
+        "interval_scale": "original",
+        "t_crit": T_CRIT,
+        "std_error": std_error_original,
+        "subject_x": x0,
+        "xtx_inv": XTX_INV,
+    }
+    ev["point"] = point_original
+    ev["point_transformed"] = point_transformed
+    ev["mean_ci80"] = mean_ci80
+    ev["prediction_interval"] = pred
+    return ev
+
+
 def make_legacy_formula_only() -> Dict[str, Any]:
     """Legacy evaluation that only kept a 4-decimal display formula."""
     point = evaluation_point()

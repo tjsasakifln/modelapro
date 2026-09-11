@@ -18,7 +18,7 @@ C12 não gera PDF (C08) e não congela o snapshot (C10). Ligação API/GUI/persi
 
 ```text
 python3 -m pytest tests/c12_evidence/ -q
-# 13 passed, exit 0
+# 15 passed, exit 0
 
 python3 -c "from modules.evidence_bundle import build_evidence_bundle; ..."
 # manifest sem self-hash; used=210 / excluded=10 / received=220; IDs iguais ao snapshot
@@ -37,7 +37,7 @@ python3 scripts/c12_reproduce/reproduce.py --bundle {bundle}
 |----|-----------------|--------|
 | C12-A01 | pass | `tests/c12_evidence/test_a01_complete_package.py` — n=220, tabelas completas, IDs e 3 coeficientes |
 | C12-A02 | pass | `test_a02_integrity_manifest.py` + CLI tamper exit 2 |
-| C12-A03 | pass | `test_a03_reproduction.py` — ponto/IC a partir do disco; legado só-fórmula falha sem ecoar o ponto |
+| C12-A03 | pass | `test_a03_reproduction.py` — ponto/IC a partir do disco; y=ln + `interval_scale=original` centra o IC no ponto em unidade original; material insuficiente para IC declarado falha o CLI; legado só-fórmula falha sem ecoar o ponto |
 | C12-A04 | pass | `test_a04_csv_safety.py` — bruto vs viz; traversal rejeitado; `.py` extra não executa |
 | C12-A05 | pass | `test_a05_completeness.py` — lacunas `faltante`; share copy não apaga o original; log sem dataset |
 

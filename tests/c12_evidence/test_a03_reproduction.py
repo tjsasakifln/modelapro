@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import pickle
 import subprocess
 import sys
@@ -10,7 +11,7 @@ from pathlib import Path
 
 from modules.evidence_bundle import build_evidence_bundle, reproduce_from_bundle
 
-from .helpers import make_complete_evaluation, make_legacy_formula_only
+from .helpers import make_complete_evaluation, make_legacy_formula_only, make_log_target_evaluation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI = REPO_ROOT / "scripts" / "c12_reproduce" / "reproduce.py"
@@ -82,6 +83,59 @@ def test_legacy_formula_without_coefficients_fails_without_memorized_value(tmp_p
     payload = json.loads(proc.stdout)
     assert payload["point"] is None
     assert payload["ok"] is False
+
+
+def test_log_target_original_scale_interval_is_centered_on_original_unit_point(tmp_path):
+    """C12-A03: y=ln + interval_scale=original must not band around ln(price)."""
+    ev = make_log_target_evaluation()
+    out = tmp_path / "bundle"
+    build_evidence_bundle(
+        ev["snapshot"], ev["input_bundle"], ev["prepared_dataset"], ev["artifacts"], out
+    )
+    result = reproduce_from_bundle(out)
+    assert result["point"] is not None
+    assert result["mean_ci80"] is not None
+    lo = result["mean_ci80"]["lower"]
+    hi = result["mean_ci80"]["upper"]
+    mid = 0.5 * (lo + hi)
+    # Centered on the reconstructed original-unit point, not on Xb = ln(price).
+    assert abs(mid - result["point"]) <= 1e-6 + 1e-8 * abs(result["point"])
+    assert lo < result["point"] < hi
+    log_scale_predictor = math.log(result["point"])
+    assert abs(mid - result["point"]) < abs(mid - log_scale_predictor)
+    assert result["comparison"]["point_within_tolerance"] is True
+    assert result["comparison"]["mean_ci80_within_tolerance"] is True
+    assert result["ok"] is True
+
+    proc = _run_cli(out)
+    payload = json.loads(proc.stdout)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    cli_mid = 0.5 * (payload["mean_ci80"]["lower"] + payload["mean_ci80"]["upper"])
+    assert abs(cli_mid - payload["point"]) <= 1e-6 + 1e-8 * abs(payload["point"])
+    assert payload["mean_ci80"]["lower"] < payload["point"] < payload["mean_ci80"]["upper"]
+
+
+def test_declared_supported_intervals_missing_material_fails_ok(tmp_path):
+    """C12-A03: promised/supported intervals without material must not exit 0."""
+    ev = make_complete_evaluation()
+    ev["artifacts"]["residual_context"] = {
+        "interval_method": "ols_mean_and_prediction",
+        "interval_scale": "original",
+    }
+    out = tmp_path / "bundle"
+    build_evidence_bundle(
+        ev["snapshot"], ev["input_bundle"], ev["prepared_dataset"], ev["artifacts"], out
+    )
+    result = reproduce_from_bundle(out)
+    assert result["mean_ci80"] is None
+    assert result["ok"] is False
+    joined = " ".join(result["limitations"]).lower()
+    assert "interval" in joined
+    proc = _run_cli(out)
+    assert proc.returncode != 0
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is False
+    assert payload.get("mean_ci80") is None
 
 
 def test_pickle_artifact_is_not_loaded_or_used_as_reproduction(tmp_path):

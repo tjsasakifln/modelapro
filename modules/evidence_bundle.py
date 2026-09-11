@@ -865,6 +865,53 @@ def reproduce_from_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
         ok = False
         limitations.append("refused to return snapshot.value.point as reproduction without reconstructing it")
 
+    if _interval_reconstruction_supported(residual, y_name):
+        method = str(residual.get("interval_method") or residual.get("method") or "")
+        if mean_ci80 is None:
+            ok = False
+            limitations.append(
+                "declared supported intervals were not reconstructed in the original unit"
+            )
+        else:
+            if not _interval_centered_on_original(mean_ci80, point, point_transformed, tolerance):
+                ok = False
+                limitations.append(
+                    "reconstructed mean_ci80 is not in the original unit "
+                    "(not centered on the original-unit point)"
+                )
+            if snap_value.get("mean_ci80") is not None and comparison.get("mean_ci80_within_tolerance") is not True:
+                ok = False
+                limitations.append("reconstructed mean_ci80 does not match the snapshot within tolerance")
+        pred_supported = method in {
+            "ols_prediction",
+            "ols_prediction_interval",
+            "prediction_interval",
+            "ols_mean_and_prediction",
+        }
+        if pred_supported:
+            if prediction_interval is None and snap_value.get("prediction_interval") is not None:
+                ok = False
+                limitations.append(
+                    "declared supported prediction_interval was not reconstructed in the original unit"
+                )
+            elif prediction_interval is not None:
+                if not _interval_centered_on_original(
+                    prediction_interval, point, point_transformed, tolerance
+                ):
+                    ok = False
+                    limitations.append(
+                        "reconstructed prediction_interval is not in the original unit "
+                        "(not centered on the original-unit point)"
+                    )
+                if (
+                    snap_value.get("prediction_interval") is not None
+                    and comparison.get("prediction_interval_within_tolerance") is not True
+                ):
+                    ok = False
+                    limitations.append(
+                        "reconstructed prediction_interval does not match the snapshot within tolerance"
+                    )
+
     return {
         "ok": ok,
         "integrity": integrity,
@@ -1673,17 +1720,19 @@ def _reconstruct_intervals(
     def band(center: float, half: float) -> Dict[str, float]:
         return {"lower": center - half, "upper": center + half}
 
-    mean_ci_t = band(point_transformed, t_crit_f * se_mean)
-    pred_t = band(point_transformed, t_crit_f * se_pred)
-
     y_key = str(y_name or "linear").lower()
+    y_identity = y_key in {"linear", "identity", "none"}
     if scale == "original":
-        mean_ci = mean_ci_t
-        pred = pred_t
-        # Worker already computed on original unit; do not re-transform.
-    elif y_key in {"linear", "identity", "none"}:
-        mean_ci = mean_ci_t
-        pred = pred_t
+        if point_original is None:
+            notes.append("original-unit point missing; cannot center original-scale intervals")
+            return None, None, notes
+        # residual std_error is declared on the original unit; do not band around Xb.
+        center = float(point_original)
+        notes.append(
+            "intervals reconstructed on interval_scale=original, centered on the original-unit point"
+        )
+    elif y_identity:
+        center = float(point_transformed)
     else:
         notes.append(
             f"interval_scale={scale!r} with y_transformation={y_name!r}: "
@@ -1691,6 +1740,9 @@ def _reconstruct_intervals(
             "intervals left unrecovered rather than presented as normative IC."
         )
         return None, None, notes
+
+    mean_ci = band(center, t_crit_f * se_mean)
+    pred = band(center, t_crit_f * se_pred)
 
     supported_mean = method in {"ols_mean_ci", "ols_mean", "mean_ci80"}
     supported_pred = method in {"ols_prediction", "ols_prediction_interval", "prediction_interval", "ols_mean_and_prediction"}
@@ -1712,6 +1764,48 @@ def _quadratic_form(x0: Any, xtx_inv: Any) -> float:
         raise ValueError("xtx_inv shape does not match subject_x")
     tmp = [sum(mat[i][j] * vec[j] for j in range(n)) for i in range(n)]
     return sum(vec[i] * tmp[i] for i in range(n))
+
+
+def _interval_reconstruction_supported(residual: Mapping[str, Any], y_name: Any) -> bool:
+    """True when residual_context declares a reconstructable original-unit interval."""
+    if not residual:
+        return False
+    method = residual.get("interval_method") or residual.get("method")
+    if not method:
+        return False
+    scale = str(residual.get("interval_scale") or "transformed")
+    y_key = str(y_name or "").lower()
+    if scale == "original":
+        return True
+    return y_key in {"linear", "identity", "none"}
+
+
+def _interval_centered_on_original(
+    interval: Mapping[str, Any],
+    point_original: Optional[float],
+    point_transformed: Optional[float],
+    tolerance: Mapping[str, float],
+) -> bool:
+    if not interval or point_original is None:
+        return False
+    try:
+        lo = number_as_float64(interval.get("lower"))
+        hi = number_as_float64(interval.get("upper"))
+    except (TypeError, ValueError):
+        return False
+    mid = 0.5 * (lo + hi)
+    abs_t = float(tolerance.get("interval_abs", 1e-6))
+    rel_t = float(tolerance.get("interval_rel", 1e-8))
+    if abs(mid - point_original) > abs_t + rel_t * max(abs(mid), abs(point_original)):
+        return False
+    if point_transformed is None:
+        return True
+    separated = abs(point_original - point_transformed) > abs_t + rel_t * max(
+        abs(point_original), abs(point_transformed)
+    )
+    if separated and abs(mid - point_transformed) < abs(mid - point_original):
+        return False
+    return True
 
 
 def _compare_to_snapshot(
