@@ -1,7 +1,7 @@
 {
   "lote": "MP-20260911",
   "integrator": "C17",
-  "suite_run_sha": "d755b0bf957341d7dd35a29ec3a209ad566e5567",
+  "suite_run_sha": "1f43121fe25f11d7200655ffd75de3c99bff50be",
   "base_main": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "TECHNICAL_E2E": "PASS",
   "NORMATIVE_VERIFICATION": "PARTIAL",
@@ -38,12 +38,12 @@
   "scenarios_A_J": {
     "A": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestALocaleAndMissingTarget"},
     "B": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestBInvalidInputs"},
-    "C": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestCNormativeExtrapolation", "note": "pending rules stay pending; issuance is not auto-approved"},
+    "C": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestCNormativeExtrapolation", "note": "item4 not axes_missing; n==sample.used; far subject out_of_measure in original-unit axes"},
     "D": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestDInfluence"},
     "E": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestEIndependentValidation", "note": "train isolation via fit_dataset(train_row_ids); HTTP holdout path not the happy path"},
     "F": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestFArtifacts"},
     "G": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestGRecovery"},
-    "H": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestHIsolationBatch"},
+    "H": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestHIsolationBatch", "note": "documentary.subject_id per item; unknown category does not copy another point"},
     "I": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestISearchCoverage"},
     "J": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestJLocalInstall", "note": "Linux executed; Windows NOT_RUN"}
   },
@@ -51,7 +51,7 @@
     {"id": "F01", "status": "CLOSED_VERIFIED", "reason": "ingest_market + POST /jobs: missing target not imputed; observed_target < received"},
     {"id": "F02", "status": "CLOSED_VERIFIED", "reason": "pt-BR CSV/Excel and ambiguous_number issue without silent 1.234→1234 under locale auto"},
     {"id": "F03", "status": "CLOSED_VERIFIED", "reason": "unknown bairro subject does not silently become reference; encoder categories are train-only"},
-    {"id": "F04", "status": "CLOSED_VERIFIED", "reason": "far subject still returns snapshot; verification_status is not certified-full; unverified rules remain listed"},
+    {"id": "F04", "status": "CLOSED_VERIFIED", "reason": "compose on 1f43121: item4 calculated with axes from CandidateFit.base_frame; y_subject in original unit equals value.point for extended subject; n==sample.used; no item4_axes_missing/k_unknown"},
     {"id": "F05", "status": "CLOSED_VERIFIED", "reason": "outlier_policy report_only keeps n; no silent_exclusion issue"},
     {"id": "F06", "status": "CLOSED_VERIFIED", "reason": "exact vs approximate search_audit; exact_optimum_guaranteed false in limited mode"},
     {"id": "F07", "status": "CLOSED_VERIFIED", "reason": "invalid file / empty candidate_cols / non-finite subject are 4xx or failed with issues; cancel queryable"},
@@ -69,7 +69,7 @@
     "I01": "FIXED",
     "I02": "FIXED",
     "I03": "FIXED",
-    "I04": "FIXED",
+    "I04": "FIXED_ITEM4_ORIGINAL_UNIT",
     "I05": "FIXED",
     "I06": "FIXED",
     "I07": "FIXED",
@@ -79,21 +79,25 @@
     "I11": "DECLARED_TRAIN_RMSE_IS_NOT_GENERALIZATION"
   },
   "suite_buckets": {
-    "sha": "d755b0bf957341d7dd35a29ec3a209ad566e5567",
+    "sha": "1f43121fe25f11d7200655ffd75de3c99bff50be",
     "pythonpath": "",
     "os": "linux",
-    "c17_integration": {"aprovados": 28, "reprovados": 0, "nao_executados": 0, "skip": 0},
-    "campaign_plus_original_plus_c17": {"aprovados": 513, "reprovados": 14, "skip": 1, "total": 528},
-    "c16_harness": {"aprovados": 47, "reprovados": 11, "nao_executados": 1, "violacoes_a04": 0, "total": 59, "disjoint": true}
+    "c17_integration": {"aprovados": 28, "reprovados": 0, "nao_executados": 0, "skip": 0, "runs": 2},
+    "c14_batch": {"sha": "1f43121fe25f11d7200655ffd75de3c99bff50be", "a01": "pass"},
+    "originals_reconfirmed": {"aprovados": 45, "reprovados": 11, "sha": "1f43121fe25f11d7200655ffd75de3c99bff50be"},
+    "campaign_plus_original_plus_c17": {"aprovados": 513, "reprovados": 14, "skip": 1, "total": 528, "sha": "d755b0bf957341d7dd35a29ec3a209ad566e5567", "note": "integral suite not re-run on 1f43121; C14 a01 now pass on 1f43121"},
+    "c16_harness": {"aprovados": 47, "reprovados": 11, "nao_executados": 1, "violacoes_a04": 0, "total": 59, "disjoint": true, "sha": "d755b0bf957341d7dd35a29ec3a209ad566e5567", "note": "not re-run on 1f43121"}
   },
   "campaign_reprovados": [
-    "tests/c09_frontend/test_app_launch.py::test_launch_frontend_app_twice (AppTest 20s timeout)",
+    "tests/c09_frontend/test_app_launch.py::test_launch_frontend_app_twice (AppTest 20s timeout; last measured d755b0b, NOT_RUN on 1f43121)",
+    "tests/test_nbr14653.py (3) on 1f43121",
+    "tests/test_audit_fixes.py (3) on 1f43121",
+    "tests/test_full_flow.py (2) on 1f43121",
+    "tests/test_verification.py (3) on 1f43121"
+  ],
+  "campaign_now_pass_on_1f43121": [
     "tests/c14_batch/test_a01_domain_independence.py::test_in_and_out_of_domain_keep_independent_classifications",
-    "tests/c14_batch/test_a01_domain_independence.py::test_subject_specific_model_is_not_silent_population_reuse",
-    "tests/test_nbr14653.py (3)",
-    "tests/test_audit_fixes.py (3)",
-    "tests/test_full_flow.py (2)",
-    "tests/test_verification.py (3)"
+    "tests/c14_batch/test_a01_domain_independence.py::test_subject_specific_model_is_not_silent_population_reuse"
   ],
   "c16_reprovados": [
     "test_send_notification_delivers_realistic_completed_payload",
@@ -113,7 +117,7 @@
     "tests/test_audit_fixes.py WS fan-out: C11 drops unscoped completed payload by design (GET /result)",
     "tests/test_full_flow.py / DataLoader len==observed: C01 keeps pending-target rows",
     "tests/test_nbr14653.py / test_verification.py: pre-MP/1 OptimalCombinationFinder + one-hot in loader",
-    "tests/c14_batch/test_a01_domain_independence.py two cases: C03 present yields pending grades vs C14 builtin fixtures",
+    "C09 AppTest timeout last measured on d755b0b (NOT_RUN on 1f43121)",
     "C16 UI Playwright: NOT_RUN no module",
     "C16 two identical POST /jobs: idempotency reuses job_id"
   ],

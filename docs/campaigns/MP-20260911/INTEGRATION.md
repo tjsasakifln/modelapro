@@ -44,6 +44,8 @@ Ajustes só na branch consolidada (não reescritos nas branches dos donos):
 5. C10 passa `output_dir` do dossiê sob o root C11 quando o caller não informa.
 6. CORS da API usa `config.cors_origin_list()` (C15), nunca `*`.
 7. Adaptador legado C05 preenche `ModelResult.coefficients` a partir do winner MP/1.
+8. C10 chama C03 sempre a partir do `CandidateFit` vivo (`axes` da `base_frame`, `n`/`k` inteiros, p-valores, `predict_original` → `{point}`); não reutiliza `assessment.normative` incompleto da busca. `resolve_effective_n_k` conta `len(sample.used)` quando `used` é lista. Alternatives JSON perdem `candidate_fit`.
+9. C14 envia eixos/`n`/`k` do domínio/sample_ranges a C03, carimba `documentary.subject_id` do imóvel, e se o grau C03 fica `None` com `sample_item_scores` usa o classificador builtin.
 
 ## Ambiente executado
 
@@ -69,7 +71,7 @@ O script grava `git rev-parse HEAD` **antes** de qualquer pytest.
 | I01 | Corrigido | `PreparedDataset`/`SubjectDesign` são Mapping; `tests/c17_integration/test_review_i01_i11.py::TestI01CanonicalObjects` |
 | I02 | Corrigido | C02 `parse_numeric` delega a C01 `parse_numeric_token`; matriz no teste I02 |
 | I03 | Corrigido | winner público carrega `candidate_fit`; frozen `model_state.coefficients` não vazio; teste I03 |
-| I04 | Corrigido | C10 reutiliza `assessment.normative` da C04; `predict_original` devolve `{point}`; teste I04 |
+| I04 | Corrigido | C10 monta contexto C03 do fit vivo; item 4 calcula `y_subject` na unidade original; `n`=`sample.used`; teste I04 |
 | I05 | Corrigido | `_FoldPredictor.predict` + encoder do fold; métricas C07 em `validation.statistical.procedure` |
 | I06 | Corrigido | `POST /preview` com `{}` devolve `feature_schema`, `row_ledger`, `sample_preview`; alvo pode estar vazio |
 | I07 | Corrigido | `report_context.used_rows` com valores; `snapshot.model.coefficients` |
@@ -101,27 +103,29 @@ Auditoria original vs C16 (mesmo problema, IDs diferentes):
 
 ## Resultado
 
-Todas as contagens abaixo são do SHA de produto **`d755b0bf957341d7dd35a29ec3a209ad566e5567`**, `PYTHONPATH` vazio, Linux. Não misturar com SHA anterior.
+SHA de produto desta cola C03/C14: **`1f43121fe25f11d7200655ffd75de3c99bff50be`**, `PYTHONPATH` vazio, Linux. C17 A–J e C14 a01 foram reexecutados neste SHA. Harness C16 e a suíte campanha+originais completa **não** foram reexecutados neste SHA (última medição integral: `d755b0b`).
 
-- `TECHNICAL_E2E`: **PASS** — cenários A–J executados em `tests/c17_integration/test_scenarios_a_j.py` nesse SHA (28 testes C17: 28 aprovados / 0 reprovados / 0 skip), sem simuladores C10.
-- `NORMATIVE_VERIFICATION`: `PARTIAL` — NBR 14653-2:2011 item 4 e tabelas calculadas; cláusulas em `docs/campaigns/MP-20260911/C03/unverified_rules.md` pendentes. Não é norma inteira certificada.
+- `TECHNICAL_E2E`: **PASS** — A–J em `tests/c17_integration` neste SHA, duas vezes (28/0/0). Job vivo: item 4 `calculated`, `y_subject` na unidade original, `n=23`=`sample.used`, `k=3`; sem `item4_axes_missing` / `k_unknown` / `NON_JSON_VALUE`. Sem simuladores C10.
+- `NORMATIVE_VERIFICATION`: `PARTIAL` — NBR 14653-2:2011 item 4 (a)+(b) calculado no compose; cláusulas em `docs/campaigns/MP-20260911/C03/unverified_rules.md` pendentes. Não é norma inteira certificada.
 - `DELIVERY`: **DRAFT_WITH_BLOCKERS**
 - `MAIN_MERGED`: NO
 - `DEPLOYED`: NO
 
-### Contagens disjuntas (SHA `d755b0b`)
+### Contagens disjuntas
 
-| Suite | Aprovados | Reprovados | Não executados / skip |
-| --- | ---: | ---: | ---: |
-| C17 `tests/c17_integration` (inclui A–J) | 28 | 0 | 0 |
-| Campanha C01–C15 + originais + C17 | 513 | 14 | 1 skip (`C15_INSTALL_SMOKE` wheel) |
-| Harness C16 | 47 | 11 | 1 (Playwright UI) |
+| Suite | SHA | Aprovados | Reprovados | Não executados / skip |
+| --- | --- | ---: | ---: | ---: |
+| C17 `tests/c17_integration` (inclui A–J) | `1f43121` (2×) | 28 | 0 | 0 |
+| C14 `tests/c14_batch` (inclui a01) | `1f43121` | todos os do diretório | 0 | 0 |
+| Originais `test_nbr14653`+`test_audit_fixes`+`test_full_flow`+`test_verification` | `1f43121` | 45 | 11 | 0 |
+| Campanha C01–C15 + originais + C17 (integral) | `d755b0b` | 513 | 14 | 1 skip (`C15_INSTALL_SMOKE` wheel) |
+| Harness C16 | `d755b0b` | 47 | 11 | 1 (Playwright UI) |
 
-C16: total 59, conjuntos disjuntos, `violacoes_a04` skip/xfail = 0.
+C16 no SHA `d755b0b`: total 59, conjuntos disjuntos, `violacoes_a04` skip/xfail = 0. Não reexecutado em `1f43121`.
 
-Reprovados C16 nesse SHA: WS fan-out (C11 recusa payload sem job), `find_best_model` legado sem winner, `DataLoader` não descarta linha sem preço, lote C16 `assessments is None`, dois POST idênticos reusam `job_id`, oráculos F01/F04/F05/F11 contra API/loader pré-MP/1.
+Reprovados originais neste SHA `1f43121` (11): `test_nbr14653` (3); `test_audit_fixes` (3); `test_full_flow` (2); `test_verification` (3). C14 a01 **passa** neste SHA. C09 AppTest timeout: última medição em `d755b0b`, **não reexecutado** aqui.
 
-Reprovados campanha (14): C09 AppTest timeout 20s; C14 a01 (2) grau C03 pending vs fixture; `test_nbr14653` (3); `test_audit_fixes` (3); `test_full_flow` (2); `test_verification` (3). Nenhum skip/xfail para esconder A–J.
+Reprovados C16 no SHA `d755b0b`: WS fan-out (C11 recusa payload sem job), `find_best_model` legado sem winner, `DataLoader` não descarta linha sem preço, lote C16 `assessments is None`, dois POST idênticos reusam `job_id`, oráculos F01/F04/F05/F11 contra API/loader pré-MP/1.
 
 ## Próximo ato humano
 
