@@ -3,6 +3,7 @@
   "head_sha": "ef274a6914e904e29825fda4ce4b4ee25833f819",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
+  "pull_request": "https://github.com/tjsasakifln/modelapro/pull/16",
   "result": "READY_COMPONENT",
   "criteria": [
     {

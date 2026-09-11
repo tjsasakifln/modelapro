@@ -3,7 +3,7 @@
   "contract_version": "MP/1",
   "exported_interface": "modules.results_generator.render_report(snapshot, report_context) -> bytes; modules.results_generator.ReportRenderError (code, origin, message, to_issue()); generate_pdf_report remains a ModelResult adapter",
   "head_sha": "ef274a6914e904e29825fda4ce4b4ee25833f819",
-  "dependency_pr": null,
+  "dependency_pr": "https://github.com/tjsasakifln/modelapro/pull/16",
   "consumers": [
     {
       "consumer": "C10",
