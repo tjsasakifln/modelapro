@@ -1,0 +1,66 @@
+{
+  "producer": "C01",
+  "contract_version": "MP/1",
+  "exported_interface": "modules.data_loader.ingest_market(file_bytes, filename, request_spec) -> InputBundle",
+  "also_exported": [
+    "modules.import_formats.read_tabular",
+    "modules.data_loader.InputBundle",
+    "modules.data_loader.reconstruct_original_record",
+    "modules.data_loader.observed_target_count",
+    "modules.utils.parse_numeric_token",
+    "modules.utils.build_column_map",
+    "modules.utils.safe_float_conversion(value, locale='auto')"
+  ],
+  "consumers": [
+    {
+      "consumer": "C02",
+      "required_callsite": "modules.preprocessing.fit_dataset(input_bundle, request_spec, train_row_ids=None)",
+      "acceptance_case": "Use parsed_frame + row_ledger.observed_target; never impute target; row_id is identity not a predictor; categories remain base variables.",
+      "dependency_pr": null,
+      "head_sha": null
+    },
+    {
+      "consumer": "C09",
+      "required_callsite": "frontend/components/forms.py currently calls pd.read_csv/pd.read_excel. Must stop reimplementing reading and consume C10 POST /preview.",
+      "acceptance_case": "C01-A03: Streamlit preview and API ingest share read_tabular/ingest_market. C01 does not edit forms.py.",
+      "dependency_pr": null,
+      "head_sha": null
+    },
+    {
+      "consumer": "C10",
+      "required_callsite": "backend/worker.py DataLoader.load_data; POST /preview and POST /jobs should call ingest_market. /upload may keep a compatibility adapter.",
+      "acceptance_case": "File-size issues use code file_size_limit with evidence.report_to=C10. load_data no longer one-hot encodes or fillna-means; worker must not expand dummy prefixes as if C01 still encoded them.",
+      "dependency_pr": null,
+      "head_sha": null
+    },
+    {
+      "consumer": "C15",
+      "required_callsite": "requirements.txt / lockfile engines for Excel",
+      "acceptance_case": "openpyxl is required for .xlsx (present in this environment 3.1.5 but not declared). xlrd is required for .xls (absent here: ingest returns excel_engine_missing, it does not fake an xls read).",
+      "dependency_pr": null,
+      "head_sha": null
+    },
+    {
+      "consumer": "C16",
+      "required_callsite": "tests/test_verification.py::test_data_loader_robustness asserts col2_B dummies; tests/test_full_flow.py feeds load_data into search",
+      "acceptance_case": "C01 will not restore one-hot or target mean-fill to keep C16 green. Update oracles to InputBundle / unencoded categories.",
+      "dependency_pr": null,
+      "head_sha": null
+    }
+  ],
+  "input_bundle_fields": [
+    "schema_version",
+    "raw_frame",
+    "parsed_frame",
+    "column_map",
+    "row_ledger",
+    "input_sha256",
+    "issues"
+  ],
+  "notes": [
+    "candidate_cols=[] is an explicit selection error, never 'all columns'. candidate_cols=null is automatic selection by role.",
+    "clean_column_name meaning is unchanged for API/worker string matching; the reversible map is column_map.",
+    "Default missing_policy.target=never_impute; predictors are not imputed in C01 (complete_case deferred to C02 train-only policies).",
+    "import_options.max_file_bytes is an additive optional field; default 52428800. C01 reports the limit, it does not own upload."
+  ]
+}
