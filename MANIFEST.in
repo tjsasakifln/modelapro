@@ -1,0 +1,21 @@
+include README.md
+include pyproject.toml
+include setup.py
+include requirements.txt
+include requirements-dev.txt
+include .env.example
+include constraints/*.txt
+include constraints/*.md
+graft modules/templates
+graft frontend/assets
+graft scripts/c15_local
+recursive-include backend *.py
+recursive-include modules *.py
+recursive-include frontend *.py
+exclude constraints/.gitignore
+global-exclude __pycache__ *.py[cod] *~ *.log
+global-exclude .env
+prune docs/normas
+prune uploads
+prune reports
+prune tests

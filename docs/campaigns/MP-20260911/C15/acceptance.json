@@ -1,0 +1,62 @@
+{
+  "campaign_id": "C15",
+  "head_sha": "7e234168a73da5f20cfc763ec7e75c331175848f",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "INTEGRATION_PENDING",
+  "criteria": [
+    {
+      "id": "C15-A01",
+      "status": "PASS",
+      "evidence": "Wheel/sdist contain backend, modules, frontend, templates, CSS, c15_local. Clean venv install x2 with PYTHONPATH unset imported packages and non-empty resources. tests/c15_packaging/test_packaging_metadata.py and test_wheel_install_smoke.py."
+    },
+    {
+      "id": "C15-A02",
+      "status": "PASS",
+      "evidence": "Direct deps openpyxl/xlrd/weasyprint declared. CSV and xlsx round-trip; xls via xlrd fixture. WeasyPrint probe exit 0 on Linux with real PDF bytes. Native-missing path returns Pango/cairo/GTK hints (pdf_env.py)."
+    },
+    {
+      "id": "C15-A03",
+      "status": "PASS",
+      "evidence": "Launcher uses streamlit CLI process and uvicorn --host 127.0.0.1. /health returned {status:healthy} twice. Redis not required. C10/C11 keys validated. CORS * still hardcoded in backend/api.py (C10 handoff); bind host already uses config.API_HOST."
+    },
+    {
+      "id": "C15-A04",
+      "status": "INTEGRATION_PENDING",
+      "evidence": "Local Linux: C15 tests 33 passed x2; install smoke x2; inherited 81 passed; flake8 0. Windows and GitHub Actions check-run not yet observed at first commit. macOS untested. Python 3.11 declared not matrixed."
+    },
+    {
+      "id": "C15-A05",
+      "status": "PASS",
+      "evidence": "No .env secrets versioned. setup.py shim; requirements*.txt install the project with constraints/linux-py3.txt; test_dependency_sync enforces no diverging lists. psutil, requests, openpyxl, xlrd are direct runtime deps."
+    }
+  ],
+  "commands": [
+    {"command": "python -V", "exit_code": 0, "note": "Python 3.12.3"},
+    {"command": "python -m flake8 --max-line-length=120 owned C15 paths", "exit_code": 0},
+    {"command": "pytest tests/c15_packaging -q (run 1)", "exit_code": 0},
+    {"command": "pytest tests/c15_packaging -q (run 2)", "exit_code": 0},
+    {"command": "C15_INSTALL_SMOKE=1 pytest tests/c15_packaging/test_wheel_install_smoke.py -q (run 1)", "exit_code": 0},
+    {"command": "C15_INSTALL_SMOKE=1 pytest tests/c15_packaging/test_wheel_install_smoke.py -q (run 2)", "exit_code": 0},
+    {"command": "python -m c15_local.launcher --check-pdf", "exit_code": 0},
+    {"command": "backend+frontend start x2 GET /health", "exit_code": 0},
+    {"command": "pytest tests --ignore=tests/c15_packaging -q (inherited baseline)", "exit_code": 0}
+  ],
+  "unmet_dependencies": [
+    "C10 must consume config.CORS_ORIGINS in backend/api.py",
+    "C08 should call probe_weasyprint before PDF render",
+    "C17 owns global README/AGENTS/DoD copy",
+    "GitHub Actions check-run on this PR (A04 oracle)"
+  ],
+  "deferred_items": [
+    "macOS: untested (no runner)",
+    "Python 3.11: declared requires-python, not CI-matrixed",
+    "Windows PDF native stack: not claimed; probe records missing GTK/Pango",
+    "tests/test_nbr14653.py grep is C03-owned"
+  ],
+  "review_findings": [
+    "Author review: CORS * remains until C10; documented handoff, not silently patched.",
+    "Author review: frontend.app:main removed from console_scripts; Streamlit is a subprocess.",
+    "WeasyPrint on this Linux emits HarfBuzz-Subset deprecation; PDF still generated."
+  ]
+}

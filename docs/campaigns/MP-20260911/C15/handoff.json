@@ -1,0 +1,54 @@
+{
+  "producer": "C15",
+  "contract_version": "MP/1",
+  "items": [
+    {
+      "consumer": "C10",
+      "exported_interface": "modules.config_manager.config.CORS_ORIGINS (tuple[str, ...]) and config.cors_origin_list(); also DATA_DIR, UPLOAD_DIR, REPORTS_DIR, JOBS_DIR, PROJECTS_DIR, MAX_UPLOAD_MB, MAX_CONCURRENT_JOBS, JOB_TIMEOUT_SECONDS, LOCAL_AUTH_TOKEN, API_HOST, API_PORT, API_PUBLIC_URL",
+      "required_callsite": "backend/api.py CORSMiddleware allow_origins=[\"*\"] — replace with list(config.CORS_ORIGINS). API_HOST is already consumed by uvicorn.run.",
+      "acceptance_case": "With default env, API binds 127.0.0.1 and CORS is the explicit localhost list, never '*'. Invalid CORS_ORIGINS='*' raises ValueError at config load.",
+      "dependency_pr": null,
+      "head_sha": "7e234168a73da5f20cfc763ec7e75c331175848f"
+    },
+    {
+      "consumer": "C11",
+      "exported_interface": "config.DATA_DIR, JOBS_DIR, PROJECTS_DIR, MAX_CONCURRENT_JOBS, JOB_TIMEOUT_SECONDS, LOCAL_AUTH_TOKEN (empty default, no shipped secret)",
+      "required_callsite": "modules/job_store.py, modules/project_store.py, modules/local_task_runner.py — read these keys instead of inventing parallel env names.",
+      "acceptance_case": "Empty DATA_DIR / MAX_CONCURRENT_JOBS=0 / LOCAL_AUTH_TOKEN=changeme raise ValueError. Redis server is not required.",
+      "dependency_pr": null,
+      "head_sha": "7e234168a73da5f20cfc763ec7e75c331175848f"
+    },
+    {
+      "consumer": "C09",
+      "exported_interface": "Installed package layout: frontend/app.py, frontend/components/__init__.py, frontend/assets/styles.css. Launcher runs `python -m streamlit run <frontend/app.py>` so script-dir imports `from components.*` keep working. Do not call frontend.app:main as a console function.",
+      "required_callsite": "frontend/app.py imports (`from components.layout import ...`). Optional: also accept `from frontend.components` for non-Streamlit importers.",
+      "acceptance_case": "After wheel install, `streamlit run` of the packaged app.py loads CSS from frontend/assets/styles.css without checkout sys.path.",
+      "dependency_pr": null,
+      "head_sha": "7e234168a73da5f20cfc763ec7e75c331175848f"
+    },
+    {
+      "consumer": "C08",
+      "exported_interface": "c15_local.pdf_env.probe_weasyprint() -> PdfProbeResult(ok, stage, message, pdf_bytes). stage is python_package | native_libraries | render | ok.",
+      "required_callsite": "modules/results_generator.py generate_pdf_report WeasyPrint path — surface the native-library message instead of a generic import crash.",
+      "acceptance_case": "Missing Pango/cairo/GTK returns an actionable OS-specific hint; success only when write_pdf returns %PDF bytes.",
+      "dependency_pr": null,
+      "head_sha": "7e234168a73da5f20cfc763ec7e75c331175848f"
+    },
+    {
+      "consumer": "C03",
+      "exported_interface": "none (request only)",
+      "required_callsite": "tests/test_nbr14653.py subprocess grep MIN_R2 — not portable on Windows. C15 cannot edit that file.",
+      "acceptance_case": "Replace grep with a pathlib scan of *.py so the assertion runs on Windows CI.",
+      "dependency_pr": null,
+      "head_sha": "7e234168a73da5f20cfc763ec7e75c331175848f"
+    },
+    {
+      "consumer": "C17",
+      "exported_interface": "docs/campaigns/MP-20260911/C15/README.md and console scripts modelapro / modelapro-api / modelapro-frontend",
+      "required_callsite": "README.md global install/run section (C17-owned).",
+      "acceptance_case": "Global README points to `pip install -c constraints/linux-py3.txt -e .[dev]` and `modelapro` as the local start command.",
+      "dependency_pr": null,
+      "head_sha": "7e234168a73da5f20cfc763ec7e75c331175848f"
+    }
+  ]
+}
