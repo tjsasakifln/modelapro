@@ -1,5 +1,13 @@
 import pandas as pd
-from frontend.components.forms import _looks_like_identification
+from frontend.components.forms import (
+    _looks_like_identification,
+    build_request_spec,
+    build_subject_payload,
+    candidate_cols_from_selection,
+    suggest_roles,
+    validate_dispatch,
+)
+from tests.c09_frontend.fixtures import PREVIEW_BAIRRO_FORMATTED
 
 
 class TestLooksLikeIdentification:
@@ -42,3 +50,40 @@ class TestLooksLikeIdentification:
     def test_numeric_column_never_excluded_regardless_of_name(self):
         s = pd.Series([1, 2, 3])
         assert _looks_like_identification("id", s) == False
+
+
+class TestRequestSpecFromBairroAndFormattedNumber:
+    """C09-A01: o mapeamento enviado (não uma reimplementação no teste)."""
+
+    def test_form_pass_yields_coherent_spec_and_subject(self):
+        roles = suggest_roles(PREVIEW_BAIRRO_FORMATTED["column_map"], target_col="preco")
+        spec = build_request_spec(
+            target_col="preco",
+            candidate_cols=["bairro", "area"],
+            roles=roles,
+            units={"area": "m2"},
+            target_unit="",
+        )
+        subject = build_subject_payload(
+            PREVIEW_BAIRRO_FORMATTED["feature_schema"],
+            {"bairro": "Centro", "area": "1.234,56"},
+        )
+        assert spec["roles"]["bairro"] == "predictor"
+        assert spec["candidate_cols"] == ["bairro", "area"]
+        assert spec["target_unit"] == ""
+        assert spec["reference_date"] is None
+        assert subject["raw_values"]["bairro"] == "Centro"
+        assert subject["raw_values"]["área"] == "1.234,56"
+        decision = validate_dispatch(spec, subject, preview=PREVIEW_BAIRRO_FORMATTED)
+        assert decision["ok"] is True
+
+    def test_empty_candidate_cols_is_none_authorized(self):
+        spec = build_request_spec(
+            target_col="preco",
+            candidate_cols=candidate_cols_from_selection([], auto=False),
+            roles={"preco": "target", "bairro": "predictor"},
+        )
+        assert spec["candidate_cols"] == []
+        decision = validate_dispatch(spec, {"supported": True, "issues": []}, preview=PREVIEW_BAIRRO_FORMATTED)
+        assert decision["can_dispatch"] is False
+        assert any(item["code"] == "no_authorized_variables" for item in decision["blocking"])
