@@ -1,0 +1,88 @@
+{
+  "schema_version": "MP/1",
+  "campaign_id": "C04",
+  "producer": "C04",
+  "records": [
+    {
+      "consumer": "C05",
+      "exported_interface": "modules.model_builder.fit_candidate / evaluate_fitted / CandidateFit / CandidateAssessment",
+      "required_callsite": "modules.optimal_combination.OptimalCombinationFinder.find_best_model still calls ModelBuilder.build_model(..., remove_outliers=True) then add_precision_and_extrapolation. After C04, that flag no longer drops rows. C05 should compare candidates via fit_candidate on a shared PreparedDataset/request_spec and read CandidateFit.diagnostics['r2_naive_comparison_blocked'] before ranking R².",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "C04-A02 common sample; C04-A01 no silent drop. Foreign test tests/test_optimal_combination.py may change ranking because outliers stay."
+    },
+    {
+      "consumer": "C03",
+      "exported_interface": "evaluate_fitted context: n, k, intercept, axes/extrapolation_details from effective sample, predict_original, value, pvalues, f_pvalue, amplitude_pct only when interval validated",
+      "required_callsite": "modules.nbr14653_validation.assess_normative(context). C04 does not interpret Tabela 1/2/5. Item-4 ranges must come from CandidateFit.used_row_ids / base_frame, not raw original_df including undocumented drops.",
+      "contract_version": "MP/1",
+      "dependency_pr": "https://github.com/tjsasakifln/modelapro/pull/5",
+      "head_sha": "88a24b5a57e73bd2894fb573104a69317f95876a",
+      "acceptance_case": "C04-A05 axes.sample_max follows documented exclusions. tests/test_nbr14653.py::test_extrapolation_range_uses_data_effectively_used_after_outlier_removal fails on C04 tree because outliers_removed is now empty by default."
+    },
+    {
+      "consumer": "C06",
+      "exported_interface": "fit_target_transform / transform_target / inverse_target_prediction consumed lazily",
+      "required_callsite": "modules.model_builder.fit_candidate (y_transformation) and evaluate_fitted inverse. C04 maps ln→log. Unvalidated interval inverse ⇒ value.mean_ci80=null and precisao.status=not_computed.",
+      "contract_version": "MP/1",
+      "dependency_pr": "https://github.com/tjsasakifln/modelapro/pull/1",
+      "head_sha": "a2a9fe140d6f481510f8974d336d48534312ee9a",
+      "acceptance_case": "C04-A04 y-transform limitations"
+    },
+    {
+      "consumer": "C02",
+      "exported_interface": "PreparedDataset mapping + transform_subject consumed lazily in predict_original",
+      "required_callsite": "modules.preprocessing.fit_dataset / transform_subject. C04 tests use labeled C02 contract fixtures; production path uses whatever C02 publishes on the process.",
+      "contract_version": "MP/1",
+      "dependency_pr": "https://github.com/tjsasakifln/modelapro/pull/2",
+      "head_sha": "963002b80253f3b36c9ec089d4df9228450ad637",
+      "acceptance_case": "C04-A05 frozen encoder_state copied at fit time"
+    },
+    {
+      "consumer": "C10",
+      "exported_interface": "CandidateFit.to_serializable() (no model_object/base_frame) and CandidateAssessment.value matching ResultSnapshot.value",
+      "required_callsite": "modules.result_contract / backend worker composition. Do not pickle model_object from users. Restore by spec+data or deterministic refit.",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "C04-A04 value.point/mean_ci80/prediction_interval"
+    },
+    {
+      "consumer": "C14",
+      "exported_interface": "evaluate_fitted(frozen CandidateFit, subject_design, request_spec) → CandidateAssessment per subject",
+      "required_callsite": "modules.valuation_batch.evaluate_batch must not refit or drop new rows per subject. Cancel/progress only at safe points.",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "C04-A05 second subject leaves coefficients/encoder/sample unchanged"
+    },
+    {
+      "consumer": "C07",
+      "exported_interface": "CandidateFit.diagnostics (influence, rank, n, k, r2, significance_invalid, pinv_used=false)",
+      "required_callsite": "modules.model_evaluation.evaluate_procedure: fit_select_predictor should wrap fit_candidate; reserved-set error must not filter the sample.",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "C04-A01 influence reported not dropped"
+    },
+    {
+      "consumer": "C13",
+      "exported_interface": "CandidateFit.issues + diagnostics.influence + CandidateAssessment.model_eligibility",
+      "required_callsite": "modules.decision_support.recommend_next_actions: influence_reported is investigation, not an auto-exclude action.",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "C04-A01"
+    },
+    {
+      "consumer": "C16",
+      "exported_interface": "legacy adapter behavior change",
+      "required_callsite": "tests/test_verification.py::test_outlier_detection asserts R² improves after remove_outliers=True. That silent drop is gone. Update the oracle to assert influence is reported and the row remains, or call fit_candidate with reviewed_exclusions.",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "foreign test failure documented in evidence.md; C04 did not edit C16 files"
+    }
+  ]
+}
