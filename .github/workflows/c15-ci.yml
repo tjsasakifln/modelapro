@@ -1,0 +1,191 @@
+name: C15 packaging CI
+
+on:
+  push:
+    branches: [mp-20260911/c15-instalacao_ci_local, main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c15-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MODELA_SKIP_DOTENV: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: Lint owned C15 paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install flake8
+        run: python -m pip install flake8
+      - name: flake8
+        run: >
+          python -m flake8 --max-line-length=120 --extend-ignore=E203,W503
+          setup.py
+          modules/config_manager.py
+          modules/logging_manager.py
+          backend/monitor.py
+          backend/__init__.py
+          modules/__init__.py
+          frontend/__init__.py
+          frontend/components/__init__.py
+          scripts/c15_local
+          tests/c15_packaging
+
+  c15-tests-linux:
+    name: C15 tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Native PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install package with lock
+        run: python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+      - name: C15 packaging tests
+        run: python -m pytest tests/c15_packaging -q --tb=short
+
+  build-sdist-wheel:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install build
+          python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  install-smoke-linux:
+    name: Clean venv install smoke (Linux)
+    runs-on: ubuntu-latest
+    needs: [build-sdist-wheel]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Native PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install wheel in a venv outside the checkout
+        run: |
+          python -m venv "$HOME/c15-smoke-venv"
+          "$HOME/c15-smoke-venv/bin/python" -m pip install -U pip
+          WHEEL=$(ls dist/modelapro-*.whl | head -n 1)
+          "$HOME/c15-smoke-venv/bin/python" -m pip install -c constraints/linux-py3.txt "$WHEEL"
+      - name: Import packages and packaged resources with PYTHONPATH unset
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ""
+        run: |
+          "$HOME/c15-smoke-venv/bin/python" - <<'PY'
+          import os
+          from importlib.resources import files
+          import backend, modules, frontend, c15_local
+          from c15_local.launcher import frontend_app_path, frontend_command
+          assert not os.environ.get("PYTHONPATH")
+          template = files("modules") / "templates" / "report.html"
+          css = files("frontend") / "assets" / "styles.css"
+          assert template.is_file() and template.read_bytes()
+          assert css.is_file() and css.read_bytes()
+          app = frontend_app_path()
+          cmd = frontend_command(app, "127.0.0.1", 8501)
+          assert cmd[1:4] == ["-m", "streamlit", "run"]
+          print("imports_ok", backend.__file__, template, css, app)
+          PY
+      - name: Health on loopback from installed package
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ""
+          MODELA_SKIP_DOTENV: "1"
+          API_HOST: "127.0.0.1"
+          API_PORT: "8765"
+          API_PUBLIC_URL: "http://127.0.0.1:8765"
+        run: |
+          "$HOME/c15-smoke-venv/bin/python" -m uvicorn backend.api:app --host 127.0.0.1 --port 8765 &
+          echo $! > "$HOME/c15-smoke-venv/api.pid"
+          "$HOME/c15-smoke-venv/bin/python" - <<'PY'
+          from c15_local.launcher import wait_for_health
+          body = wait_for_health("http://127.0.0.1:8765/health", timeout=45)
+          assert body.get("status") == "healthy", body
+          print("health", body)
+          PY
+          kill "$(cat "$HOME/c15-smoke-venv/api.pid")" || true
+
+  c15-tests-windows:
+    name: C15 tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package (lock first, ranges if Windows pins fail)
+        shell: pwsh
+        run: |
+          python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Linux lock did not apply on Windows; installing pyproject ranges"
+            python -m pip install -e ".[dev]"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: C15 packaging tests
+        shell: pwsh
+        run: python -m pytest tests/c15_packaging -q --tb=short
+      - name: Record WeasyPrint native status (not claimed)
+        shell: pwsh
+        run: python -m c15_local.launcher --check-pdf
+        continue-on-error: true
+
+  inherited-baseline:
+    name: Inherited suite baseline (recorded, not omitted)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Native PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install
+        run: python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+      - name: Run inherited tests
+        run: python -m pytest tests --ignore=tests/c15_packaging -q --tb=line
+      - name: Upload inherited log if present
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inherited-baseline
+          path: .pytest_cache
+          if-no-files-found: ignore

@@ -1,17 +1,7 @@
-streamlit>=1.30.0
-fastapi>=0.109.0
-uvicorn>=0.27.0
-pandas>=2.2.0
-numpy>=1.26.0
-scipy>=1.12.0
-statsmodels>=0.14.1
-matplotlib>=3.8.2
-seaborn>=0.13.1
-redis>=5.0.1
-python-multipart>=0.0.6
-jinja2>=3.1.3
-weasyprint>=60.2
-python-dotenv>=1.0.0
-pytest>=8.0.0
-httpx>=0.26.0
-websockets>=12.0
+# Runtime install from a clone.
+# Canonical direct dependency ranges: pyproject.toml [project.dependencies]
+# Pinned set: constraints/linux-py3.txt
+# Do not add package names here — tests/c15_packaging/test_dependency_sync.py
+# fails if this file grows a second, diverging list.
+-c constraints/linux-py3.txt
+.

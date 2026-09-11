@@ -1,19 +1,142 @@
-import os
-from dotenv import load_dotenv
-from dataclasses import dataclass
+"""Local configuration: loopback defaults, explicit origins, no embedded secrets."""
 
-load_dotenv()
+from __future__ import annotations
+
+import os
+import warnings
+from dataclasses import dataclass, field
+from typing import Tuple
+
+from dotenv import load_dotenv
+
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+UNSAFE_BIND_HOSTS = frozenset({"0.0.0.0", "::", "[::]"})
+_PLACEHOLDER_TOKENS = frozenset(
+    {"secret", "changeme", "password", "token", "admin", "123456", "changemeplease"}
+)
+_DEFAULT_CORS = (
+    "http://127.0.0.1:8501",
+    "http://localhost:8501",
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+)
+
+
+def load_dotenv_files() -> None:
+    """Load `.env` from the process cwd unless tests request a skip."""
+    flag = os.getenv("MODELA_SKIP_DOTENV", "").strip().lower()
+    if flag in {"1", "true", "yes", "on"}:
+        return
+    load_dotenv()
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(
+    name: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        value = default
+    else:
+        try:
+            value = int(raw.strip())
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {value}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be <= {maximum}, got {value}")
+    return value
+
+
+def _env_str(name: str, default: str, *, allow_empty: bool = True) -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    stripped = raw.strip()
+    if stripped:
+        return stripped
+    return "" if not allow_empty else default
+
+
+def _nested_dir(name: str, parent: str, nested: str) -> str:
+    """Blank env values (as in a copied .env.example) are treated as unset."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return os.path.join(parent, nested) if parent else ""
+    return raw.strip()
+
+
+def _parse_origins(raw: str | None) -> Tuple[str, ...]:
+    if raw is None or not raw.strip():
+        return _DEFAULT_CORS
+    parts = tuple(item.strip() for item in raw.split(",") if item.strip())
+    if not parts:
+        raise ValueError("CORS_ORIGINS is empty after parsing; list explicit localhost origins")
+    if any(item == "*" for item in parts):
+        raise ValueError(
+            "CORS_ORIGINS must list explicit origins "
+            "(e.g. http://127.0.0.1:8501); '*' is not allowed"
+        )
+    return parts
+
+
+def is_loopback_host(host: str) -> bool:
+    return host.strip().lower() in LOOPBACK_HOSTS
+
+
+def _display_host(bind_host: str) -> str:
+    if bind_host in UNSAFE_BIND_HOSTS:
+        return "127.0.0.1"
+    return bind_host
+
+
+def _validate_local_token(token: str) -> None:
+    if token == "":
+        return
+    if token.lower() in _PLACEHOLDER_TOKENS or len(token) < 8:
+        raise ValueError(
+            "LOCAL_AUTH_TOKEN is set but is a placeholder or shorter than 8 characters. "
+            "Leave it empty for single-user loopback use, or set a non-guessable token. "
+            "Do not commit the token."
+        )
+
 
 @dataclass
 class Config:
-    APP_NAME: str = os.getenv("APP_NAME", "CONFENGE MODELA PRO")
-    DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
-    API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
-    API_PORT: int = int(os.getenv("API_PORT", "8000"))
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    
+    APP_NAME: str = "CONFENGE MODELA PRO"
+    DEBUG: bool = False
+    API_HOST: str = "127.0.0.1"
+    API_PORT: int = 8000
+    API_PUBLIC_URL: str = "http://127.0.0.1:8000"
+    FRONTEND_HOST: str = "127.0.0.1"
+    FRONTEND_PORT: int = 8501
+    CORS_ORIGINS: Tuple[str, ...] = _DEFAULT_CORS
+    REDIS_ENABLED: bool = False
+    REDIS_HOST: str = "127.0.0.1"
+    REDIS_PORT: int = 6379
+    LOG_LEVEL: str = "INFO"
+    LOG_DIR: str = "./logs"
+    DATA_DIR: str = "./data"
+    UPLOAD_DIR: str = "./uploads"
+    REPORTS_DIR: str = "./reports"
+    JOBS_DIR: str = "./data/jobs"
+    PROJECTS_DIR: str = "./data/projects"
+    MAX_UPLOAD_MB: int = 25
+    MAX_CONCURRENT_JOBS: int = 1
+    JOB_TIMEOUT_SECONDS: int = 3600
+    LOCAL_AUTH_TOKEN: str = ""
+
     # NBR 14653-2 Defaults
     # MIN_SAMPLES_GRAU_1/2/3 are informational references only - they are NOT
     # normative absolute minimums independent of k (number of model variables).
@@ -33,7 +156,7 @@ class Config:
     MIN_CORRELATION: float = 0.75
     MAX_VIF: float = 10.0
     MAX_COOK_DISTANCE: float = 1.0
-    MAX_RESIDUAL_REL: float = 0.40 # 40%
+    MAX_RESIDUAL_REL: float = 0.40  # 40%
 
     SIGNIFICANCE_LEVEL_AUX: float = 0.10   # Anexo A.3.1 - testes não citados na Tabela 1 (Shapiro-Wilk, Breusch-Pagan)
     CAMPO_ARBITRIO: float = 0.15           # NBR 14653-1 3.8 / NBR 14653-2 8.2.1.5.1
@@ -50,6 +173,98 @@ class Config:
     # between "technically encodable as a model variable" and "kept as
     # identification-only data" sits, and is configurable via the
     # MAX_ONE_HOT_CATEGORIES env var.
-    MAX_ONE_HOT_CATEGORIES: int = int(os.getenv("MAX_ONE_HOT_CATEGORIES", "50"))
+    MAX_ONE_HOT_CATEGORIES: int = 50
 
-config = Config()
+    extra_warnings: Tuple[str, ...] = field(default_factory=tuple)
+
+    def cors_origin_list(self) -> list[str]:
+        return list(self.CORS_ORIGINS)
+
+
+def validate_config(cfg: Config) -> None:
+    """Raise ValueError if required C10/C11 keys are empty or unsafe."""
+    if not cfg.DATA_DIR.strip():
+        raise ValueError("DATA_DIR must be a non-empty local directory path")
+    if not cfg.UPLOAD_DIR.strip():
+        raise ValueError("UPLOAD_DIR must be a non-empty local directory path")
+    if not cfg.REPORTS_DIR.strip():
+        raise ValueError("REPORTS_DIR must be a non-empty local directory path")
+    if not cfg.JOBS_DIR.strip():
+        raise ValueError("JOBS_DIR must be a non-empty local directory path")
+    if not cfg.PROJECTS_DIR.strip():
+        raise ValueError("PROJECTS_DIR must be a non-empty local directory path")
+    if not cfg.LOG_DIR.strip():
+        raise ValueError("LOG_DIR must be a non-empty local directory path")
+    if cfg.MAX_UPLOAD_MB < 1:
+        raise ValueError(f"MAX_UPLOAD_MB must be >= 1, got {cfg.MAX_UPLOAD_MB}")
+    if cfg.MAX_CONCURRENT_JOBS < 1:
+        raise ValueError(
+            f"MAX_CONCURRENT_JOBS must be >= 1, got {cfg.MAX_CONCURRENT_JOBS}"
+        )
+    if cfg.JOB_TIMEOUT_SECONDS < 1:
+        raise ValueError(
+            f"JOB_TIMEOUT_SECONDS must be >= 1, got {cfg.JOB_TIMEOUT_SECONDS}"
+        )
+    if not cfg.CORS_ORIGINS:
+        raise ValueError("CORS_ORIGINS must contain at least one explicit origin")
+    if "*" in cfg.CORS_ORIGINS:
+        raise ValueError("CORS_ORIGINS must not include '*'")
+    _validate_local_token(cfg.LOCAL_AUTH_TOKEN)
+    if not is_loopback_host(cfg.API_HOST) and cfg.API_HOST not in UNSAFE_BIND_HOSTS:
+        warnings.warn(
+            f"API_HOST={cfg.API_HOST!r} is not loopback. Local default is 127.0.0.1.",
+            stacklevel=2,
+        )
+    if cfg.API_HOST in UNSAFE_BIND_HOSTS:
+        warnings.warn(
+            "API_HOST binds all interfaces (0.0.0.0/[::]). "
+            "This exposes the API beyond localhost; the shipped default is 127.0.0.1.",
+            stacklevel=2,
+        )
+
+
+def build_config() -> Config:
+    """Read process environment and return a validated Config."""
+    api_host = _env_str("API_HOST", "127.0.0.1") or "127.0.0.1"
+    api_port = _env_int("API_PORT", 8000, minimum=1, maximum=65535)
+    frontend_host = _env_str("FRONTEND_HOST", "127.0.0.1") or "127.0.0.1"
+    frontend_port = _env_int("FRONTEND_PORT", 8501, minimum=1, maximum=65535)
+    public_default = f"http://{_display_host(api_host)}:{api_port}"
+    data_dir = _env_str("DATA_DIR", "./data", allow_empty=False)
+    jobs_dir = _nested_dir("JOBS_DIR", data_dir, "jobs")
+    projects_dir = _nested_dir("PROJECTS_DIR", data_dir, "projects")
+    cfg = Config(
+        APP_NAME=_env_str("APP_NAME", "CONFENGE MODELA PRO") or "CONFENGE MODELA PRO",
+        DEBUG=_env_bool("DEBUG", False),
+        API_HOST=api_host,
+        API_PORT=api_port,
+        API_PUBLIC_URL=_env_str("API_PUBLIC_URL", public_default) or public_default,
+        FRONTEND_HOST=frontend_host,
+        FRONTEND_PORT=frontend_port,
+        CORS_ORIGINS=_parse_origins(os.getenv("CORS_ORIGINS")),
+        REDIS_ENABLED=_env_bool("REDIS_ENABLED", False),
+        REDIS_HOST=_env_str("REDIS_HOST", "127.0.0.1") or "127.0.0.1",
+        REDIS_PORT=_env_int("REDIS_PORT", 6379, minimum=1, maximum=65535),
+        LOG_LEVEL=(_env_str("LOG_LEVEL", "INFO") or "INFO").upper(),
+        LOG_DIR=_env_str("LOG_DIR", "./logs", allow_empty=False),
+        DATA_DIR=data_dir,
+        UPLOAD_DIR=_env_str("UPLOAD_DIR", "./uploads", allow_empty=False),
+        REPORTS_DIR=_env_str("REPORTS_DIR", "./reports", allow_empty=False),
+        JOBS_DIR=jobs_dir,
+        PROJECTS_DIR=projects_dir,
+        MAX_UPLOAD_MB=_env_int("MAX_UPLOAD_MB", 25, minimum=1, maximum=1024),
+        MAX_CONCURRENT_JOBS=_env_int("MAX_CONCURRENT_JOBS", 1, minimum=1, maximum=32),
+        JOB_TIMEOUT_SECONDS=_env_int(
+            "JOB_TIMEOUT_SECONDS", 3600, minimum=1, maximum=86400
+        ),
+        LOCAL_AUTH_TOKEN=(os.getenv("LOCAL_AUTH_TOKEN") or "").strip(),
+        MAX_ONE_HOT_CATEGORIES=_env_int(
+            "MAX_ONE_HOT_CATEGORIES", 50, minimum=1, maximum=10_000
+        ),
+    )
+    validate_config(cfg)
+    return cfg
+
+
+load_dotenv_files()
+config = build_config()

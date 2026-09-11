@@ -1,0 +1,5 @@
+# Development install from a clone.
+# Canonical ranges: pyproject.toml [project.optional-dependencies] dev
+# Pinned set: constraints/linux-py3.txt
+-c constraints/linux-py3.txt
+.[dev]
