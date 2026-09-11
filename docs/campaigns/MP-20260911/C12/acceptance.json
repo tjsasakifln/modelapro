@@ -1,0 +1,79 @@
+{
+  "campaign_id": "C12",
+  "lote": "MP-20260911",
+  "result": "INTEGRATION_PENDING",
+  "local_component": "READY_COMPONENT",
+  "head_sha": "PENDING_COMMIT",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "bundle_version": "C12/1",
+  "criteria": [
+    {
+      "id": "C12-A01",
+      "status": "pass",
+      "evidence": "tests/c12_evidence/test_a01_complete_package.py: n=220 complete original/used/excluded/identification tables; used_row_ids and 3 integral coefficients match the snapshot sample/model. PDF artifact present does not truncate tables."
+    },
+    {
+      "id": "C12-A02",
+      "status": "pass",
+      "evidence": "tests/c12_evidence/test_a02_integrity_manifest.py plus CLI tamper: one-byte change in used_sample.csv -> exit 2 hash mismatch; MANIFEST.json has no sha256/self_hash and does not list itself."
+    },
+    {
+      "id": "C12-A03",
+      "status": "pass",
+      "evidence": "tests/c12_evidence/test_a03_reproduction.py and two CLI runs: point 110000.0 and supported intervals recovered from disk within declared tolerance; identical primary numbers; legacy formula-only package returns point=null (exit 3), never the memorized snapshot value."
+    },
+    {
+      "id": "C12-A04",
+      "status": "pass",
+      "evidence": "tests/c12_evidence/test_a04_csv_safety.py: raw CSV keeps =CMD|'/c calc'!A0; visualization prefixes with apostrophe; path traversal artifact stays inside the bundle; unexpected pwn.py is not executed."
+    },
+    {
+      "id": "C12-A05",
+      "status": "pass",
+      "evidence": "tests/c12_evidence/test_a05_completeness.py: missing base/policy/photo/version -> faltante, no fabricated image; export_share_copy retains original; strip_dataset_from_log_payload redacts frames. PR fixtures are synthetic."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c12_evidence/ -q",
+      "exit_code": 0,
+      "note": "13 passed on clean worktree at base c92949e"
+    },
+    {
+      "command": "python3 scripts/c12_reproduce/reproduce.py --bundle {scratch}/bundle  # run 1",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 scripts/c12_reproduce/reproduce.py --bundle {scratch}/bundle  # run 2",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 scripts/c12_reproduce/reproduce.py --bundle {scratch}/bundle  # after one-byte tamper",
+      "exit_code": 2
+    }
+  ],
+  "unmet_dependencies": [
+    "C10 freeze_result_snapshot + worker callsite for build_evidence_bundle",
+    "C11 JobStore/ProjectStore persistence of the package and artifact_refs",
+    "C01 ingest_market InputBundle in the live pipeline",
+    "C02 fit_dataset PreparedDataset in the live pipeline",
+    "C08 render_report bytes as artifacts.report_pdf"
+  ],
+  "deferred_items": [
+    "Live API/GUI wiring (C10/C09/C11 via handoff.json)",
+    "End-to-end pipeline with unpublished peers (C17)"
+  ],
+  "review_findings": [
+    {
+      "kind": "author_review",
+      "severity": "info",
+      "detail": "Local acceptances C12-A01..A05 passed against shipped functions and the CLI. No independent reviewer subagent was attached to this session."
+    },
+    {
+      "kind": "integration",
+      "severity": "info",
+      "detail": "Do not claim PASS_E2E. Reproduction is promised only when coefficients, subject_design and y_transformation are on disk."
+    }
+  ]
+}
