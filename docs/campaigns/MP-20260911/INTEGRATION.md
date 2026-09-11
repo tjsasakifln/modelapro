@@ -101,17 +101,9 @@ Auditoria original vs C16 (mesmo problema, IDs diferentes):
 | F15 instalação | C16-F15 | C15 venv |
 | F16 seleção vazia | C16-F16 | `[]` |
 
-## Resultado
+## Resultado C17 (histórico, SHA `1f43121`)
 
-SHA de produto desta cola C03/C14: **`1f43121fe25f11d7200655ffd75de3c99bff50be`**, `PYTHONPATH` vazio, Linux. C17 A–J e C14 a01 foram reexecutados neste SHA. Harness C16 e a suíte campanha+originais completa **não** foram reexecutados neste SHA (última medição integral: `d755b0b`).
-
-- `TECHNICAL_E2E`: **PASS** — A–J em `tests/c17_integration` neste SHA, duas vezes (28/0/0). Job vivo: item 4 `calculated`, `y_subject` na unidade original, `n=23`=`sample.used`, `k=3`; sem `item4_axes_missing` / `k_unknown` / `NON_JSON_VALUE`. Sem simuladores C10.
-- `NORMATIVE_VERIFICATION`: `PARTIAL` — NBR 14653-2:2011 item 4 (a)+(b) calculado no compose; cláusulas em `docs/campaigns/MP-20260911/C03/unverified_rules.md` pendentes. Não é norma inteira certificada.
-- `DELIVERY`: **DRAFT_WITH_BLOCKERS**
-- `MAIN_MERGED`: NO
-- `DEPLOYED`: NO
-
-### Contagens disjuntas
+Fotografia do encerramento C17. **Não** é o gate A1 atual. SHA de produto da cola C03/C14 naquela data: **`1f43121fe25f11d7200655ffd75de3c99bff50be`**. Harness C16 e a suíte integral **não** foram reexecutados nesse SHA (última medição integral então: `d755b0b`).
 
 | Suite | SHA | Aprovados | Reprovados | Não executados / skip |
 | --- | --- | ---: | ---: | ---: |
@@ -121,12 +113,25 @@ SHA de produto desta cola C03/C14: **`1f43121fe25f11d7200655ffd75de3c99bff50be`*
 | Campanha C01–C15 + originais + C17 (integral) | `d755b0b` | 513 | 14 | 1 skip (`C15_INSTALL_SMOKE` wheel) |
 | Harness C16 | `d755b0b` | 47 | 11 | 1 (Playwright UI) |
 
-C16 no SHA `d755b0b`: total 59, conjuntos disjuntos, `violacoes_a04` skip/xfail = 0. Não reexecutado em `1f43121`.
+CI observado então: run `34610359558` / job `103299011588` — 28 failed, 512 passed, exit 1, workflow `success` porque `inherited-baseline.continue-on-error: true`. Merge de teste histórico: `64f480e7`.
 
-Reprovados originais neste SHA `1f43121` (11): `test_nbr14653` (3); `test_audit_fixes` (3); `test_full_flow` (2); `test_verification` (3). C14 a01 **passa** neste SHA. C09 AppTest timeout: última medição em `d755b0b`, **não reexecutado** aqui.
+## Resultado C18 (candidato atual)
 
-Reprovados C16 no SHA `d755b0b`: WS fan-out (C11 recusa payload sem job), `find_best_model` legado sem winner, `DataLoader` não descarta linha sem preço, lote C16 `assessments is None`, dois POST idênticos reusam `job_id`, oráculos F01/F04/F05/F11 contra API/loader pré-MP/1.
+SHA de produto: **`e465a9392578b5ca2d6a842fc6f1415f41e610bb`**. Árvore: `aee529c39ac5a10bbb91e549d7437612d69f830b`. Pai de produto: `7db63cb` (R17-01…R17-06). `e465a93` corrige só o encode do CSV no job de avaliação pelo wheel. Base `main`: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`. Merge de teste GitHub: `fe954172d6bfe0b643e466838115eff65db110e2` (`e465a93` into `c92949e4`). `PYTHONPATH` vazio.
+
+Gate A1: GitHub Actions run [34630150786](https://github.com/tjsasakifln/modelapro/actions/runs/34630150786), `conclusion=success`. Agregador job `103366696947` success. Suíte ampla Linux job `103364984372`: **592 passed, 1 skipped** (`C15_INSTALL_SMOKE`, coberto por `install-eval-linux`). C16 job `103364984502`: **59/0/0**, `violacoes_a04=0`, disjoint. Wheel eval job `103365055397`: ponto `899999.9999999998` ≈ 900000, PDF `%PDF`, módulos em `site-packages`.
+
+- `TECHNICAL_E2E`: **PASS_LINUX** — A–J endurecidos, Playwright loopback, wheel fora do checkout, suíte ampla GHA, C16. Não é prontidão Windows nem certificação NBR integral.
+- `NORMATIVE_VERIFICATION`: `PARTIAL` — item 4 (a)+(b) calculado; cláusulas em `C03/unverified_rules.md` pendentes.
+- `DELIVERY`: **READY_FOR_MERGE_REVIEW**
+- `MAIN_MERGED`: NO
+- `DEPLOYED`: NO
+- `MERGE_AUTHORIZATION`: NOT_GRANTED
+
+R17-06: grau C03 `None` **não** troca para `builtin_assess_normative`. Congelamento padrão: `population_model` com `domain.variables` da amostra usada.
+
+Proteção de `main`: **não configurada** (HTTP 404). O agregador é job do workflow, não required check de branch protection. Esta campanha não alterou proteções.
 
 ## Próximo ato humano
 
-Revisar a PR `mp-20260911/integracao-final` → `main`. Merge e deploy exigem autorização explícita fora deste lote.
+Retirar o draft da PR #17 e fazer nova revisão humana. **Não mergear e não fazer deploy** sem autorização explícita fora desta campanha.
