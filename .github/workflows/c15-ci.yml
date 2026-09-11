@@ -122,9 +122,12 @@ jobs:
           import backend, modules
           from backend.worker import compose_valuation_job, resolve_peers
           from modules.job_store import JobStore
-          csv = "id;bairro;area;preco\n" + "\n".join(
-              f"IM-{i:02d};Centro;{50+2*i:.2f};{(50+2*i)*10000:.2f}".replace(".", ",")
-              for i in range(24)
+          csv = (
+              "id;bairro;area;preco\n"
+              + "\n".join(
+                  f"IM-{i:02d};Centro;{50+2*i:.2f};{(50+2*i)*10000:.2f}".replace(".", ",")
+                  for i in range(24)
+              )
           ).encode()
           spec = {
               "schema_version": "MP/1",
