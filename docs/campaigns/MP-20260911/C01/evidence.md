@@ -4,7 +4,8 @@ Campaign: `C01`
 Contract: `MP/1`  
 Base: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`  
 Branch: `mp-20260911/c01-dados_integros`  
-Head (implementation commit): `62a183f01f87145938ccfe835195abc3d95164df`
+Head (implementation commit): `62a183f01f87145938ccfe835195abc3d95164df`  
+PR: https://github.com/tjsasakifln/modelapro/pull/4
 
 ## Findings reproduced on the audited HEAD
 
