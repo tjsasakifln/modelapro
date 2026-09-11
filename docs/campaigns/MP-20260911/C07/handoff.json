@@ -1,0 +1,126 @@
+{
+  "producer": "C07",
+  "consumers": ["C05", "C08", "C09", "C10", "C13"],
+  "contract_version": "MP/1",
+  "dependency_pr": null,
+  "head_sha": null,
+  "exported_interface": {
+    "modules.model_evaluation.evaluate_procedure": {
+      "signature": "evaluate_procedure(input_bundle, request_spec, fit_select_predictor, seed, *, progress_callback=None, cancel_requested=None, revisions=None) -> EvaluationResult",
+      "fit_select_predictor": "fit_select_predictor(train_row_ids, seed) -> handle with predict(records)->[{row_id,status,value,issue}] and trace {used_row_ids,encoder_state,selected_features,selected_base_variables,candidates}",
+      "notes": "Optional kwargs are keyword-only. Callbacks are synchronous and light. cancel_requested() returns bool."
+    },
+    "modules.model_evaluation.partition_external": {
+      "signature": "partition_external(input_bundle, request_spec, seed) -> partition mapping"
+    },
+    "modules.model_evaluation.detect_preprocessing_leak": {
+      "signature": "detect_preprocessing_leak(trace, *, reserved_row_ids, holdout_only_categories=None, train_only_impute=None) -> {leaked, leaks}"
+    },
+    "modules.model_stability.analyze_stability": {
+      "signature": "analyze_stability(input_bundle, request_spec, fit_select_predictor, seed, *, evaluation_result=None, fitted_folds=None, mode=None, budget=None, revisions=None) -> StabilityResult",
+      "named_analyses": [
+        "pipeline_bootstrap",
+        "fixed_model_sensitivity",
+        "variable_selection_frequency",
+        "candidate_dispersion",
+        "justified_revision_sensitivity"
+      ]
+    },
+    "EvaluationResult": {
+      "schema_version": "MP/1",
+      "kind": "evaluation_result",
+      "status": "completed|partial|error",
+      "metrics": {
+        "unit": "str|null",
+        "scale": "original",
+        "mae": "number|null",
+        "rmse": "number|null",
+        "relative_mae": "number|null",
+        "relative_rmse": "number|null",
+        "n_covered": "int",
+        "n_reserved": "int",
+        "n_failed": "int",
+        "coverage": "number|null",
+        "coverage_denominator": "n_reserved_with_observed_target",
+        "failed_remain_in_denominator": true,
+        "metrics_scope": "covered_cases_only",
+        "primary_metrics": ["mae", "rmse"]
+      },
+      "reference": {"method": "train_mean", "mae": "number|null", "rmse": "number|null"},
+      "coverage": {"reserved_row_ids": [], "covered_row_ids": [], "failed_row_ids": [], "failures": []},
+      "partition": {"method": "random|group|temporal", "seed": "int", "folds": [], "invented_groups": false, "nested": "null|object"},
+      "fold_metrics": [],
+      "fold_traces": ["encoder_state and selection provenance, no model objects"],
+      "variability": {"n_folds": "int", "mae": {"mean": null, "std": null, "values": []}, "hidden_in_single_mean": false},
+      "predictions": [{"row_id": "", "status": "ok|failed|unscored_missing_target", "y_true": null, "y_pred": null, "residual": null}],
+      "generalization": {"kind": "predictive_generalization", "not_normative_classification": true},
+      "normative_label": {"applied": false, "grau_fundamentacao": null, "grau_precisao": null},
+      "statistical_inference": {"post_selection_guarantee": false},
+      "usable_for_model_selection": false,
+      "winner_retrained_on_full_data": false,
+      "procedure_provenance": {"evaluated_unit": "full_procedure", "mode": "full|fast", "budget": {}, "executed": [], "cost": {}, "scale": "original"},
+      "stability": "StabilityResult|null",
+      "limitations": [],
+      "issues": [{"code": "", "severity": "info|warning|error", "origin": "C07", "message": "", "affected_ids": [], "evidence": {}}]
+    },
+    "StabilityResult": {
+      "kind": "stability_result",
+      "pipeline_bootstrap": "resample train, refit procedure; NOT a CI",
+      "fixed_model_sensitivity": "perturb features, keep model fixed; NOT pipeline bootstrap",
+      "variable_selection_frequency": "from pipeline bootstrap traces",
+      "candidate_dispersion": "internal_score from callback trace; used_for_selection=false",
+      "justified_revision_sensitivity": "refit after declared exclude_row_ids",
+      "executed_analyses": [],
+      "skipped_analyses": [],
+      "cost": {},
+      "underlying_data": {},
+      "not_normative_grade": true,
+      "not_post_selection_confidence_interval": true,
+      "usable_for_model_selection": false
+    }
+  },
+  "required_callsites": {
+    "C05": {
+      "file_hint": "modules/optimal_combination.py (search_models / find_best_model)",
+      "action": "Comparação interna de candidatos permanece no treino. NÃO alimentar o ranking/search_audit com EvaluationResult.metrics. Distinguir enumeração interna de validação externa C07.",
+      "must_not": "Re-score the selected winner on the full sample and call it independent evaluation."
+    },
+    "C10": {
+      "file_hint": "modules/result_contract.py / modules/results.py / backend/worker.py",
+      "action": "Mapear EvaluationResult para snapshot.validation.statistical (e provenance). Não copiar grau normativo de C07. Falha de cálculo = null + issue, nunca zero. freeze_result_snapshot é de C10.",
+      "fields": ["metrics", "coverage", "procedure_provenance", "limitations", "issues", "statistical_inference"]
+    },
+    "C08": {
+      "file_hint": "modules/results_generator.py",
+      "action": "Renderizar métricas originais, cobertura, falhas e limitações a partir do snapshot/EvaluationResult já calculado. Não recalcular o modelo. Gráficos só com predictions[] subjacente."
+    },
+    "C09": {
+      "file_hint": "frontend/components/",
+      "action": "Exibir MAE/RMSE na unidade original, cobertura e limitações; não rotular como grau NBR. Superfície de estabilidade usa os nomes distintos do StabilityResult."
+    },
+    "C13": {
+      "file_hint": "modules/decision_support.py",
+      "action": "Usar coverage.failures, limitations e c07.no_better_than_reference / c07.small_sample / c07.unseen_category para next_actions. Não tratar MAE como aprovação normativa."
+    }
+  },
+  "defaults_documented_by_C07": {
+    "evaluation_policy.method": "random",
+    "evaluation_policy.test_size": 0.2,
+    "evaluation_policy.n_splits": 1,
+    "evaluation_policy.mode": "full",
+    "evaluation_policy.stability": false,
+    "fast.pipeline_bootstrap_replicates": 3,
+    "full.pipeline_bootstrap_replicates": 10,
+    "relative_error": "only when abs(y_true) >= max(1e-12, 1e-6 * median(|y|))",
+    "target_unit": "pending if missing; never assumed BRL",
+    "note": "C10 owns runtime request_spec defaults; these are C07's documented behaviour when evaluation_policy keys are absent."
+  },
+  "acceptance_case": "tests/c07_validation/test_a01_leak_sentinel.py::test_correct_procedure_does_not_encode_holdout_category_or_full_mean plus A02–A05 in the same directory. Real evaluate_procedure entry point; labeled simulators only for missing C01/C02/C04/C05 pairs.",
+  "invariants": [
+    "External scores must not re-enter model selection.",
+    "Reserved rows are never dropped for large residual.",
+    "Unseen category is a failed prediction remaining in the coverage denominator, never a silent zero.",
+    "Groups/dates are used only when metadata exists.",
+    "pipeline_bootstrap and fixed_model_sensitivity keep distinct names."
+  ]
+}
