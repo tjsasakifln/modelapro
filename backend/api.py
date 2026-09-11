@@ -945,7 +945,22 @@ async def save_project_revision(project_id: str, request: Request):
             "ProjectStore.save_revision unavailable",
             [make_issue("PEER_UNAVAILABLE", "save_revision missing", origin="c10.api")],
         )
-    revision_id = saver(project_id, dict(payload))
+    try:
+        revision_id = saver(project_id, dict(payload))
+    except Exception as exc:
+        from modules.job_store import PersistenceError, SchemaVersionError, UnsafePayloadError, PathEscapeError
+        from modules.project_store import RevisionImmutableError
+
+        if isinstance(
+            exc,
+            (PersistenceError, SchemaVersionError, UnsafePayloadError, PathEscapeError, RevisionImmutableError),
+        ):
+            return _issues_response(
+                400,
+                "revision payload rejected",
+                [make_issue("UNSAFE_PAYLOAD", str(exc), origin="c10.api")],
+            )
+        raise
     return JSONResponse(
         status_code=201,
         content={

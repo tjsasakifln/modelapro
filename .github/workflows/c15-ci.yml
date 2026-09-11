@@ -116,12 +116,14 @@ jobs:
           MODELA_SKIP_DOTENV: "1"
         run: |
           "$HOME/c15-smoke-venv/bin/python" - <<'PY'
-          import hashlib, os, json
+          import os
           from pathlib import Path
           assert not os.environ.get("PYTHONPATH")
           import backend, modules
           from backend.worker import compose_valuation_job, resolve_peers
+          from modules.evidence_bundle import MANIFEST_NAME, reproduce_from_bundle
           from modules.job_store import JobStore
+          expected = 735000.0  # 10000 × 73.5; 73.5 is not on the 50,52,… sample grid
           csv = (
               "id;bairro;area;preco\n"
               + "\n".join(
@@ -154,17 +156,24 @@ jobs:
               file_bytes=csv,
               filename="mercado.csv",
               request_spec=spec,
-              subject_raw={"area": 90.0},
+              subject_raw={"area": 73.5},
               project_id=None,
               peers=resolve_peers(),
               job_store=store,
           )
           snap = ctx["snapshot"]
           point = snap["value"]["point"]
-          assert point is not None and abs(float(point) - 900000.0) < 1.0, point
+          assert point is not None and abs(float(point) - expected) < 1.0, point
           pdf = ctx["artifact_bytes"].get("report.pdf") or store.get_artifact(rec["job_id"], "report.pdf")
           assert pdf and pdf[:4] == b"%PDF"
-          print("wheel_eval_ok", point, backend.__file__, modules.__file__)
+          evidence = root / "jobs" / rec["job_id"] / "evidence"
+          assert (evidence / MANIFEST_NAME).is_file(), list(evidence.glob("*")) if evidence.exists() else "no evidence dir"
+          repro = reproduce_from_bundle(evidence)
+          assert repro.get("ok") is True, repro
+          assert repro.get("point") is not None
+          assert abs(float(repro["point"]) - expected) < 1.0, repro
+          assert (repro.get("comparison") or {}).get("point_within_tolerance") is True
+          print("wheel_eval_ok", point, repro["point"], backend.__file__, modules.__file__, evidence)
           PY
 
   c15-tests-windows:
@@ -210,8 +219,10 @@ jobs:
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
       - name: Run mandatory tests
+        env:
+          C17_UI_EVIDENCE: artifacts/ui-e2e
         run: |
-          mkdir -p artifacts
+          mkdir -p artifacts/ui-e2e
           set -o pipefail
           python -m pytest tests -q --tb=line --junitxml=artifacts/wide.junit.xml | tee artifacts/wide.log
       - name: Upload wide evidence

@@ -711,6 +711,25 @@ def _first_present(*values: Any) -> Any:
     return None
 
 
+def _design_row_mapping(x_row: Any) -> Dict[str, Any]:
+    """One JSON object of feature → scalar for the C12 dossier (never a DataFrame)."""
+    if x_row is None:
+        return {}
+    if hasattr(x_row, "iloc"):
+        try:
+            x_row = x_row.iloc[0].to_dict()
+        except Exception:
+            return {}
+    if not isinstance(x_row, Mapping):
+        return {}
+    out: Dict[str, Any] = {}
+    for key, value in x_row.items():
+        if isinstance(value, Mapping) and len(value) == 1:
+            value = next(iter(value.values()))
+        out[str(key)] = value
+    return out
+
+
 def _int_or_none(value: Any) -> Optional[int]:
     if value is None or isinstance(value, bool):
         return None
@@ -1345,8 +1364,31 @@ def compose_valuation_job(
                 if root is not None:
                     output_dir = os.path.join(str(root), "jobs", str(job_id), "evidence")
                     os.makedirs(output_dir, exist_ok=True)
+            pack = dict(context["artifact_bytes"])
+            if subject_design is not None:
+                raw_values = _as_dict(_get(subject_design, "raw_values")) or dict(
+                    context.get("subject_raw") or {}
+                )
+                pack["subject_design"] = {
+                    "raw_values": raw_values,
+                    "X": _design_row_mapping(_get(subject_design, "X")),
+                    "supported": _get(subject_design, "supported"),
+                }
+            if context.get("subject_raw"):
+                pack["subject_raw"] = context["subject_raw"]
+            if pack.get("report.pdf") is not None:
+                pack.setdefault("report_pdf", pack["report.pdf"])
+            coeffs = _as_dict(_get(winner_fit, "coefficients"))
+            if coeffs:
+                pack.setdefault("coefficients", coeffs)
+            cand_spec = _as_dict(_get(winner_fit, "candidate_spec"))
+            y_tr = cand_spec.get("y_transformation") or _get(winner_fit, "y_transformation")
+            if y_tr:
+                pack.setdefault("y_transformation", y_tr)
+            if cand_spec:
+                pack.setdefault("candidate_spec", cand_spec)
             manifest = builder(
-                snapshot, bundle, prepared, context["artifact_bytes"], output_dir
+                snapshot, bundle, prepared, pack, output_dir
             )
             manifest_dict = _as_dict(manifest) or {"manifest": manifest}
             payload = dumps_strict(manifest_dict).encode("utf-8")

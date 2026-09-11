@@ -32,6 +32,30 @@ def _spec_from_preview(*, candidate_cols, target_unit="", reference_date=None, i
     )
 
 
+def test_preview_to_form_model_accepts_c01_entries_column_map():
+    preview = {
+        "column_map": {
+            "entries": [
+                {"original": "id", "internal": "id", "kind": "text"},
+                {"original": "area", "internal": "area", "kind": "numeric"},
+                {"original": "preco", "internal": "preco", "kind": "numeric"},
+            ]
+        },
+        "feature_schema": {
+            "columns": {
+                "area": {"original_name": "area", "kind": "numeric"},
+                "preco": {"original_name": "preco", "kind": "numeric", "role": "target"},
+            }
+        },
+        "issues": [],
+    }
+    model = preview_to_form_model(preview)
+    assert "area" in model["column_map"]
+    assert isinstance(model["column_map"]["area"], dict)
+    assert model["column_map"]["area"].get("kind") == "numeric"
+    assert "entries" not in model["columns"]
+
+
 class TestBairroAndFormattedNumberMapping:
     def test_bairro_is_predictor_not_identifier(self):
         roles = suggest_roles(PREVIEW_BAIRRO_FORMATTED["column_map"], target_col="preco")

@@ -183,28 +183,162 @@ def test_mutation_other_imovel_docs_are_not_reused():
     assert (doc_b.get("item1") or {}).get("grade") in (None, 0) or doc_b.get("item1", {}).get("evidence_status") == "pending"
 
 
-def test_project_store_reopen_batch_without_editing_scope(tmp_path):
-    from modules.project_store import ProjectStore
+def test_http_save_kill_server_reopen_batch(tmp_path):
+    """A6: POST job → save revision → kill uvicorn → new process → batch."""
+    import json
+    import os
+    import socket
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
 
-    frozen = make_frozen_project()
-    spec = make_request_spec()
-    store_a = ProjectStore(tmp_path / "proj")
-    revision_id = store_a.save_revision(frozen["project_id"], frozen)
-    del store_a
-    store_b = ProjectStore(tmp_path / "proj")
-    loaded = store_b.load_revision(frozen["project_id"], revision_id)
-    assert loaded["model_scope"] == "population_model"
-    subjects = [
-        make_subject("r1", area=90.0, bairro="Centro"),
-        make_subject("r2", area=110.0, bairro="Sul"),
-        make_subject("r3", area=90.0, bairro="bairro_inexistente"),
-    ]
-    batch = evaluate_batch(loaded, subjects, spec)
-    items = {i["subject_id"]: i for i in batch["items"]}
-    assert items["r1"]["value"]["point"] == expected_point(90.0, "Centro")
-    assert items["r2"]["value"]["point"] == expected_point(110.0, "Sul")
-    assert items["r3"]["value"]["point"] is None
-    assert items["r3"]["status"] in {"unsupported", "failed"}
+    import httpx
+
+    from tests.c17_integration.helpers import (
+        UNIQUE_SUBJECT_AREA,
+        analytic_bairro_csv,
+        analytic_bairro_point,
+        request_spec,
+        wait_job,
+    )
+
+    def _free_port() -> int:
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        return port
+
+    def _wait_health(base: str, timeout: float = 40.0) -> None:
+        deadline = time.time() + timeout
+        last = None
+        while time.time() < deadline:
+            try:
+                resp = httpx.get(f"{base}/health", timeout=2.0)
+                if resp.status_code < 500:
+                    return
+                last = resp.text
+            except Exception as exc:  # noqa: BLE001
+                last = str(exc)
+            time.sleep(0.3)
+        raise AssertionError(f"API did not become healthy at {base}: {last}")
+
+    def _start(port: int, store_root: Path, env_base: dict) -> subprocess.Popen:
+        env = dict(env_base)
+        env["MODELA_STORE_ROOT"] = str(store_root)
+        env["MODELA_SKIP_DOTENV"] = "1"
+        env.pop("PYTHONPATH", None)
+        log = store_root / f"uvicorn-{port}.log"
+        handle = log.open("w", encoding="utf-8")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "backend.api:app", "--host", "127.0.0.1", "--port", str(port)],
+            cwd=str(Path(__file__).resolve().parents[2]),
+            env=env,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+        )
+        proc._log_handle = handle  # type: ignore[attr-defined]
+        return proc
+
+    def _stop(proc: subprocess.Popen) -> None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        handle = getattr(proc, "_log_handle", None)
+        if handle is not None:
+            handle.close()
+
+    store_root = tmp_path / "http-store"
+    store_root.mkdir()
+    env_base = os.environ.copy()
+    csv = analytic_bairro_csv(n_per=16, tag="A6")
+    spec = request_spec(
+        candidate_cols=["area", "bairro"],
+        roles={"preco": "target", "area": "predictor", "bairro": "predictor", "id": "identifier"},
+    )
+    area_c = UNIQUE_SUBJECT_AREA  # 73.5, inside Centro sample [50,80] even grid
+    area_s = 77.5  # inside Sul sample [51,81] odd grid; not a sample observation
+    expected_c = analytic_bairro_point(area=area_c, bairro="Centro")
+    expected_s = analytic_bairro_point(area=area_s, bairro="Sul")
+
+    port1 = _free_port()
+    proc1 = _start(port1, store_root, env_base)
+    try:
+        base1 = f"http://127.0.0.1:{port1}"
+        _wait_health(base1)
+        with httpx.Client(base_url=base1, timeout=30.0) as http:
+            posted = http.post(
+                "/jobs",
+                files={"file": ("mercado.csv", csv, "text/csv")},
+                data={
+                    "request_json": json.dumps(spec),
+                    "subject_json": json.dumps({"area": area_c, "bairro": "Centro"}),
+                    "project_id": "proj-c18-restart",
+                },
+            )
+            assert posted.status_code == 202, posted.text
+            job_id = posted.json()["job_id"]
+            status = wait_job(http, job_id, timeout=180.0)
+            assert status["state"] == "succeeded", status
+            frozen_resp = http.get(f"/jobs/{job_id}/artifacts/frozen_project.json")
+            assert frozen_resp.status_code == 200, frozen_resp.text
+            frozen = frozen_resp.json()
+            frozen.pop("candidate_fit", None)
+            frozen.pop("artifact_refs", None)
+            frozen.pop("revision_id", None)
+            frozen["project_id"] = "proj-c18-restart"
+            saved = http.post(f"/projects/proj-c18-restart/revisions", json=frozen)
+            assert saved.status_code == 201, saved.text
+            revision_id = saved.json()["revision_id"]
+            assert frozen.get("model_scope") == "population_model"
+    finally:
+        _stop(proc1)
+
+    port2 = _free_port()
+    proc2 = _start(port2, store_root, env_base)
+    try:
+        base2 = f"http://127.0.0.1:{port2}"
+        _wait_health(base2)
+        with httpx.Client(base_url=base2, timeout=30.0) as http:
+            loaded = http.get("/projects/proj-c18-restart")
+            assert loaded.status_code == 200, loaded.text
+            rev = loaded.json().get("revision") or {}
+            assert rev.get("model_scope") == "population_model"
+            subjects = [
+                {"subject_id": "r1", "bairro": "Centro", "area": area_c, "documentary": {"subject_id": "r1", "origin": "subject", "item1": {"grade": 3, "evidence_status": "declared"}, "item3": {"grade": 3, "evidence_status": "declared"}}},
+                {"subject_id": "r2", "bairro": "Sul", "area": area_s, "documentary": {"subject_id": "r2", "origin": "subject", "item1": {"grade": 3, "evidence_status": "declared"}, "item3": {"grade": 3, "evidence_status": "declared"}}},
+                {"subject_id": "r3", "bairro": "bairro_inexistente", "area": area_c},
+                {"subject_id": "r4", "bairro": "Centro", "area": area_c, "documentary": {"subject_id": "r4", "origin": "subject", "items": []}},
+            ]
+            batch_post = http.post(
+                "/projects/proj-c18-restart/batch",
+                json={"revision_id": revision_id, "subjects": subjects, "request_spec": spec},
+            )
+            assert batch_post.status_code == 202, batch_post.text
+            batch_job = batch_post.json()["job_id"]
+            batch_status = wait_job(http, batch_job, timeout=180.0)
+            assert batch_status["state"] == "succeeded", batch_status
+            result = http.get(f"/jobs/{batch_job}/result")
+            assert result.status_code == 200, result.text
+            body = result.json()
+            batch = body.get("result") or body
+            rows = batch.get("items") or batch.get("assessments") or []
+            items = {i["subject_id"]: i for i in rows}
+            assert set(items) == {"r1", "r2", "r3", "r4"}
+            assert abs(float(items["r1"]["value"]["point"]) - expected_c) < 1.0
+            assert abs(float(items["r2"]["value"]["point"]) - expected_s) < 1.0
+            assert items["r3"]["value"]["point"] is None
+            assert items["r3"]["status"] in {"unsupported", "failed"}
+            fund4 = ((items["r4"].get("assessment") or {}).get("normative") or {}).get("fundamentacao") or {}
+            assert fund4.get("grade") is None
+            assert items["r4"]["value"]["point"] is not None
+            assert abs(float(items["r4"]["value"]["point"]) - expected_c) < 1.0
+    finally:
+        _stop(proc2)
 
 
 def test_pdf_generation_failure_preserves_calculation(monkeypatch, isolated_c17_runtime):

@@ -15,6 +15,7 @@ from modules.valuation_batch import evaluate_batch
 from typing import Mapping
 
 from .helpers import (
+    UNIQUE_SUBJECT_AREA,
     analytic_linear_csv,
     analytic_point,
     client,
@@ -369,9 +370,20 @@ class TestEIndependentValidation:
 
 
 class TestFArtifacts:
-    def test_snapshot_pdf_and_dossier_identity_when_ready(self):
+    def test_snapshot_pdf_and_dossier_identity_when_ready(self, isolated_c17_runtime, tmp_path):
+        import json
+        import subprocess
+        import sys
+
+        from .helpers import analytic_linear_sample_areas, assert_pdf_conclusion_point
+
         test_client = client()
-        expected = analytic_point(area=90.0)
+        n_rows = 24
+        area = UNIQUE_SUBJECT_AREA
+        expected = analytic_point(area=area)
+        assert area not in analytic_linear_sample_areas(n=n_rows)
+        sample_prices = {analytic_point(area=a) for a in analytic_linear_sample_areas(n=n_rows)}
+        assert expected not in sample_prices
         spec = request_spec(
             candidate_cols=["area"],
             roles={"preco": "target", "area": "predictor", "id": "identifier", "bairro": "excluded"},
@@ -380,10 +392,10 @@ class TestFArtifacts:
         )
         job_id, status, snap = _require_success(
             test_client,
-            analytic_linear_csv(n=24, tag="F"),
+            analytic_linear_csv(n=n_rows, tag="F"),
             filename="mercado.csv",
             spec=spec,
-            subject={"area": 90.0},
+            subject={"area": area},
         )
         point = snap["value"]["point"]
         assert point is not None and math.isfinite(float(point))
@@ -394,23 +406,37 @@ class TestFArtifacts:
         pdf = test_client.get(f"/jobs/{job_id}/artifacts/report.pdf")
         assert pdf.status_code == 200
         assert pdf.content.startswith(b"%PDF")
-        from .helpers import pdf_text
+        assert_pdf_conclusion_point(pdf.content, expected)
+        from tests.c08_report.pdf_text import extract_pdf_text, parse_frozen_lines
 
-        text = pdf_text(pdf.content)
-        digits = "".join(ch for ch in text if ch.isdigit())
-        expected_int = f"{expected:.0f}"
-        assert expected_int in text.replace(".", "").replace(",", "") or expected_int in digits
-        assert "2024-06-01" in text or "01/06/2024" in text or "2024" in text
-        assert snap["job_id"] in text or job_id in text
+        frozen = parse_frozen_lines(extract_pdf_text(pdf.content))
+        assert frozen.get("MP1_REFERENCE_DATE") == "2024-06-01"
+        assert frozen.get("MP1_INSPECTION_DATE") == "2024-06-15"
+        assert snap["job_id"] in extract_pdf_text(pdf.content) or job_id in extract_pdf_text(pdf.content)
         assert evidence_state.get("state") == "ready", evidence_state
         manifest = test_client.get(f"/jobs/{job_id}/artifacts/evidence_manifest.json")
         assert manifest.status_code == 200
-        body = manifest.json() if "json" in manifest.headers.get("content-type", "") else None
-        if body is None:
-            import json
-
-            body = json.loads(manifest.content.decode("utf-8"))
-        assert body
+        body = manifest.json() if "json" in manifest.headers.get("content-type", "") else json.loads(manifest.content.decode("utf-8"))
+        assert body.get("files") or body.get("completeness") or body.get("schema_version")
+        evidence_dir = isolated_c17_runtime["root"] / "jobs" / job_id / "evidence"
+        assert (evidence_dir / "MANIFEST.json").is_file(), list(evidence_dir.glob("*"))
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        cli = Path(__file__).resolve().parents[2] / "scripts" / "c12_reproduce" / "reproduce.py"
+        ran = subprocess.run(
+            [sys.executable, str(cli), "--bundle", str(evidence_dir)],
+            cwd=str(tmp_path),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        repro = json.loads(ran.stdout)
+        assert repro.get("ok") is True, repro
+        assert repro.get("point") is not None
+        assert abs(float(repro["point"]) - expected) < 1.0
+        assert (repro.get("comparison") or {}).get("point_within_tolerance") is True
 
     def test_more_than_200_rows_keeps_every_id(self):
         test_client = client()
@@ -423,7 +449,7 @@ class TestFArtifacts:
             analytic_linear_csv(n=210, missing_target_at=9, tag="F200"),
             filename="mercado.csv",
             spec=spec,
-            subject={"area": 90.0},
+            subject={"area": UNIQUE_SUBJECT_AREA},
         )
         assert snap["sample"]["received"] == 210
         assert snap["sample"]["observed_target"] == 209

@@ -152,12 +152,34 @@ def preview_to_form_model(preview: Optional[Mapping[str, Any]]) -> dict:
             "issues": [],
             "input_sha256": None,
         }
-    column_map = dict(preview.get("column_map") or {})
     feature_schema = dict(preview.get("feature_schema") or {})
+    schema_cols = dict((feature_schema.get("columns") or {}))
+    raw_map = preview.get("column_map") or {}
+    column_map: dict = {}
+    if isinstance(raw_map, Mapping) and isinstance(raw_map.get("entries"), list):
+        for entry in raw_map.get("entries") or []:
+            if not isinstance(entry, Mapping):
+                continue
+            name = str(entry.get("internal") or entry.get("original") or "")
+            if not name:
+                continue
+            meta = dict(schema_cols.get(name) or {})
+            meta.setdefault("original_name", entry.get("original") or name)
+            if entry.get("kind"):
+                meta.setdefault("kind", entry.get("kind"))
+            if entry.get("unit"):
+                meta.setdefault("unit", entry.get("unit"))
+            column_map[name] = meta
+    elif isinstance(raw_map, Mapping):
+        for name, meta in raw_map.items():
+            if isinstance(meta, Mapping):
+                column_map[str(name)] = dict(meta)
+    if not column_map:
+        column_map = {str(k): dict(v) if isinstance(v, Mapping) else {"original_name": str(k)} for k, v in schema_cols.items()}
     issues = list(preview.get("issues") or [])
     columns = list(column_map.keys())
     if not columns:
-        columns = list((feature_schema.get("columns") or {}).keys())
+        columns = list(schema_cols.keys())
     return {
         "columns": columns,
         "column_map": column_map,

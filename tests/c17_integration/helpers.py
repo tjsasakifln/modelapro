@@ -63,6 +63,66 @@ def analytic_point(*, area: float, slope: float = 10000.0, intercept: float = 0.
     return intercept + slope * float(area)
 
 
+# Not on the analytic_linear_csv grid (50, 52, …, 50+2*(n-1)).
+UNIQUE_SUBJECT_AREA = 73.5
+
+
+def analytic_linear_sample_areas(*, n: int = 24) -> set[float]:
+    return {50.0 + i * 2.0 for i in range(n)}
+
+
+def analytic_bairro_csv(
+    *,
+    n_per: int = 16,
+    slope: float = 10000.0,
+    sul_add: float = 80000.0,
+    tag: str = "AB",
+) -> bytes:
+    """Identified two-bairro market: Centro = slope*area; Sul = slope*area + sul_add."""
+    lines = ["id;bairro;area;preco"]
+    for i in range(n_per):
+        area = 50.0 + i * 2.0
+        price = slope * area
+        lines.append(f"{tag}-C{i + 1:03d};Centro;{fmt_ptbr(area)};{fmt_ptbr(price)}")
+    for i in range(n_per):
+        area = 51.0 + i * 2.0
+        price = slope * area + sul_add
+        lines.append(f"{tag}-S{i + 1:03d};Sul;{fmt_ptbr(area)};{fmt_ptbr(price)}")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def analytic_bairro_point(
+    *,
+    area: float,
+    bairro: str,
+    slope: float = 10000.0,
+    sul_add: float = 80000.0,
+) -> float:
+    extra = sul_add if bairro == "Sul" else 0.0
+    return slope * float(area) + extra
+
+
+def pdf_frozen_fields(pdf_bytes: bytes) -> dict:
+    from tests.c08_report.pdf_text import extract_pdf_text, parse_frozen_lines
+
+    text = extract_pdf_text(pdf_bytes)
+    frozen = parse_frozen_lines(text)
+    return {"text": text, "frozen": frozen}
+
+
+def assert_pdf_conclusion_point(pdf_bytes: bytes, expected: float, *, tol: float = 1.0) -> None:
+    """Require the labeled conclusion field, not a digit substring of the annex."""
+    parsed = pdf_frozen_fields(pdf_bytes)
+    frozen = parsed["frozen"]
+    raw = frozen.get("MP1_POINT")
+    assert raw not in (None, "", "null"), f"MP1_POINT missing in frozen lines: {frozen}"
+    # format_snapshot_number emits 735000 or 735000.5 — never a thousands grouping.
+    observed = float(str(raw))
+    assert math.isfinite(observed), raw
+    assert abs(observed - float(expected)) < tol, f"MP1_POINT={raw!r} expected {expected}"
+    assert "Estimativa pontual (snapshot.value.point)" in parsed["text"]
+
+
 def ptbr_csv_bytes(*, n: int = 24, missing_target_at: Optional[int] = 7, tag: str = "A") -> bytes:
     lines = ["id;bairro;area;preco"]
     for row in market_rows(n=n, missing_target_at=missing_target_at):
