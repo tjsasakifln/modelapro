@@ -1,0 +1,79 @@
+{
+  "campaign_id": "C05",
+  "head_sha": null,
+  "contract_version": "MP/1",
+  "status": "INTEGRATION_PENDING",
+  "criteria": [
+    {
+      "id": "C05-A01",
+      "status": "passed",
+      "evidence": "tests/c05_search/test_a01_count_and_coverage.py; possible==262143; budget stop does not claim full objective; candidate_cols=[] errors; null selects by role"
+    },
+    {
+      "id": "C05-A02",
+      "status": "passed",
+      "evidence": "tests/c05_search/test_a02_exact_mode.py; itertools enumerator vs search_models twice; find_best_model adapter; deterministic candidate_id tie-break"
+    },
+    {
+      "id": "C05-A03",
+      "status": "passed",
+      "evidence": "tests/c05_search/test_a03_ranking.py; original_rmse ranking; no row-removal bonus; shortlist disclosure; higher grade does not waive diagnostics; C07 not called"
+    },
+    {
+      "id": "C05-A04",
+      "status": "passed",
+      "evidence": "tests/c05_search/test_a04_heuristic_diversity.py and benchmarks/c05_search/weak_conditional_predictor.py; diversity of base variables; no optimum guarantee; conditional pair generated"
+    },
+    {
+      "id": "C05-A05",
+      "status": "passed",
+      "evidence": "tests/c05_search/test_a05_cancel_progress_profile.py; cancel before completion; non-decreasing progress in [0,1]; local RSS/time; cache key includes subject and sample fingerprint"
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c05_search tests/test_optimal_combination.py -q --tb=short",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c05_search/test_a01_count_and_coverage.py -q --tb=short",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c05_search/test_a02_exact_mode.py -q --tb=short",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c05_search/test_a03_ranking.py -q --tb=short",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c05_search/test_a04_heuristic_diversity.py -q --tb=short",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c05_search/test_a05_cancel_progress_profile.py -q --tb=short",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 benchmarks/c05_search/profile_runner.py",
+      "exit_code": 0
+    }
+  ],
+  "unmet_dependencies": [
+    "C04 modules.model_builder.fit_candidate / evaluate_fitted not exported at c92949e; search consumes them when present",
+    "C06 modules.target_transform.inverse_target_prediction not exported at c92949e; y-transform original-scale path uses a labeled test fixture or ln-exp fallback",
+    "C02 PreparedDataset / feature_schema production object; tests use MP/1 mappings",
+    "C07 evaluate_procedure is intentionally not invoked from C05",
+    "C10/C08/C09/C13/C14 must wire search_models / search_audit / alternatives / cache key (see handoff.json)"
+  ],
+  "deferred_items": [
+    "Worker/API still call find_best_model; live product wiring is C10/C11",
+    "No percentage performance claims; local profile only"
+  ],
+  "review_findings": [
+    "Self-review: ranking no longer uses (grau, r2_adjusted) as the preference key; foreign tests that assumed that order are outside C05 write scope.",
+    "Self-review: approximate search is not a proven prune; exact_optimum_guaranteed stays false without a proof.",
+    "Author review only; no independent reviewer in this session."
+  ]
+}
