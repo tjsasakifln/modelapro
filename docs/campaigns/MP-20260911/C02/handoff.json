@@ -45,7 +45,7 @@
   },
   "contract_version": "MP/1",
   "dependency_pr": null,
-  "head_sha": null,
+  "head_sha": "797c75dbec8d0b34739bca40bbcf90dcf4164b94",
   "acceptance_case": "tests/c02_schema/test_a01_shared_encoder.py::test_a01_bairro_and_formatted_numeric_share_encoder",
   "notes": [
     "candidate_cols=[] is an explicit error (no variables authorized). candidate_cols=null selects by role=predictor.",
