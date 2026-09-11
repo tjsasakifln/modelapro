@@ -17,13 +17,13 @@ HEAD deste texto é gravado no comentário da PR **depois** do commit.
 - P04-A01: independent numeric reference on BASE_SHA (43 passed × 2).
 - P04-A02: metrics distinguish machine time, robot actions, and unrun human time.
 - P04-A03: P01 #19, P02 #18, P03 #21 incorporated `--no-ff` after SEALED comments. No writes to main/#17/producer branches.
-- P04-A04: HTTP/worker/PDF/mutation/restore/batch on the composed candidate (104 passed × 2). Playwright NOT_RUN (import failed); that is not “no browser”.
-- P04-A05: C18 triggers fire; first-increment GHA success; wheel outside checkout `wheel_eval_ok` 735000 from `site-packages`. Mutations fail for the intended cause.
+- P04-A04: HTTP/worker/PDF/mutation/restore/batch (104 passed × 2 on `200816f`). Playwright+Chromium installed locally; composed browser path passed in `tests/pro_workflow/p04` (29 passed including browser). Screenshot: combined-browser.png.
+- P04-A05: C18 triggers fire. First increment GHA success. GHA on `113cccb` install-eval **success**, wide suite **failure** (C16 UI labels, C17 dossier `ok`, P02 Playwright). This follow-up commit addresses those. Wheel `wheel_eval_ok` 735000 from `site-packages`.
 
 ## What remains
 
 - Human pilot 5–10 authorized real cases: **not run**.
-- Playwright Streamlit loopback: **NOT_RUN** here.
+- GHA wide suite on the Playwright/C17-fix HEAD: pending after push. STATUS=`PARTIAL_EVIDENCE` until that run is green.
 - Absolute readiness / full NBR / Windows PDF: **not claimed**.
 - This status does **not** authorize merge or laudo.
 

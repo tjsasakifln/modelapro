@@ -5,7 +5,7 @@
   "branch": "mp-pro-20260911/p04-referencia-consolidacao",
   "pr_base": "mp-20260911/integracao-final",
   "pr_number": 20,
-  "status": "COMBINED_INCREMENT_VERIFIED",
+  "status": "PARTIAL_EVIDENCE",
   "local_classification": "IMPLEMENTED_VERIFIED",
   "head_note": "HEAD recorded in the PR comment after this commit, not inside it.",
   "implemented": [

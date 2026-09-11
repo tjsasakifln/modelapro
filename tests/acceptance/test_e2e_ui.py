@@ -132,8 +132,8 @@ class TestE2EUiStreamlit:
                 page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_selector("input[type=file]", state="attached", timeout=30000)
                 page.locator("input[type=file]").first.set_input_files(str(csv_path))
-                page.wait_for_selector("text=Variável-alvo", timeout=45000)
-                page.wait_for_selector("text=Informar o avaliando", timeout=15000)
+                page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=45000)
+                page.wait_for_selector("text=1. Preparação da amostra", timeout=15000)
 
                 area = page.get_by_placeholder("ex.: 73,5")
                 assert area.count() >= 1, (
@@ -155,7 +155,9 @@ class TestE2EUiStreamlit:
                 retried = False
                 for _ in range(40):
                     body = page.inner_text("body")
-                    if "Cálculo concluído" in body and ("735.000,00" in body or "735000" in body):
+                    if ("Valor da avaliação" in body or "Cálculo disponível" in body) and (
+                        "735.000,00" in body or "735000" in body or "735.000" in body
+                    ):
                         break
                     if (
                         not retried
@@ -174,7 +176,7 @@ class TestE2EUiStreamlit:
                 (tmp_path / "ui_body.txt").write_text(body, encoding="utf-8")
                 _copy_evidence(tmp_path / "ui_body.txt", "ui_body.txt")
                 _copy_evidence(tmp_path / "api.log", "ui_api.log")
-                assert "Cálculo concluído" in body, (
+                assert "Valor da avaliação" in body or "Cálculo disponível" in body, (
                     "UI did not reach a completed calculation; body=" + body[:2000]
                 )
                 assert "735.000,00" in body or "735000" in body, body[:1200]

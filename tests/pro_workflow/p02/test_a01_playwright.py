@@ -185,13 +185,23 @@ def _drive_two_files(sync_playwright, ui_port: int, csv_path: Path, xlsx_path: P
 def _upload_and_run(page, path: Path, tag: str) -> None:
     file_input = page.locator("input[type='file']").first
     file_input.set_input_files(str(path))
-    page.wait_for_timeout(2500)
-    # Streamlit widgets: fill subject area if present, then execute.
-    area = page.get_by_label("área", exact=False)
+    try:
+        page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=60000)
+    except Exception:
+        file_input.set_input_files(str(path))
+        page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=60000)
+    area = page.get_by_placeholder("ex.: 73,5")
     if area.count():
         area.first.fill("73,5")
     execute = page.get_by_role("button", name="Executar avaliação")
     if execute.count():
         execute.first.click()
-    page.wait_for_timeout(4000)
+    for _ in range(20):
+        body = page.inner_text("body")
+        if "735" in body and ("Valor da avaliação" in body or "Cálculo disponível" in body):
+            break
+        refresh = page.get_by_role("button", name="Atualizar estado")
+        if refresh.count() >= 1 and refresh.first.is_enabled():
+            refresh.first.click()
+        page.wait_for_timeout(1500)
     page.screenshot(path=str(SCRATCH / "p02-a01" / f"result-{tag}.png"))
