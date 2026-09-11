@@ -269,7 +269,7 @@ class TestEIndependentValidation:
                 "budget": 16,
                 "objective": "aic",
                 "seed": 17,
-                "target_degree": 1,
+
                 "y_transformations": ["identity"],
             },
         )
@@ -359,7 +359,7 @@ class TestEIndependentValidation:
                     "budget": 16,
                     "objective": "aic",
                     "seed": 17,
-                    "target_degree": 1,
+    
                     "y_transformations": ["identity"],
                 },
             ),
@@ -499,7 +499,7 @@ class TestHIsolationBatch:
                 "budget": 32,
                 "objective": "aic",
                 "seed": 17,
-                "target_degree": 1,
+
                 "y_transformations": ["identity"],
             },
         )
@@ -562,7 +562,7 @@ class TestISearchCoverage:
                 "budget": 64,
                 "objective": "aic",
                 "seed": 17,
-                "target_degree": 1,
+
                 "y_transformations": ["identity"],
             }),
             subject=subject_raw(),
@@ -580,7 +580,7 @@ class TestISearchCoverage:
                 "budget": 3,
                 "objective": "aic",
                 "seed": 17,
-                "target_degree": 1,
+
                 "y_transformations": ["identity"],
             }),
             subject=subject_raw(),

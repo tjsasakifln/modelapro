@@ -50,7 +50,7 @@ spec = {
     "outlier_policy": {"mode": "report_only", "reviewed_exclusions": []},
     "search_policy": {
         "mode": "exact", "budget": 16, "objective": "aic", "seed": 17,
-        "target_degree": 1, "y_transformations": ["identity"],
+        "y_transformations": ["identity"],
     },
     "evaluation_policy": {"method": "none", "partitions": None, "groups": None, "seed": 17},
     "reference_date": "2024-06-01",

@@ -4,7 +4,7 @@
   "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
   "branch": "mp-pro-20260911/p04-referencia-consolidacao",
   "pr_base": "mp-20260911/integracao-final",
-  "pr_number": null,
+  "pr_number": 20,
   "status": "LOCAL_READY_COMPOSITION_PENDING",
   "local_classification": "IMPLEMENTED_VERIFIED",
   "head_note": "HEAD recorded in the PR comment after this commit, not inside it.",
@@ -46,9 +46,9 @@
     "exit_codes": "recorded in evidence.md after execution"
   },
   "producer_dependencies": {
-    "P01": {"pr": null, "sealed": false, "needed_for": ["minimum_fundamentacao_grade", "provenance.workflow_context", "model.formula"]},
-    "P02": {"pr": null, "sealed": false, "needed_for": ["browser path, file-swap invalidation, required clicks"]},
-    "P03": {"pr": null, "sealed": false, "needed_for": ["report_context series, formula in PDF"]}
+    "P01": {"pr": 19, "sealed": true, "head": "18a2dc0a6b5b315d3e3a5707fa186f6cc0820ad1", "incorporated": true},
+    "P02": {"pr": 18, "sealed": true, "head": "a0b4b4a8767372ce83d7a42b00d80aa488767194", "incorporated": true},
+    "P03": {"pr": null, "sealed": false, "needed_for": ["report_context series", "combined browser/PDF candidate"]}
   },
   "limitations": [
     "P01/P02/P03 PRs were not published at first increment; no SEALED HEADs to incorporate",

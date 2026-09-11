@@ -471,7 +471,7 @@ def pinned_identity_spec(**overrides: Any) -> Dict[str, Any]:
             "budget": 16,
             "objective": "aic",
             "seed": 17,
-            "target_degree": 1,
+            # After P01 SEALED, target_degree is a grade alias, not a ranking knob.
             "y_transformations": ["identity"],
         },
         "evaluation_policy": {"method": "none", "partitions": None, "groups": None, "seed": 17},

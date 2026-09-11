@@ -161,7 +161,7 @@ def request_spec(**overrides: Any) -> dict:
             "budget": 64,
             "objective": "aic",
             "seed": 17,
-            "target_degree": 1,
+            # P01 SEALED: target_degree aliases minimum_fundamentacao_grade.
             "y_transformations": ["identity"],
         },
         "evaluation_policy": {

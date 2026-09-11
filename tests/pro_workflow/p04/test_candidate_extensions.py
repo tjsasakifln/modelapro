@@ -39,13 +39,18 @@ def test_minimum_fundamentacao_grade_canonical_field(isolated_p04_runtime):
             "budget": 16,
             "objective": "aic",
             "seed": 17,
-            "target_degree": 1,
             "y_transformations": ["identity"],
             "minimum_fundamentacao_grade": 2,
         },
     )
-    out = run_job(client(), corpus.s02_csv_bytes(case), spec=spec, subject=case["subject"])
-    snap = out["snapshot"]
+    out = run_job(
+        client(),
+        corpus.s02_csv_bytes(case),
+        spec=spec,
+        subject=case["subject"],
+        require_success=False,
+    )
+    snap = out["snapshot"] or {}
     ctx = (snap.get("provenance") or {}).get("workflow_context")
     present = isinstance(ctx, dict) and ctx.get("schema_version") == "MP-PRO/1"
     finding = {

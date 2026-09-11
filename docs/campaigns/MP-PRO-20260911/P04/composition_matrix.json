@@ -1,51 +1,50 @@
 {
   "campaign_id": "MP-PRO-20260911/P04",
-  "generated_at": "2026-09-11T21:34:28.715738+00:00",
   "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "p04_first_increment": "079b05d29fdf409afeeba884ddade7bc1868016b",
+  "note": "P01 and P02 incorporated with git merge --no-ff after SEALED comments. P03 not published. Connection fix on P04: stop sending historical target_degree as a ranking knob because P01 aliases it to minimum_fundamentacao_grade.",
   "rows": {
     "P01": {
       "id": "P01",
       "prefix": "[MP-PRO-20260911/P01]",
       "branch": "mp-pro-20260911/p01-nucleo-reuso",
-      "pr": null,
-      "url": null,
-      "head": null,
-      "base": null,
-      "state": null,
-      "draft": null,
-      "sealed": false,
-      "sealed_head": null,
-      "contracts": [],
-      "evidence": []
+      "pr": 19,
+      "url": "https://github.com/tjsasakifln/modelapro/pull/19",
+      "head": "18a2dc0a6b5b315d3e3a5707fa186f6cc0820ad1",
+      "base": "mp-20260911/integracao-final",
+      "sealed": true,
+      "sealed_comment": "https://github.com/tjsasakifln/modelapro/pull/19#issuecomment-5640960159",
+      "incorporated_on_p04": true,
+      "contracts": [
+        "MP/1 RequestSpec/ResultSnapshot",
+        "MP-PRO/1 provenance.workflow_context",
+        "search_policy.minimum_fundamentacao_grade"
+      ],
+      "evidence": ["docs/campaigns/MP-PRO-20260911/P01/"]
     },
     "P02": {
       "id": "P02",
       "prefix": "[MP-PRO-20260911/P02]",
       "branch": "mp-pro-20260911/p02-rotina-interface",
-      "pr": null,
-      "url": null,
-      "head": null,
-      "base": null,
-      "state": null,
-      "draft": null,
-      "sealed": false,
-      "sealed_head": null,
-      "contracts": [],
-      "evidence": []
+      "pr": 18,
+      "url": "https://github.com/tjsasakifln/modelapro/pull/18",
+      "head": "a0b4b4a8767372ce83d7a42b00d80aa488767194",
+      "base": "mp-20260911/integracao-final",
+      "sealed": true,
+      "sealed_comment": "https://github.com/tjsasakifln/modelapro/pull/18#issuecomment-5640941856",
+      "incorporated_on_p04": true,
+      "contracts": ["MP/1 HTTP jobs/preview", "canonical minimum_fundamentacao_grade emission"],
+      "evidence": ["docs/campaigns/MP-PRO-20260911/P02/"]
     },
     "P03": {
       "id": "P03",
       "prefix": "[MP-PRO-20260911/P03]",
       "branch": "mp-pro-20260911/p03-relatorio-tecnico",
       "pr": null,
-      "url": null,
       "head": null,
-      "base": null,
-      "state": null,
-      "draft": null,
       "sealed": false,
-      "sealed_head": null,
-      "contracts": [],
+      "incorporated_on_p04": false,
+      "contracts": ["report_context series", "PDF frozen MP1_* lines"],
       "evidence": []
     }
   }
