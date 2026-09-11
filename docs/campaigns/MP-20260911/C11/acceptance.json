@@ -14,7 +14,7 @@
     {
       "id": "C11-A02",
       "status": "PASS",
-      "evidence": "tests/c11_persistence/test_a02_restart_and_abandoned.py: revisions reload; abandoned running -> interrupted never succeeded; complete idempotency reuses; no resume_search"
+      "evidence": "tests/c11_persistence/test_a02_restart_and_abandoned.py: revisions reload; abandoned running -> interrupted never succeeded; complete idempotency reuses; no resume_search. tests/c11_persistence/test_a02_a04_live_ws_does_not_interrupt.py: JobStore() without configure_default then JobStore.default() and /ws leave a live running job running"
     },
     {
       "id": "C11-A03",
@@ -24,7 +24,7 @@
     {
       "id": "C11-A04",
       "status": "PASS",
-      "evidence": "tests/c11_persistence/test_a04_ws_isolation.py: FakeWebSocket + real /ws TestClient; two job tokens isolated; dead socket pruned; unscoped send_notification does not broadcast"
+      "evidence": "tests/c11_persistence/test_a04_ws_isolation.py: FakeWebSocket + real /ws TestClient; two job tokens isolated; dead socket pruned; unscoped send_notification does not broadcast. test_a02_a04_live_ws_does_not_interrupt.py drives /ws against JobStore() without configure_default"
     },
     {
       "id": "C11-A05",
@@ -36,12 +36,12 @@
     {
       "command": "python3 -m pytest tests/c11_persistence/ -q",
       "exit_code": 0,
-      "note": "run 1, 37 passed"
+      "note": "run 1, 39 passed"
     },
     {
       "command": "python3 -m pytest tests/c11_persistence/ -q",
       "exit_code": 0,
-      "note": "run 2, 37 passed"
+      "note": "run 2, 39 passed"
     },
     {
       "command": "python3 fresh-process JobStore/ProjectStore/LocalTaskRunner roundtrip",
@@ -83,6 +83,11 @@
       "source": "author",
       "severity": "info",
       "finding": "Workspace contained concurrent campaign files; only C11 write-list paths are committed on this branch."
+    },
+    {
+      "source": "author",
+      "severity": "info",
+      "finding": "Fixed: JobStore() now becomes JobStore.default(); recover_on_open is once per process/root so /ws cannot interrupt a live running job. Explicit recover_abandoned still runs on simulated process reopen."
     }
   ]
 }

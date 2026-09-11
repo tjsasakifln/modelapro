@@ -65,7 +65,11 @@ class LocalTaskRunner:
             thread_name_prefix="c11-runner",
         )
         if recover_abandoned:
-            self.store.recover_abandoned(live_job_ids=())
+            recover = getattr(self.store, "recover_on_open", None)
+            if callable(recover):
+                recover(live_job_ids=self.live_job_ids())
+            else:
+                self.store.recover_abandoned(live_job_ids=self.live_job_ids())
 
     def submit(self, job_id: str, callable: WorkFn) -> str:
         """Queue work for an already-persisted job. Does not create identity."""

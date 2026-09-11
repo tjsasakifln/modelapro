@@ -24,6 +24,9 @@ async def websocket_endpoint(
     multi-tenant cloud login.
     """
     await websocket.accept()
+    # Reuse the process JobStore. A new JobStore() here used to run
+    # recover_abandoned(live_job_ids=()) and flip a live running job to
+    # interrupted on the first /ws connection.
     store = JobStore.default()
     if not job_id or not token:
         job_id, token = await _credentials_from_first_message(websocket, job_id, token)

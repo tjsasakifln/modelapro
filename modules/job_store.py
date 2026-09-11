@@ -60,8 +60,9 @@ _UNSAFE_MARKERS = frozenset(
 
 _root_locks_guard = threading.Lock()
 _root_locks: Dict[str, threading.RLock] = {}
-_default_guard = threading.Lock()
+_default_guard = threading.RLock()
 _default_store: Optional["JobStore"] = None
+_auto_recovered_roots: Set[str] = set()
 
 
 class PersistenceError(Exception):
@@ -604,8 +605,32 @@ class JobStore:
         self.root = init_store_root(chosen)
         self.db_path = self.root / STORE_DB_NAME
         self._lock = lock_for_root(self.root)
+        self._adopt_as_process_default()
         if recover_abandoned:
-            self.recover_abandoned(live_job_ids=())
+            self.recover_on_open(live_job_ids=())
+
+    def _adopt_as_process_default(self) -> None:
+        """First live instance in the process becomes JobStore.default()."""
+        global _default_store
+        with _default_guard:
+            if _default_store is None:
+                _default_store = self
+
+    def recover_on_open(
+        self, live_job_ids: Optional[Iterable[str]] = None
+    ) -> Sequence[str]:
+        """Recover abandoned ``running`` jobs at most once per process/root.
+
+        Explicit ``recover_abandoned`` / ``interrupt_stale_running`` still
+        always run. ``/ws`` and extra ``JobStore()`` clones must not flip a
+        live running job to ``interrupted``.
+        """
+        key = str(self.root.resolve())
+        with _default_guard:
+            if key in _auto_recovered_roots:
+                return []
+            _auto_recovered_roots.add(key)
+        return self.recover_abandoned(live_job_ids=live_job_ids)
 
     @classmethod
     def configure_default(
@@ -622,17 +647,19 @@ class JobStore:
 
     @classmethod
     def default(cls) -> "JobStore":
-        global _default_store
+        """Reuse the process store. Does not open a recovering clone."""
         with _default_guard:
-            if _default_store is None:
-                _default_store = cls(recover_abandoned=True)
-            return _default_store
+            existing = _default_store
+        if existing is not None:
+            return existing
+        return cls(recover_abandoned=True)
 
     @classmethod
     def reset_default(cls) -> None:
         global _default_store
         with _default_guard:
             _default_store = None
+            _auto_recovered_roots.clear()
 
     def create(
         self,
