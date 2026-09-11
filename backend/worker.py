@@ -658,6 +658,249 @@ def _model_identity(winner_fit: Any, prepared: Any, assessment: Any) -> dict:
     }
 
 
+def _first_present(*values: Any) -> Any:
+    """Return the first value that is not None. DataFrames are not bool-tested."""
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (list, tuple)):
+        return len(value)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number)
+
+
+def _frame_columns(frame: Any) -> List[str]:
+    if frame is None:
+        return []
+    columns = getattr(frame, "columns", None)
+    if columns is not None:
+        return [str(c) for c in list(columns)]
+    if isinstance(frame, Mapping):
+        return [str(k) for k in frame.keys()]
+    return []
+
+
+def _column_values(frame: Any, name: str) -> List[Any]:
+    if frame is None:
+        return []
+    series = None
+    try:
+        if hasattr(frame, "columns") and name in list(frame.columns):
+            series = frame[name]
+        elif isinstance(frame, Mapping) and name in frame:
+            series = frame[name]
+    except Exception:
+        return []
+    if series is None:
+        return []
+    try:
+        return list(series)
+    except TypeError:
+        return [series]
+
+
+def _axes_from_fit(winner_fit: Any, prepared: Any, subject_raw: Optional[Mapping[str, Any]]) -> List[dict]:
+    """Item-4 axes from CandidateFit.base_frame (fallback: prepared.base_frame / X)."""
+    raw = dict(subject_raw or {})
+    nested = _get(winner_fit, "candidate_fit")
+    frame = _first_present(
+        _get(winner_fit, "base_frame"),
+        _get(nested, "base_frame") if nested is not None else None,
+        _get(prepared, "base_frame"),
+        _get(winner_fit, "X_design"),
+        _get(prepared, "X"),
+    )
+    spec = _as_dict(_get(winner_fit, "candidate_spec")) or {}
+    names = [str(n) for n in (spec.get("base_variables") or spec.get("features") or [])]
+    frame_cols = _frame_columns(frame)
+    intercept_names = {"const", "intercept", "Intercept"}
+    if not names:
+        names = [c for c in frame_cols if c not in intercept_names]
+    for key in raw:
+        if key not in names and key in frame_cols:
+            names.append(str(key))
+    schema = _as_dict(_get(winner_fit, "feature_schema") or _get(prepared, "feature_schema")) or {}
+    columns_meta = schema.get("columns") if isinstance(schema.get("columns"), Mapping) else {}
+    groups = schema.get("groups") if isinstance(schema.get("groups"), Mapping) else {}
+    axes: List[dict] = []
+    seen = set()
+    for name in names:
+        if name in seen or name in intercept_names:
+            continue
+        seen.add(name)
+        values = _column_values(frame, name)
+        if not values:
+            group = groups.get(name) if isinstance(groups, Mapping) else None
+            if isinstance(group, Mapping):
+                values = _column_values(frame, str(group.get("base_variable") or name))
+        meta = columns_meta.get(name) if isinstance(columns_meta, Mapping) else None
+        kind_hint = str((meta or {}).get("kind") or "").lower()
+        nums: List[float] = []
+        others: List[Any] = []
+        for item in values:
+            try:
+                number = float(item)
+            except (TypeError, ValueError):
+                if item is not None and str(item) != "":
+                    others.append(item)
+                continue
+            if math.isfinite(number):
+                nums.append(number)
+            else:
+                others.append(item)
+        qualitative = kind_hint in {"categorical", "qualitative", "dummy", "indicator"} or (
+            others and not nums
+        )
+        if qualitative:
+            sample_values = []
+            for item in values:
+                if item is None:
+                    continue
+                text = str(item)
+                if text and text not in sample_values:
+                    sample_values.append(text)
+            aval = raw.get(name)
+            axes.append(
+                {
+                    "name": name,
+                    "variable": name,
+                    "kind": "categorical",
+                    "avaliando_value": aval,
+                    "sample_values": sample_values,
+                    "categories": sample_values,
+                }
+            )
+            continue
+        if not nums:
+            continue
+        aval = raw.get(name)
+        aval_f = None
+        try:
+            aval_f = float(aval) if aval is not None and aval != "" else None
+        except (TypeError, ValueError):
+            aval_f = None
+        axes.append(
+            {
+                "name": name,
+                "variable": name,
+                "kind": "quantitative",
+                "avaliando_value": aval_f if aval_f is not None else aval,
+                "sample_min": min(nums),
+                "sample_max": max(nums),
+                "n": len(nums),
+            }
+        )
+    return axes
+
+
+def _pvalues_from_fit(winner_fit: Any) -> Dict[str, Any]:
+    records = _get(winner_fit, "coefficient_records") or []
+    pvalues: Dict[str, Any] = {}
+    if isinstance(records, list):
+        for rec in records:
+            if isinstance(rec, Mapping) and rec.get("name") is not None:
+                pvalues[str(rec["name"])] = rec.get("pvalue")
+    if pvalues:
+        return pvalues
+    diagnostics = _as_dict(_get(winner_fit, "diagnostics")) or {}
+    nested = diagnostics.get("pvalues")
+    if isinstance(nested, Mapping):
+        return {str(k): v for k, v in nested.items()}
+    return pvalues
+
+
+def _normative_context_from_fit(
+    winner_fit: Any,
+    prepared: Any,
+    assessment: Any,
+    spec: Mapping[str, Any],
+    subject_raw: Optional[Mapping[str, Any]],
+    predict_original: Callable[[Any], Any],
+) -> Dict[str, Any]:
+    """Build a C03 context from the live CandidateFit + prepared sample.
+
+    Nested search-record `assessment.normative` is not a substitute: it may
+    lack axes, integer n/k, p-values and a `{point}` predict_original.
+    """
+    diagnostics = _as_dict(_get(winner_fit, "diagnostics")) or {}
+    used_ids = _row_ids(_get(winner_fit, "used_row_ids") or _get(prepared, "row_ids"))
+    n = _int_or_none(diagnostics.get("n"))
+    if n is None:
+        n = len(used_ids)
+    k = _int_or_none(diagnostics.get("k"))
+    intercept = diagnostics.get("has_intercept")
+    spec_c = _as_dict(_get(winner_fit, "candidate_spec")) or {}
+    if intercept is None:
+        intercept = spec_c.get("intercept")
+    if k is None:
+        cols = diagnostics.get("design_columns") or _frame_columns(
+            _first_present(_get(winner_fit, "X_design"), _get(prepared, "X"))
+        )
+        if cols:
+            intercept_cols = [c for c in cols if str(c).lower() in {"const", "intercept"}]
+            drop = 1 if intercept or intercept_cols else 0
+            k = max(0, len(cols) - drop)
+        else:
+            coeffs = _json_coeffs(winner_fit)
+            drop = 1 if intercept or "const" in coeffs else 0
+            k = max(0, len(coeffs) - drop) if coeffs else None
+    axes = _axes_from_fit(winner_fit, prepared, subject_raw)
+    value_block = _as_dict(_get(assessment, "value")) or {}
+    nested_norm = _as_dict(_get(assessment, "normative")) or {}
+    precisao = nested_norm.get("precisao") if isinstance(nested_norm.get("precisao"), Mapping) else {}
+    amplitude = precisao.get("amplitude_pct") if isinstance(precisao, Mapping) else None
+    if amplitude is None and value_block.get("point") and isinstance(value_block.get("mean_ci80"), Mapping):
+        point = _point_from(value_block)
+        bounds = value_block.get("mean_ci80") or {}
+        try:
+            width = abs(float(bounds.get("upper")) - float(bounds.get("lower")))
+            if point not in (0, None) and math.isfinite(point):
+                amplitude = width / abs(point) * 100.0
+        except (TypeError, ValueError):
+            amplitude = None
+    statistical = _as_dict(_get(assessment, "statistical")) or {}
+    statistical = dict(statistical)
+    statistical.setdefault("n", n)
+    statistical.setdefault("k", k)
+    statistical.setdefault("automatic_selection", False)
+    return {
+        "n": n,
+        "k": k,
+        "intercept": intercept,
+        "sample": {"used": used_ids, "n": n, "k": k},
+        "X": _first_present(_get(winner_fit, "X_design"), _get(prepared, "X")),
+        "y": _first_present(_get(winner_fit, "y_design"), _get(prepared, "y")),
+        "subject_raw": subject_raw,
+        "predict_original": predict_original,
+        "pvalues": _pvalues_from_fit(winner_fit),
+        "f_pvalue": diagnostics.get("f_pvalue"),
+        "amplitude_pct": amplitude,
+        "value": value_block,
+        "mean_ci80": value_block.get("mean_ci80") if isinstance(value_block, Mapping) else None,
+        "prediction_interval": value_block.get("prediction_interval") if isinstance(value_block, Mapping) else None,
+        "central_estimate": _point_from(assessment),
+        "axes": axes,
+        "extrapolation_details": axes,
+        "documentary": spec.get("declared_documentary") or spec.get("documentary") or {},
+        "request_spec": spec,
+        "used_row_ids": used_ids,
+        "statistical": statistical,
+        "estimand": value_block.get("estimand") or _get(assessment, "estimand"),
+        "feature_names": diagnostics.get("design_columns"),
+    }
+
+
 def compose_preview(
     *,
     file_bytes: bytes,
@@ -853,43 +1096,21 @@ def compose_valuation_job(
         return {"point": _point_from(result)}
 
     emit(STAGE_NORMATIVE, None)
-    # Prefer C04's already-built NormativeAssessment. A second C03 call with a
-    # count-dict as n would overwrite item 2/4 with incomplete context.
-    normative = _get(assessment, "normative")
-    if normative is None and callable(peers.get("assess_normative")):
-        diagnostics = _as_dict(_get(winner_fit, "diagnostics")) or {}
-        used_ids = _row_ids(_get(winner_fit, "used_row_ids") or _get(prepared, "row_ids"))
-        value_block = _as_dict(_get(assessment, "value")) or {}
-        records = _get(winner_fit, "coefficient_records") or []
-        pvalues = {}
-        if isinstance(records, list):
-            for rec in records:
-                if isinstance(rec, Mapping) and rec.get("name") is not None:
-                    pvalues[str(rec["name"])] = rec.get("pvalue")
-        normative = peers["assess_normative"]({
-            "n": diagnostics.get("n") or len(used_ids),
-            "k": diagnostics.get("k"),
-            "intercept": diagnostics.get("has_intercept"),
-            "sample": {"used": used_ids, "n": diagnostics.get("n"), "k": diagnostics.get("k")},
-            "X": _get(winner_fit, "X_design") or _get(prepared, "X"),
-            "y": _get(winner_fit, "y_design") or _get(prepared, "y"),
-            "subject_raw": context["subject_raw"],
-            "predict_original": predict_original,
-            "pvalues": pvalues,
-            "f_pvalue": diagnostics.get("f_pvalue"),
-            "amplitude_pct": (_as_dict(_get(assessment, "normative")) or {}).get("precisao", {}).get("amplitude_pct")
-            if isinstance((_as_dict(_get(assessment, "normative")) or {}).get("precisao"), Mapping)
-            else None,
-            "value": value_block,
-            "mean_ci80": value_block.get("mean_ci80") if isinstance(value_block, Mapping) else None,
-            "prediction_interval": value_block.get("prediction_interval") if isinstance(value_block, Mapping) else None,
-            "central_estimate": _point_from(assessment),
-            "axes": diagnostics.get("axes") or [],
-            "documentary": spec.get("declared_documentary") or spec.get("documentary") or {},
-            "request_spec": spec,
-            "used_row_ids": used_ids,
-            "statistical": _as_dict(_get(assessment, "statistical")) or {},
-        })
+    # Always feed C03 from the live CandidateFit + prepared sample. Nested
+    # assessment.normative from a partial search record is not sufficient.
+    if callable(peers.get("assess_normative")):
+        normative = peers["assess_normative"](
+            _normative_context_from_fit(
+                winner_fit,
+                prepared,
+                assessment,
+                spec,
+                context.get("subject_raw"),
+                predict_original,
+            )
+        )
+    else:
+        normative = _get(assessment, "normative")
     normative_issues = _issue_list(normative)
     if _has_error_issues(normative_issues):
         raise CompositionError("assess_normative failed", normative_issues)
@@ -1150,6 +1371,13 @@ def _map_validation(normative: Any, assessment: Any, procedure: Any = None) -> d
         "verified": False,
     }
     statistical = _as_dict(a.get("statistical")) or _as_dict(n.get("statistical")) or {}
+    statistical = dict(statistical or {})
+    if n.get("n") is not None:
+        statistical.setdefault("n", n.get("n"))
+    if n.get("k") is not None:
+        statistical.setdefault("k", n.get("k"))
+    if n.get("intercept") is not None:
+        statistical.setdefault("intercept", n.get("intercept"))
     if procedure is not None:
         proc = _as_dict(procedure) or {}
         statistical = dict(statistical)
@@ -1199,10 +1427,20 @@ def _json_safe_alternatives(alternatives: Any) -> List[dict]:
     out: List[dict] = []
     if not alternatives:
         return out
+    drop = (
+        "model_object",
+        "base_frame",
+        "candidate_fit",
+        "X_design",
+        "y_design",
+        "_legacy_model_result",
+        "_rank_tuple",
+        "_peer_fit",
+    )
     for item in alternatives:
         d = _as_dict(item) or {}
-        d.pop("model_object", None)
-        d.pop("base_frame", None)
+        for key in drop:
+            d.pop(key, None)
         out.append(d)
     return out
 

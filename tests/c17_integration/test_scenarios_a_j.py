@@ -207,6 +207,21 @@ class TestCNormativeExtrapolation:
         assert snap["target"]["unit"] == ""
         assert snap["sample"]["used"] >= 1
         assert snap["sample"]["used"] + snap["sample"]["excluded"] <= snap["sample"]["received"]
+        codes = {i.get("code") for i in snap.get("issues") or []}
+        assert "item4_axes_missing" not in codes
+        assert "k_unknown" not in codes
+        fund = validation.get("fundamentacao") or {}
+        item4 = next((i for i in (fund.get("items") or []) if i.get("item") == 4), None)
+        assert item4 is not None
+        assert "axes_missing" not in (item4.get("reasons") or [])
+        calc = item4.get("calculation") or {}
+        assert calc.get("out_of_measure") or calc.get("extrapolated") or item4.get("grade") == 0
+        stat = validation.get("statistical") or {}
+        n_eff = stat.get("n")
+        k_eff = stat.get("k")
+        assert n_eff == snap["sample"]["used"]
+        assert k_eff is not None and int(k_eff) >= 1
+        assert snap["sample"]["used"] == len(snap["sample"]["used_row_ids"])
 
 
 class TestDInfluence:
@@ -384,8 +399,11 @@ class TestHIsolationBatch:
         grades = []
         for item in items:
             assessment = item.get("assessment") or {}
-            fund = ((assessment.get("normative") or {}).get("fundamentacao") or {})
+            normative = assessment.get("normative") or {}
+            fund = (normative.get("fundamentacao") or {})
             grades.append(fund.get("grade"))
+            documentary = normative.get("documentary") or {}
+            assert documentary.get("subject_id") == item.get("subject_id")
             if item.get("subject_id") == "s3":
                 eligibility = (assessment.get("model_eligibility") or item.get("model_eligibility") or {}).get("status")
                 assert item.get("status") in {"unsupported", "failed", "succeeded", "pending"}
@@ -395,6 +413,7 @@ class TestHIsolationBatch:
                     assert item.get("value", {}).get("point") in (None, 0) or item["value"]["point"] != points[0]
         assert len(set(str(p) for p in points)) >= 2 or any(p is None for p in points)
         assert len(set(str(g) for g in grades)) >= 1
+        assert len({item.get("subject_id") for item in items}) == 3
 
 
 class TestISearchCoverage:

@@ -841,7 +841,8 @@ def resolve_effective_n_k(
     intercept = ctx.get("intercept")
     sample = ctx.get("sample") if isinstance(ctx.get("sample"), Mapping) else {}
     if n is None and sample.get("used") is not None:
-        n = sample.get("used")
+        used = sample.get("used")
+        n = len(used) if isinstance(used, (list, tuple)) else used
     if n is None and y is not None:
         try:
             n = len(y)

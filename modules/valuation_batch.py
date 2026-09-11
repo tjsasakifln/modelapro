@@ -1029,8 +1029,12 @@ def _sample_ranges(frozen: Mapping[str, Any]) -> Dict[str, Dict[str, float]]:
         if name in out:
             continue
         info = _as_mapping(block)
-        vmin = _finite_or_none(info.get("sample_min"))
-        vmax = _finite_or_none(info.get("sample_max"))
+        vmin = _finite_or_none(
+            info.get("sample_min") if info.get("sample_min") is not None else info.get("min")
+        )
+        vmax = _finite_or_none(
+            info.get("sample_max") if info.get("sample_max") is not None else info.get("max")
+        )
         if vmin is not None and vmax is not None:
             out[str(name)] = {"min": vmin, "max": vmax}
     return out
@@ -1681,6 +1685,89 @@ def export_batch_result(batch_result: Mapping[str, Any]) -> Dict[str, Any]:
 # Per-subject evaluation
 # ---------------------------------------------------------------------------
 
+def _assess_subject_normative(
+    adapters: Mapping[str, Callable[..., Any]],
+    frozen: Mapping[str, Any],
+    candidate_fit: Mapping[str, Any],
+    subject: Mapping[str, Any],
+    raw: Mapping[str, Any],
+    extra: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """C03 with axes/n/k from the frozen sample, else builtin; stamp this subject's documentary."""
+    extra = dict(extra or {})
+    sid = subject.get("subject_id")
+    documentary_in = subject.get("documentary") if isinstance(subject.get("documentary"), Mapping) else {}
+    documentary = dict(documentary_in)
+    documentary.setdefault("subject_id", sid)
+    documentary.setdefault("origin", "subject")
+    documentary.setdefault("items", list(documentary.get("items") or []))
+
+    ranges = _sample_ranges(frozen)
+    details = extra.pop("extrapolation_details", None) or _extrapolation_details(raw, ranges)
+    axes = extra.pop("axes", None)
+    if not axes:
+        axes = []
+        for item in details:
+            axes.append(
+                {
+                    "name": item.get("variable") or item.get("name"),
+                    "variable": item.get("variable") or item.get("name"),
+                    "kind": item.get("kind") or "quantitative",
+                    "avaliando_value": item.get("avaliando_value"),
+                    "sample_min": item.get("sample_min"),
+                    "sample_max": item.get("sample_max"),
+                    "sample_values": item.get("sample_values"),
+                }
+            )
+
+    diagnostics = _as_mapping(candidate_fit.get("diagnostics"))
+    model_state = _as_mapping(candidate_fit.get("model_state"))
+    coefficients = _as_mapping(candidate_fit.get("coefficients") or model_state.get("coefficients"))
+    n = extra.pop("n", None)
+    if n is None:
+        n = candidate_fit.get("n") or model_state.get("n") or diagnostics.get("n")
+    k = extra.pop("k", None)
+    if k is None:
+        k = candidate_fit.get("k") or model_state.get("k") or diagnostics.get("k")
+    sample_item_scores = extra.pop("sample_item_scores", None)
+    if sample_item_scores is None:
+        sample_item_scores = _as_mapping(diagnostics.get("item_scores"))
+
+    ctx: Dict[str, Any] = {
+        "subject_id": sid,
+        "subject_raw": raw,
+        "documentary": documentary,
+        "sample_item_scores": sample_item_scores,
+        "sample_ranges": ranges,
+        "axes": axes,
+        "extrapolation_details": details,
+        "n": n,
+        "k": k,
+        "intercept": True if "const" in coefficients else None,
+        "normative_version": frozen.get("normative_version"),
+        "edition": frozen.get("normative_version"),
+    }
+    ctx.update(extra)
+
+    peer = adapters.get("assess_normative") or builtin_assess_normative
+    result = peer(ctx)
+    result = _as_mapping(result, "normative")
+    fund = _as_mapping(result.get("fundamentacao"), "fundamentacao")
+    # Frozen C14 fixtures declare sample_item_scores; C03 grade stays None when
+    # items 1/3 are documentary-pending. Builtin then classifies per subject.
+    if fund.get("grade") is None and sample_item_scores and peer is not builtin_assess_normative:
+        result = _as_mapping(builtin_assess_normative(ctx), "normative")
+
+    doc = result.get("documentary")
+    if not isinstance(doc, dict):
+        doc = {}
+        result["documentary"] = doc
+    doc["subject_id"] = documentary.get("subject_id") or sid
+    doc["items"] = list(documentary.get("items") or [])
+    doc.setdefault("origin", documentary.get("origin") or "subject")
+    return result
+
+
 def _evaluate_one(
     *,
     frozen: Mapping[str, Any],
@@ -1743,19 +1830,13 @@ def _evaluate_one(
         assessment["value"] = empty_value()
         assessment["used_row_ids"] = list(_as_list(candidate_fit.get("used_row_ids")))
         # Per-subject normative still runs (own grades); documentary of THIS subject only.
-        amplitude = None
-        normative = adapters["assess_normative"](
-            {
-                "subject_id": sid,
-                "subject_raw": raw,
-                "documentary": subject.get("documentary"),
-                "sample_item_scores": _as_mapping(_as_mapping(candidate_fit.get("diagnostics")).get("item_scores")),
-                "sample_ranges": _sample_ranges(frozen),
-                "amplitude_pct": amplitude,
-                "point": None,
-                "normative_version": frozen.get("normative_version"),
-                "edition": frozen.get("normative_version"),
-            }
+        normative = _assess_subject_normative(
+            adapters,
+            frozen,
+            candidate_fit,
+            subject,
+            raw,
+            extra={"amplitude_pct": None, "point": None},
         )
         assessment["normative"] = _as_mapping(normative, "normative")
         assessment["model_eligibility"] = _empty_eligibility(
@@ -1779,18 +1860,13 @@ def _evaluate_one(
         if REASON_REQUIRES_INDIVIDUAL not in eligibility_reasons:
             eligibility_reasons.append(REASON_REQUIRES_INDIVIDUAL)
         # Do not force a predicted value for an inadequate model.
-        normative = adapters["assess_normative"](
-            {
-                "subject_id": sid,
-                "subject_raw": raw,
-                "documentary": subject.get("documentary"),
-                "sample_item_scores": _as_mapping(_as_mapping(candidate_fit.get("diagnostics")).get("item_scores")),
-                "sample_ranges": _sample_ranges(frozen),
-                "amplitude_pct": None,
-                "point": None,
-                "normative_version": frozen.get("normative_version"),
-                "edition": frozen.get("normative_version"),
-            }
+        normative = _assess_subject_normative(
+            adapters,
+            frozen,
+            candidate_fit,
+            subject,
+            raw,
+            extra={"amplitude_pct": None, "point": None},
         )
         reasons = []
         for r in eligibility_reasons:
@@ -1852,13 +1928,13 @@ def _evaluate_one(
 
     mean_ci = value.get("mean_ci80") if isinstance(value.get("mean_ci80"), Mapping) else None
     amplitude = _amplitude_pct(value)
-    normative = adapters["assess_normative"](
-        {
-            "subject_id": sid,
-            "subject_raw": raw,
-            "documentary": subject.get("documentary"),
-            "sample_item_scores": _as_mapping(_as_mapping(candidate_fit.get("diagnostics")).get("item_scores")),
-            "sample_ranges": _sample_ranges(frozen),
+    normative = _assess_subject_normative(
+        adapters,
+        frozen,
+        candidate_fit,
+        subject,
+        raw,
+        extra={
             "amplitude_pct": amplitude,
             "point": point,
             "ci_lower": None if mean_ci is None else mean_ci.get("lower"),
@@ -1866,11 +1942,7 @@ def _evaluate_one(
             "predict_original": lambda subject_raw: _predict_original_callback(
                 frozen, candidate_fit, adapters, request_spec, subject_raw
             ),
-            "normative_version": frozen.get("normative_version"),
-            "edition": frozen.get("normative_version"),
-            "n": candidate_fit.get("n"),
-            "k": candidate_fit.get("k"),
-        }
+        },
     )
     assessment["value"] = value
     assessment["normative"] = _as_mapping(normative, "normative")

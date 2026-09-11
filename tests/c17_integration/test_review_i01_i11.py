@@ -142,6 +142,22 @@ class TestI04NormativeContext:
             "normative_verification_status"
         ) in {"verified_rules_listed", "partial"}
         assert snap["value"]["point"] is not None
+        codes = {i.get("code") for i in snap.get("issues") or []}
+        assert "item4_axes_missing" not in codes
+        assert "k_unknown" not in codes
+        assert "NON_JSON_VALUE" not in codes
+        assert "axes_missing" not in (item4.get("reasons") or [])
+        calc = item4.get("calculation") or {}
+        # area=150 is inside the 0.5·min–2·max window of the C17 fixture, so
+        # item 4 (b) must run in the original unit via predict_original {point}.
+        assert calc.get("y_subject") is not None
+        assert isinstance(calc.get("y_subject"), (int, float))
+        stat = (snap.get("validation") or {}).get("statistical") or {}
+        assert stat.get("n") == snap["sample"]["used"]
+        assert stat.get("k") is not None and int(stat["k"]) >= 1
+        assert snap["sample"]["used"] == len(snap["sample"]["used_row_ids"])
+        for alt in snap.get("alternatives") or []:
+            assert "candidate_fit" not in alt or alt.get("candidate_fit") is None
 
 
 class TestI05ProcedureHandle:
