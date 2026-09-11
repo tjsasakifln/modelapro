@@ -7,6 +7,7 @@
 - Branch: `mp-20260911/c09-interface_avaliador`
 - Base auditada: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`
 - HEAD da implementação: `081dc4c6590bbfef2ad3c2893efbc8e7ae67e596`
+- PR: https://github.com/tjsasakifln/modelapro/pull/10
 - Contrato: MP/1
 - `origin/main` no momento da implementação: ainda em `c92949e` (sem reconciliação adicional)
 

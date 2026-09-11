@@ -3,6 +3,7 @@
   "head_sha": "081dc4c6590bbfef2ad3c2893efbc8e7ae67e596",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
+  "pr_url": "https://github.com/tjsasakifln/modelapro/pull/10",
   "status": "INTEGRATION_PENDING",
   "criteria": [
     {
