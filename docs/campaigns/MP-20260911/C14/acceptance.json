@@ -1,0 +1,68 @@
+{
+  "campaign_id": "C14",
+  "head_sha": "1a9f80d6f69c4ea5fefad89c0523e9a3295049f3",
+  "evidence_sha": "1a9f80d6f69c4ea5fefad89c0523e9a3295049f3",
+  "pr_url": "https://github.com/tjsasakifln/modelapro/pull/9",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "result": "READY_COMPONENT",
+  "criteria": [
+    {
+      "id": "C14-A01",
+      "status": "passed",
+      "evidence": "tests/c14_batch/test_a01_domain_independence.py plus isolated consumer: in-domain succeeded/eligible/grade 3/point 350000; out-of-domain unsupported/requires_individual_analysis/grade null/point null; documentary ids not copied; subject_specific model not reused as population."
+    },
+    {
+      "id": "C14-A02",
+      "status": "passed",
+      "evidence": "tests/c14_batch/test_a02_unknown_category.py: unknown category fails only that item with code unknown_category; other items succeeded; summary succeeded=2 failed=1 pending=0; failed item remains in the list; value is null not zero."
+    },
+    {
+      "id": "C14-A03",
+      "status": "passed",
+      "evidence": "tests/c14_batch/test_a03_reuse_key.py: complete key invalidates on input/dataset/exclusion/schema/transformation/unit/policy/version/subject_constraints; filename and n_rows do not; identical inputs reproduce; ledger_hit on second call; duplicate subject_ids do not duplicate items."
+    },
+    {
+      "id": "C14-A04",
+      "status": "passed",
+      "evidence": "tests/c14_batch/test_a04_cancel_resume.py: sequential cancel after first item leaves others pending; parallel max_workers=4 on 5 subjects after first item_completed yields state=cancelled with unstarted items pending (never all-success); resume preserves completed points and evaluates only pending; progress is completed/total in [0,1]; max_workers capped at 8."
+    },
+    {
+      "id": "C14-A05",
+      "status": "passed",
+      "evidence": "tests/c14_batch/test_a05_parity.py: batch point matches individual evaluate_fitted and the linear oracle in BRL. benchmarks/c14_batch/run_benchmark.py N=40 seed=20260911 records preprocess/fit/evaluate/memory; no productivity multiplier claimed."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c14_batch/ -q",
+      "exit_code": 0,
+      "note": "17 passed; repeated immediately, 17 passed, exit 0"
+    },
+    {
+      "command": "python3 benchmarks/c14_batch/run_benchmark.py -n 40 --seed 20260911",
+      "exit_code": 0,
+      "note": "reused_oracle_mismatches=0; batch_succeeded=40/40"
+    }
+  ],
+  "unmet_dependencies": [
+    "C10 POST /projects/{id}/batch route and worker composition (handoff; C14 must not edit backend/api.py or backend/worker.py)",
+    "C11 JobStore/ProjectStore persistence of FrozenProject revisions and BatchResult snapshots (handoff; in-process ReuseLedger only in this PR)",
+    "C04 restore of a live CandidateFit.model_object from a revision (evaluate_fitted is used when that object is already in memory)",
+    "C03 assess_normative export (classifiers of NBRValidator are consumed at the audited base)",
+    "C06 inverse_target_prediction export (Transformer.apply_transformation is consumed for X)",
+    "C09 per-item UI and C12 evidence-bundle consumption of BatchResult.export"
+  ],
+  "deferred_items": [
+    "HTTP batch route and job 202 contract (C10)",
+    "Transactional revision storage (C11)",
+    "Integrated live-C04 numeric parity after C04/C11 publish restore"
+  ],
+  "review_findings": [
+    "Author review: did not wrap find_best_model(avaliando_raw=...) as lote reuse.",
+    "Author review: eligible is not issuance authorization.",
+    "Author review: no second database, no user pickle, no consolidated PDF.",
+    "Independent reviewer not invoked in this session; distinguish from author review.",
+    "Skeptic: parallel path used to submit every index before cancel_requested could fire; now submits at most max_workers and leaves unstarted items pending."
+  ]
+}
