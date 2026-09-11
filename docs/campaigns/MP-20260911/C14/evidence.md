@@ -4,6 +4,7 @@ Campaign: C14
 Contract: MP/1  
 Base: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`  
 Branch: `mp-20260911/c14-lotes_reuso_modelos`  
+HEAD (implementation): `b1a00eaeec844f86332d1ae7c862a7c6412b30e3`  
 Owned paths: `modules/valuation_batch.py`, `tests/c14_batch/`, `benchmarks/c14_batch/`, `docs/campaigns/MP-20260911/C14/`
 
 ## What shipped

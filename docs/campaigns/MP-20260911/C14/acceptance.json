@@ -1,6 +1,6 @@
 {
   "campaign_id": "C14",
-  "head_sha": "PENDING_COMMIT",
+  "head_sha": "b1a00eaeec844f86332d1ae7c862a7c6412b30e3",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
   "result": "READY_COMPONENT",
