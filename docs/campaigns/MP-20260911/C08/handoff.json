@@ -1,0 +1,19 @@
+{
+  "producer": "C08",
+  "contract_version": "MP/1",
+  "exported_interface": "modules.results_generator.render_report(snapshot, report_context) -> bytes; modules.results_generator.ReportRenderError (code, origin, message, to_issue()); generate_pdf_report remains a ModelResult adapter",
+  "head_sha": null,
+  "dependency_pr": null,
+  "consumers": [
+    {
+      "consumer": "C10",
+      "required_callsite": "backend/worker.py and C10 job composition must call render_report(snapshot, report_context) after freeze_result_snapshot. On ReportRenderError, set artifact_states['report_pdf'].state='failed' and artifact_states['report_pdf'].error=exc.to_issue(). Do not treat a succeeded calculation as a delivered document. generate_pdf_report still returns None for invalid ModelResult so the current worker path does not crash; that is not the MP/1 success path.",
+      "acceptance_case": "C08-A01 copies snapshot.value/dates/unit; C08-A05 raises ReportRenderError instead of None"
+    },
+    {
+      "consumer": "C12",
+      "required_callsite": "modules.evidence_bundle.build_evidence_bundle must include the PDF bytes returned by render_report and any in-PDF annex of used/excluded row_ids. Do not attach a truncated 200-row extract as if it were the integral ledger.",
+      "acceptance_case": "C08-A03 integral used/excluded ids live in the same PDF bytes"
+    }
+  ]
+}

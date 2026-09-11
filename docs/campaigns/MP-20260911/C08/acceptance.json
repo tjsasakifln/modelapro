@@ -1,0 +1,52 @@
+{
+  "campaign_id": "C08",
+  "head_sha": null,
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "result": "READY_COMPONENT",
+  "criteria": [
+    {
+      "id": "C08-A01",
+      "status": "passed",
+      "evidence": "tests/c08_report/test_a01_snapshot_numbers.py drives render_report; extracted MP1_* lines match fixture literals; OLS/build_model forbidden; pending date/unit; BRL and BRL/m2 formatting"
+    },
+    {
+      "id": "C08-A02",
+      "status": "passed",
+      "evidence": "tests/c08_report/test_a02_warnings.py: issue origins, unclassified precision, approximate search, declared/present/verified, next_actions, minuta, R2 disclaimer"
+    },
+    {
+      "id": "C08-A03",
+      "status": "passed",
+      "evidence": "tests/c08_report/test_a03_integral_rows.py: 210 used + 12 excluded ids in PDF body/annex; n received/observed/prepared/used/excluded match snapshot"
+    },
+    {
+      "id": "C08-A04",
+      "status": "passed",
+      "evidence": "tests/c08_report/test_a04_layout.py plus pypdfium2 rasters of synthetic c08_long.pdf (24 pages, non-blank); Portuguese chart titles; long Unicode name; landscape ledger without mid-id breaks"
+    },
+    {
+      "id": "C08-A05",
+      "status": "passed",
+      "evidence": "tests/c08_report/test_a05_exception.py: ReportRenderError C08_PDF_ENGINE_FAILED / C08_INVALID_SNAPSHOT; render_report never returns None"
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c08_report/ tests/test_results_generator.py tests/test_audit_fixes.py::TestExhaustiveDisclosurePropagation -q",
+      "exit_code": 0,
+      "notes": "22 passed, pytest 9.1.1, Python 3.12.3, weasyprint 70.0, jinja2 3.1.6"
+    }
+  ],
+  "unmet_dependencies": [
+    "C10 must call render_report and record artifact failure; worker.py still uses generate_pdf_report and None",
+    "C12 must include the integral PDF in the evidence bundle"
+  ],
+  "deferred_items": [
+    "DOCX editable output (coordinate with C15; not required for A01-A05)"
+  ],
+  "review_findings": [
+    "Author review: landscape ledger + nowrap row_id after visual inspection showed break-all splitting used-0020. Charts in Portuguese. Adapter still returns None on invalid ModelResult for C16/worker compatibility.",
+    "pdftoppm/pdftotext missing in this environment; rasterization used pypdfium2 for inspection only (not a product dependency)."
+  ]
+}
