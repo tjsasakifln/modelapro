@@ -1,7 +1,7 @@
 {
   "producer": "C06",
   "contract_version": "MP/1",
-  "dependency_pr": null,
+  "dependency_pr": "https://github.com/tjsasakifln/modelapro/pull/1",
   "head_sha": "a416db2ea85c245018dd270171153800e6d494f1",
   "exported_interface": {
     "apply_transformation": {

@@ -1,6 +1,7 @@
 {
   "campaign_id": "C06",
   "head_sha": "a416db2ea85c245018dd270171153800e6d494f1",
+  "pr": "https://github.com/tjsasakifln/modelapro/pull/1",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
   "status": "READY_COMPONENT",
