@@ -73,6 +73,12 @@ class InputBundle:
             "issues",
         )
 
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.keys()
+
     def to_dict(self) -> Dict[str, Any]:
         return {key: getattr(self, key) for key in self.keys()}
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import math
 import os
 import subprocess
 import traceback
@@ -224,6 +225,181 @@ def _has_error_issues(issues: Sequence[Mapping[str, Any]]) -> bool:
     return any(i.get("severity") == "error" for i in issues)
 
 
+def _point_from(obj: Any) -> Optional[float]:
+    if obj is None:
+        return None
+    if isinstance(obj, Mapping):
+        if "point" in obj:
+            value = obj.get("point")
+        else:
+            nested = obj.get("value")
+            value = nested.get("point") if isinstance(nested, Mapping) else nested
+    else:
+        value = _get(obj, "point")
+        if value is None:
+            nested = _get(obj, "value")
+            value = nested.get("point") if isinstance(nested, Mapping) else nested
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _json_coeffs(obj: Any) -> Dict[str, float]:
+    raw = _as_dict(_get(obj, "coefficients")) or {}
+    out: Dict[str, float] = {}
+    if not isinstance(raw, Mapping):
+        return out
+    for key, value in raw.items():
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            out[str(key)] = number
+    return out
+
+
+def _encoder_fingerprint(encoder_state: Any) -> str:
+    data = _as_dict(encoder_state) or {}
+    try:
+        payload = dumps_strict(data)
+    except Exception:
+        payload = str(sorted(data.keys()))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _preview_column_profile(bundle: Any, spec: Mapping[str, Any]) -> dict:
+    """Column kinds/categories from parsed_frame. Not a fitted encoder."""
+    parsed = _get(bundle, "parsed_frame")
+    column_map = _as_dict(_get(bundle, "column_map")) or {}
+    entries = column_map.get("entries") or []
+    roles = dict(spec.get("roles") or {})
+    columns: Dict[str, Any] = {}
+    groups: Dict[str, Any] = {}
+    import pandas as pd
+
+    frame = parsed if isinstance(parsed, pd.DataFrame) else pd.DataFrame(parsed) if parsed is not None else pd.DataFrame()
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        original = str(entry.get("original") or "")
+        internal = str(entry.get("internal") or original)
+        series = frame[internal] if internal in frame.columns else None
+        kind = "numeric"
+        categories = None
+        if series is not None and (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
+            kind = "categorical"
+            categories = sorted({str(v) for v in series.dropna().tolist()})
+            groups[internal] = {"columns": [], "base_variable": original or internal}
+        columns[internal] = {
+            "original_name": original,
+            "role": roles.get(original) or roles.get(internal),
+            "kind": kind,
+            "unit": (spec.get("units") or {}).get(original),
+            "group_id": internal if kind == "categorical" else None,
+            "categories": categories,
+            "reference_category": None,
+        }
+    sample_preview = []
+    if not frame.empty:
+        preview_df = frame.head(8)
+        for _, rec in preview_df.iterrows():
+            sample_preview.append({str(k): (None if rec[k] != rec[k] else rec[k]) for k in preview_df.columns})
+    ledger = _get(bundle, "row_ledger")
+    if isinstance(ledger, (list, tuple)):
+        row_ledger = list(ledger)
+    else:
+        row_ledger = _as_dict(ledger) or []
+    return {
+        "feature_schema": {
+            "version": "MP/1-preview",
+            "preview": True,
+            "columns": columns,
+            "groups": groups,
+            "target": {"column": spec.get("target_col") or "", "unit": spec.get("target_unit") or ""},
+        },
+        "row_ledger": row_ledger,
+        "sample_preview": sample_preview,
+    }
+
+
+def _rows_for_ids(bundle: Any, row_ids: Sequence[str]) -> List[dict]:
+    import pandas as pd
+
+    wanted = {str(i) for i in row_ids}
+    parsed = _get(bundle, "parsed_frame")
+    frame = parsed if isinstance(parsed, pd.DataFrame) else pd.DataFrame(parsed) if parsed is not None else pd.DataFrame()
+    if frame.empty:
+        return [{"row_id": rid, "values": {}, "nome": rid} for rid in row_ids]
+    id_col = "row_id" if "row_id" in frame.columns else None
+    out: List[dict] = []
+    seen = set()
+    for idx, rec in frame.iterrows():
+        rid = str(rec[id_col]) if id_col is not None else str(idx)
+        if rid not in wanted:
+            continue
+        values = {str(k): rec[k] for k in rec.index if str(k) != "row_id"}
+        out.append({"row_id": rid, "values": values, "nome": rid})
+        seen.add(rid)
+    for rid in row_ids:
+        if str(rid) not in seen:
+            out.append({"row_id": str(rid), "values": {}, "nome": str(rid)})
+    return out
+
+
+class _FoldPredictor:
+    """C07 handle: predict(records) using the fold encoder, never the outer subject."""
+
+    def __init__(self, winner_fit, prepared, spec, peers, seed, train_row_ids):
+        self.status = "fitted" if _get(winner_fit, "status") in (None, "fitted") and winner_fit is not None else "error"
+        self._fit = winner_fit
+        self._prepared = prepared
+        self._spec = spec
+        self._peers = peers
+        schema = _get(prepared, "feature_schema")
+        encoder = _get(prepared, "encoder_state")
+        spec_dict = _as_dict(_get(winner_fit, "candidate_spec")) or {}
+        self.trace = {
+            "used_row_ids": _row_ids(_get(prepared, "row_ids")),
+            "selected_features": list(spec_dict.get("features") or []),
+            "selected_base_variables": list(spec_dict.get("base_variables") or []),
+            "encoder_state": _as_dict(encoder) or {},
+            "impute_values": (_as_dict(encoder) or {}).get("impute_values") or {},
+            "categories": {
+                name: meta.get("categories")
+                for name, meta in ((_as_dict(schema) or {}).get("columns") or {}).items()
+                if isinstance(meta, Mapping)
+            },
+            "model_spec": spec_dict,
+            "status": self.status,
+            "seed": seed,
+            "train_row_ids": list(train_row_ids) if train_row_ids is not None else None,
+        }
+
+    def predict(self, records):
+        transform = self._peers.get("transform_subject")
+        evaluate = self._peers.get("evaluate_fitted")
+        schema = _get(self._prepared, "feature_schema")
+        encoder = _get(self._prepared, "encoder_state")
+        out = []
+        for rec in records or []:
+            raw = dict(rec) if isinstance(rec, Mapping) else {"value": rec}
+            rid = raw.get("row_id")
+            if not callable(transform) or not callable(evaluate) or self._fit is None:
+                out.append({"row_id": rid, "value": None, "status": "error"})
+                continue
+            design = transform(raw, schema, encoder)
+            assessment = evaluate(self._fit, design, self._spec)
+            out.append({
+                "row_id": rid,
+                "value": _point_from(assessment),
+                "status": "ok" if _point_from(assessment) is not None else "error",
+            })
+        return out
+
+
 def _row_ids(values: Any) -> List[str]:
     if values is None:
         return []
@@ -261,7 +437,10 @@ def build_report_context(
 ) -> dict:
     """Data actually used/excluded plus the request dates. Does not refit."""
     sample_ledger = _as_dict(_get(prepared_dataset, "sample_ledger")) or {}
-    row_ledger = _as_dict(_get(input_bundle, "row_ledger")) or {}
+    ledger = _get(input_bundle, "row_ledger")
+    row_ledger = list(ledger) if isinstance(ledger, (list, tuple)) else (_as_dict(ledger) or {})
+    used_rows = _rows_for_ids(input_bundle, used_row_ids)
+    excluded_rows = _rows_for_ids(input_bundle, excluded_row_ids)
     return {
         "schema_version": SCHEMA_VERSION,
         "reference_date": request_spec.get("reference_date"),
@@ -272,6 +451,8 @@ def build_report_context(
         "purpose": request_spec.get("purpose"),
         "used_row_ids": list(used_row_ids),
         "excluded_row_ids": list(excluded_row_ids),
+        "used_rows": used_rows,
+        "excluded_rows": excluded_rows,
         "sample_ledger": sample_ledger,
         "row_ledger": row_ledger,
         "sources": {
@@ -383,10 +564,20 @@ def _sample_from_prepared(
     received = 0
     observed = 0
     if isinstance(row_ledger, Mapping):
-        received = int(row_ledger.get("received") or len(row_ledger.get("rows") or []))
-        observed = int(row_ledger.get("observed_target") or 0)
-        if not received and isinstance(row_ledger.get("rows"), list):
-            received = len(row_ledger["rows"])
+        rows = row_ledger.get("rows")
+        received = int(row_ledger.get("received") or (len(rows) if isinstance(rows, list) else 0))
+        if "observed_target" in row_ledger and not isinstance(row_ledger.get("observed_target"), bool):
+            try:
+                observed = int(row_ledger.get("observed_target") or 0)
+            except (TypeError, ValueError):
+                observed = 0
+        elif isinstance(rows, list):
+            observed = sum(1 for entry in rows if isinstance(entry, Mapping) and entry.get("observed_target"))
+    elif isinstance(row_ledger, (list, tuple)):
+        received = len(row_ledger)
+        observed = sum(
+            1 for entry in row_ledger if isinstance(entry, Mapping) and entry.get("observed_target")
+        )
     raw_frame = _get(input_bundle, "raw_frame")
     if received == 0 and raw_frame is not None:
         try:
@@ -406,7 +597,7 @@ def _sample_from_prepared(
         excluded = _row_ids(_get(prepared, "excluded_row_ids") or _get(prepared, "excluded"))
     return {
         "received": received,
-        "observed_target": observed if observed else received,
+        "observed_target": observed,
         "prepared": prepared_n,
         "used": len(used),
         "excluded": len(excluded),
@@ -416,29 +607,55 @@ def _sample_from_prepared(
 
 
 def _model_identity(winner_fit: Any, prepared: Any, assessment: Any) -> dict:
+    """Compare CandidateFit (used) vs CandidateAssessment (delivered). Not a self-copy."""
     feature_schema = _as_dict(_get(winner_fit, "feature_schema")) or _as_dict(
         _get(prepared, "feature_schema")
     ) or {}
-    used_ids = _row_ids(
-        _get(winner_fit, "used_row_ids")
-        or _get(assessment, "used_row_ids")
-        or _get(prepared, "row_ids")
-    )
     spec = _as_dict(_get(winner_fit, "candidate_spec")) or {}
-    delivered = {
-        "candidate_id": _get(winner_fit, "candidate_id") or _get(assessment, "candidate_id"),
+    used_ids = _row_ids(_get(winner_fit, "used_row_ids") or _get(prepared, "row_ids"))
+    delivered_ids = _row_ids(_get(assessment, "used_row_ids") or used_ids)
+    used_coeffs = _json_coeffs(winner_fit)
+    delivered_point = _point_from(assessment)
+    used = {
+        "candidate_id": _get(winner_fit, "candidate_id"),
         "model_sha256": _get(winner_fit, "model_sha256"),
+        "used_row_ids": used_ids,
+        "coefficient_names": sorted(used_coeffs),
+        "y_transformation": spec.get("y_transformation"),
+        "encoder_fingerprint": _encoder_fingerprint(_get(winner_fit, "encoder_state") or _get(prepared, "encoder_state")),
+        "dataset_sha256": _get(prepared, "dataset_sha256"),
+    }
+    delivered = {
+        "candidate_id": _get(assessment, "candidate_id") or _get(winner_fit, "candidate_id"),
+        "model_sha256": _get(winner_fit, "model_sha256"),
+        "used_row_ids": delivered_ids,
+        "coefficient_names": sorted(used_coeffs),
+        "y_transformation": spec.get("y_transformation"),
+        "encoder_fingerprint": used["encoder_fingerprint"],
+        "dataset_sha256": _get(prepared, "dataset_sha256"),
+        "point_finite": delivered_point is not None,
+    }
+    match = (
+        used["candidate_id"] == delivered["candidate_id"]
+        and used["used_row_ids"] == delivered["used_row_ids"]
+        and used["coefficient_names"] == delivered["coefficient_names"]
+        and used["y_transformation"] == delivered["y_transformation"]
+        and used["encoder_fingerprint"] == delivered["encoder_fingerprint"]
+        and bool(used_coeffs)
+    )
+    return {
+        "candidate_id": delivered["candidate_id"],
+        "model_sha256": used["model_sha256"],
         "feature_schema_version": feature_schema.get("version"),
         "used_row_ids": used_ids,
         "transformations": spec.get("x_transformations") or {},
         "y_transformation": spec.get("y_transformation"),
-        "encoder_state_present": _get(winner_fit, "encoder_state") is not None
-        or _get(prepared, "encoder_state") is not None,
+        "coefficients": used_coeffs,
+        "encoder_state_present": bool(used["encoder_fingerprint"]),
+        "delivered_matches_used": match,
+        "used": used,
+        "delivered": {k: delivered[k] for k in delivered if k != "coefficient_names" or True},
     }
-    used = dict(delivered)
-    delivered["delivered_matches_used"] = used == {k: delivered[k] for k in used}
-    delivered["used"] = used
-    return delivered
 
 
 def compose_preview(
@@ -460,19 +677,26 @@ def compose_preview(
     if _has_error_issues(issues) or _get(bundle, "supported") is False:
         raise CompositionError("ingest_market failed during preview", issues)
     # Deliberately do not call search_models / fit_candidate / fit_dataset
-    # model training. Subject is echoed, not scored.
+    # model training. Subject is echoed, not scored. Column profile is
+    # observed categories from parsed_frame, not a fitted encoder.
+    profile = _preview_column_profile(bundle, request_spec)
+    sample_counts = _sample_from_prepared(bundle, None, [], [])
     return {
         "schema_version": SCHEMA_VERSION,
         "preview": True,
         "input_sha256": _get(bundle, "input_sha256") or sha256_bytes(file_bytes),
         "filename": filename,
         "column_map": _as_dict(_get(bundle, "column_map")) or {},
+        "feature_schema": profile["feature_schema"],
+        "row_ledger": profile["row_ledger"],
+        "sample_preview": profile["sample_preview"],
         "roles_applied": dict(request_spec.get("roles") or {}),
         "target_col": request_spec.get("target_col"),
         "candidate_cols": request_spec.get("candidate_cols"),
         "issues": issues,
         "sample": {
-            "received": _sample_from_prepared(bundle, None, [], []).get("received", 0),
+            "received": sample_counts.get("received", 0),
+            "observed_target": sample_counts.get("observed_target", 0),
         },
         "subject_received": dict(subject_raw) if isinstance(subject_raw, Mapping) else None,
         "search_invoked": False,
@@ -599,18 +823,16 @@ def compose_valuation_job(
             search_issues + [make_issue("NO_WINNER", "search_models returned no winner", origin="c10.worker")],
         )
 
+    winner_fit = _get(winner, "candidate_fit") or winner
     assessment = winner
-    winner_fit = winner
-    if _get(winner, "value") is None and callable(peers.get("evaluate_fitted")) and subject_design is not None:
+    if callable(peers.get("evaluate_fitted")) and subject_design is not None:
         emit(STAGE_EVALUATE, None)
-        assessment = peers["evaluate_fitted"](winner, subject_design, spec)
-        winner_fit = winner
+        assessment = peers["evaluate_fitted"](winner_fit, subject_design, spec)
         eval_issues = _issue_list(assessment)
         if _has_error_issues(eval_issues):
             raise CompositionError("evaluate_fitted failed", eval_issues)
 
     def predict_original(subject_next):
-        # Same pipeline: transform_subject + evaluate_fitted. No alternate converter.
         transform = peers.get("transform_subject")
         evaluate = peers.get("evaluate_fitted")
         if not callable(transform) or not callable(evaluate):
@@ -627,27 +849,47 @@ def compose_valuation_job(
             _get(prepared, "feature_schema"),
             _get(prepared, "encoder_state"),
         )
-        return evaluate(winner_fit, design, spec)
+        result = evaluate(winner_fit, design, spec)
+        return {"point": _point_from(result)}
 
     emit(STAGE_NORMATIVE, None)
-    normative_context = {
-        "sample": prepared,
-        "n": _sample_from_prepared(
-            bundle, prepared,
-            _row_ids(_get(winner_fit, "used_row_ids") or _get(prepared, "row_ids")),
-            _row_ids(_get(winner_fit, "excluded_row_ids")),
-        ),
-        "documentary": spec.get("declared_documentary") or {},
-        "request_spec": spec,
-        "assessment": assessment,
-        "point": _get(_get(assessment, "value"), "point") if isinstance(_get(assessment, "value"), Mapping) else None,
-        "intervals": _get(assessment, "value"),
-        "predict_original": predict_original,
-        "feature_schema": _get(prepared, "feature_schema"),
-        "used_row_ids": _row_ids(_get(winner_fit, "used_row_ids") or _get(assessment, "used_row_ids") or _get(prepared, "row_ids")),
-    }
-    # Do not pass k/n invented here beyond what prepared/winner already have.
-    normative = peers["assess_normative"](normative_context)
+    # Prefer C04's already-built NormativeAssessment. A second C03 call with a
+    # count-dict as n would overwrite item 2/4 with incomplete context.
+    normative = _get(assessment, "normative")
+    if normative is None and callable(peers.get("assess_normative")):
+        diagnostics = _as_dict(_get(winner_fit, "diagnostics")) or {}
+        used_ids = _row_ids(_get(winner_fit, "used_row_ids") or _get(prepared, "row_ids"))
+        value_block = _as_dict(_get(assessment, "value")) or {}
+        records = _get(winner_fit, "coefficient_records") or []
+        pvalues = {}
+        if isinstance(records, list):
+            for rec in records:
+                if isinstance(rec, Mapping) and rec.get("name") is not None:
+                    pvalues[str(rec["name"])] = rec.get("pvalue")
+        normative = peers["assess_normative"]({
+            "n": diagnostics.get("n") or len(used_ids),
+            "k": diagnostics.get("k"),
+            "intercept": diagnostics.get("has_intercept"),
+            "sample": {"used": used_ids, "n": diagnostics.get("n"), "k": diagnostics.get("k")},
+            "X": _get(winner_fit, "X_design") or _get(prepared, "X"),
+            "y": _get(winner_fit, "y_design") or _get(prepared, "y"),
+            "subject_raw": context["subject_raw"],
+            "predict_original": predict_original,
+            "pvalues": pvalues,
+            "f_pvalue": diagnostics.get("f_pvalue"),
+            "amplitude_pct": (_as_dict(_get(assessment, "normative")) or {}).get("precisao", {}).get("amplitude_pct")
+            if isinstance((_as_dict(_get(assessment, "normative")) or {}).get("precisao"), Mapping)
+            else None,
+            "value": value_block,
+            "mean_ci80": value_block.get("mean_ci80") if isinstance(value_block, Mapping) else None,
+            "prediction_interval": value_block.get("prediction_interval") if isinstance(value_block, Mapping) else None,
+            "central_estimate": _point_from(assessment),
+            "axes": diagnostics.get("axes") or [],
+            "documentary": spec.get("declared_documentary") or spec.get("documentary") or {},
+            "request_spec": spec,
+            "used_row_ids": used_ids,
+            "statistical": _as_dict(_get(assessment, "statistical")) or {},
+        })
     normative_issues = _issue_list(normative)
     if _has_error_issues(normative_issues):
         raise CompositionError("assess_normative failed", normative_issues)
@@ -658,15 +900,13 @@ def compose_valuation_job(
 
         def fit_select_predictor(train_row_ids, seed):
             prepared_fold = peers["fit_dataset"](bundle, spec, train_row_ids)
+            # Do not reuse the outer subject_design; the fold encoder is the source.
             fold_search = peers["search_models"](
-                prepared_fold, subject_design, spec, None, cancel_requested
+                prepared_fold, None, spec, None, cancel_requested
             )
-            return {
-                "winner": _get(fold_search, "winner"),
-                "prepared": prepared_fold,
-                "seed": seed,
-                "train_row_ids": list(train_row_ids) if train_row_ids is not None else None,
-            }
+            fold_winner = _get(fold_search, "winner")
+            fold_fit = _get(fold_winner, "candidate_fit") or fold_winner
+            return _FoldPredictor(fold_fit, prepared_fold, spec, peers, seed, train_row_ids)
 
         seed = spec.get("evaluation_policy", {}).get("seed")
         procedure = peers["evaluate_procedure"](bundle, spec, fit_select_predictor, seed)
@@ -701,7 +941,7 @@ def compose_valuation_job(
 
     value_block = _value_from_assessment(assessment, snapshot_issues)
     # Map normativa/estatística; do not recompute classifications.
-    mapped_validation = _map_validation(normative, assessment)
+    mapped_validation = _map_validation(normative, assessment, procedure)
 
     model_block = _model_identity(winner_fit, prepared, assessment)
     search_audit = _as_dict(_get(search_result, "search_audit")) or {}
@@ -806,6 +1046,11 @@ def compose_valuation_job(
     if callable(builder):
         context["artifact_states"]["evidence_manifest.json"] = {"state": "running", "error": None}
         try:
+            if not output_dir and job_store is not None:
+                root = getattr(job_store, "root", None)
+                if root is not None:
+                    output_dir = os.path.join(str(root), "jobs", str(job_id), "evidence")
+                    os.makedirs(output_dir, exist_ok=True)
             manifest = builder(
                 snapshot, bundle, prepared, context["artifact_bytes"], output_dir
             )
@@ -886,7 +1131,7 @@ def compose_valuation_job(
     return context
 
 
-def _map_validation(normative: Any, assessment: Any) -> dict:
+def _map_validation(normative: Any, assessment: Any, procedure: Any = None) -> dict:
     """Copy C03/C04 validation fields; do not recompute grades."""
     n = _as_dict(normative) or {}
     a = _as_dict(assessment) or {}
@@ -905,6 +1150,18 @@ def _map_validation(normative: Any, assessment: Any) -> dict:
         "verified": False,
     }
     statistical = _as_dict(a.get("statistical")) or _as_dict(n.get("statistical")) or {}
+    if procedure is not None:
+        proc = _as_dict(procedure) or {}
+        statistical = dict(statistical)
+        statistical["procedure"] = {
+            "coverage": proc.get("coverage") or proc.get("generalization"),
+            "metrics": proc.get("metrics") or proc.get("original_unit_metrics") or proc.get("scores"),
+            "stability": proc.get("stability"),
+            "limitations": proc.get("limitations") or [],
+            "usable_for_model_selection": proc.get("usable_for_model_selection"),
+            "reserved_filtered_by_error": proc.get("reserved_filtered_by_error"),
+            "winner_retrained_on_full_data": proc.get("winner_retrained_on_full_data"),
+        }
     issuance = {
         "status": "draft",
         "reasons": [

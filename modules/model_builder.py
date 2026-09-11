@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -211,8 +212,34 @@ def _load_transform_subject() -> Optional[Callable]:
     return None
 
 
+def _transform_name(value: Any) -> Optional[str]:
+    """C05 may emit {name: ...}; MP/1 y_transformation is a name string."""
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        value = value.get("name") or value.get("transformation")
+        if value is None:
+            return None
+    text = str(value).strip()
+    return text or None
+
+
+class _DataclassMapping(MappingABC):
+    def __getitem__(self, key: str) -> Any:
+        fields = getattr(self, "__dataclass_fields__", {})
+        if key not in fields:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __iter__(self):
+        return iter(getattr(self, "__dataclass_fields__", {}))
+
+    def __len__(self) -> int:
+        return len(getattr(self, "__dataclass_fields__", {}))
+
+
 @dataclass
-class CandidateSpec:
+class CandidateSpec(_DataclassMapping):
     candidate_id: str
     features: List[str]
     base_variables: List[str]
@@ -228,6 +255,12 @@ class CandidateSpec:
         data = _as_mapping(obj)
         features = [str(x) for x in (data.get("features") or [])]
         base = data.get("base_variables")
+        x_raw = data.get("x_transformations") or {}
+        x_transformations = {}
+        for key, value in x_raw.items():
+            name = _transform_name(value)
+            if name is not None:
+                x_transformations[str(key)] = name
         return cls(
             candidate_id=str(data.get("candidate_id") or "candidate"),
             features=features,
@@ -236,10 +269,8 @@ class CandidateSpec:
                 str(k): [str(c) for c in v]
                 for k, v in (data.get("feature_groups") or {}).items()
             },
-            x_transformations={
-                str(k): str(v) for k, v in (data.get("x_transformations") or {}).items()
-            },
-            y_transformation=data.get("y_transformation"),
+            x_transformations=x_transformations,
+            y_transformation=_transform_name(data.get("y_transformation")),
             intercept=bool(data.get("intercept", True)),
         )
 
@@ -256,7 +287,7 @@ class CandidateSpec:
 
 
 @dataclass
-class CandidateFit:
+class CandidateFit(_DataclassMapping):
     candidate_id: str
     status: str
     candidate_spec: CandidateSpec
@@ -319,7 +350,7 @@ def _pending_normative(issues: Optional[List[Dict[str, Any]]] = None) -> Dict[st
 
 
 @dataclass
-class CandidateAssessment:
+class CandidateAssessment(_DataclassMapping):
     candidate_id: str
     subject_id: str
     subject_raw: Dict[str, Any]

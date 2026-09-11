@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -55,8 +56,24 @@ _HIGH_CARDINALITY_ABS = 20
 _CURRENCY_RE = re.compile(r"[R$\s\xa0]")
 
 
+class _DataclassMapping(MappingABC):
+    """In-process objects remain mappings so C05/C10/C12 can call .get()."""
+
+    def __getitem__(self, key: str) -> Any:
+        fields = getattr(self, "__dataclass_fields__", {})
+        if key not in fields:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __iter__(self):
+        return iter(getattr(self, "__dataclass_fields__", {}))
+
+    def __len__(self) -> int:
+        return len(getattr(self, "__dataclass_fields__", {}))
+
+
 @dataclass
-class PreparedDataset:
+class PreparedDataset(_DataclassMapping):
     """In-process MP/1 prepared sample. DataFrames stay in-process, not JSON."""
 
     X: pd.DataFrame
@@ -68,16 +85,18 @@ class PreparedDataset:
     issues: List[Dict[str, Any]]
     dataset_sha256: str
     base_frame: pd.DataFrame
+    schema_version: str = SCHEMA_VERSION
 
 
 @dataclass
-class SubjectDesign:
+class SubjectDesign(_DataclassMapping):
     """One subject encoded with a frozen schema/encoder."""
 
     X: pd.DataFrame
     raw_values: Dict[str, Any]
     issues: List[Dict[str, Any]]
     supported: bool
+    schema_version: str = SCHEMA_VERSION
 
 
 def make_issue(
@@ -136,48 +155,18 @@ def is_missing(value: Any) -> bool:
 
 
 def parse_numeric(value: Any, locale: str = "auto") -> Optional[float]:
-    """Parse a numeric scalar, preserving domain. None means missing/unparseable."""
-    if is_missing(value):
-        return None
-    if isinstance(value, bool):
-        return float(int(value))
-    if isinstance(value, (int, np.integer)):
-        return float(value)
-    if isinstance(value, (float, np.floating)):
-        if not np.isfinite(value):
-            return None
-        return float(value)
-    text = _CURRENCY_RE.sub("", str(value).strip())
-    if not text or text.lower() in _MISSING_STRINGS:
-        return None
+    """Parse a numeric scalar via C01 ``parse_numeric_token``.
 
-    def _as_float(candidate: str) -> Optional[float]:
-        try:
-            parsed = float(candidate)
-        except ValueError:
-            return None
-        if not math.isfinite(parsed):
-            return None
-        return parsed
+    None means missing, unparseable, non-finite, or **ambiguous**. Tokens such
+    as ``1.234`` with locale ``auto`` stay None; they are never silently
+    converted to 1.234 or 1234.
+    """
+    from modules.utils import parse_numeric_token
 
-    loc = locale or "auto"
-    if loc == "pt-BR":
-        if "," in text:
-            text = text.replace(".", "").replace(",", ".")
-        return _as_float(text)
-    if loc == "en-US":
-        return _as_float(text.replace(",", ""))
-
-    # auto: last separator wins; a trailing comma+digits is pt-BR decimal.
-    if re.search(r",\d{1,2}$", text) and text.count(",") == 1:
-        return _as_float(text.replace(".", "").replace(",", "."))
-    if "," in text and "." in text:
-        if text.rfind(",") > text.rfind("."):
-            return _as_float(text.replace(".", "").replace(",", "."))
-        return _as_float(text.replace(",", ""))
-    if "," in text:
-        return _as_float(text.replace(".", "").replace(",", "."))
-    return _as_float(text)
+    parsed = parse_numeric_token(value, locale or "auto")
+    if parsed.status in {"parsed", "already_numeric"}:
+        return parsed.value
+    return None
 
 
 def dataset_sha256(

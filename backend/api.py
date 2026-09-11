@@ -50,6 +50,7 @@ from modules.result_contract import (
     subject_numeric_values_finite,
     validate_job_status_progress,
     validate_request_spec,
+    fill_preview_spec,
 )
 
 try:
@@ -102,13 +103,8 @@ def reset_runtime() -> None:
 
 
 def _cors_origins() -> List[str]:
-    raw = os.getenv(
-        "MP_CORS_ORIGINS",
-        "http://127.0.0.1:8501,http://localhost:8501,"
-        "http://127.0.0.1:8000,http://localhost:8000",
-    )
-    origins = [item.strip() for item in raw.split(",") if item.strip()]
-    return origins or ["http://127.0.0.1:8501"]
+    """C15 owns CORS_ORIGINS; C10 consumes the validated explicit list (never '*')."""
+    return list(config.cors_origin_list())
 
 
 def _max_upload_bytes() -> int:
@@ -656,7 +652,12 @@ async def preview(
 ):
     """Ingest-only. Does not search, fit candidates, or write project revisions."""
     spec_payload = _parse_json_field(request_json, field="request_json")
-    spec = _validate_spec_or_400(spec_payload)
+    try:
+        spec = fill_preview_spec(spec_payload)
+    except (RequestSpecError, ContractError) as exc:
+        return _issues_response(400, str(exc), getattr(exc, "issues", None) or [
+            make_issue("INVALID_SPEC", str(exc), origin="c10.api")
+        ])
     subject = _parse_json_field(subject_json, field="subject_json", allow_null=True) if subject_json else None
     ok, issues = subject_numeric_values_finite(subject)
     if not ok:

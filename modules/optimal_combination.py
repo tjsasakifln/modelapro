@@ -5,6 +5,7 @@ is a compatibility adapter over the same search — it does not run a second alg
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -88,6 +89,19 @@ def evaluate_search_candidate(
     return record
 
 
+def _as_mapping(obj: Any) -> Mapping[str, Any]:
+    """Accept MP/1 mappings or the C02 dataclass objects without losing frames."""
+    if obj is None:
+        return {}
+    if isinstance(obj, Mapping):
+        return obj
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
+    if hasattr(obj, "__dict__"):
+        return {key: value for key, value in vars(obj).items() if not key.startswith("_")}
+    return {}
+
+
 def search_models(
     prepared_dataset: Mapping[str, Any],
     subject_design: Optional[Mapping[str, Any]],
@@ -100,6 +114,10 @@ def search_models(
     Callbacks are synchronous and light. ``cancel_requested()`` returns bool.
     C07 ``evaluate_procedure`` is never invoked here (no validation recursion).
     """
+    prepared_dataset = _as_mapping(prepared_dataset)
+    if subject_design is not None:
+        subject_design = _as_mapping(subject_design)
+    request_spec = _as_mapping(request_spec)
     _configure_local_threads((request_spec.get("search_policy") or {}).get("n_jobs", 1))
     t0 = time.perf_counter()
     rss0 = _rss_bytes()
@@ -907,6 +925,19 @@ class OptimalCombinationFinder:
                 if alt.get("_legacy_model_result") is not None:
                     best_model = alt["_legacy_model_result"]
                     break
+        if best_model is None and winner is not None:
+            coeffs = winner.get("coefficients") or {}
+            if coeffs:
+                best_model = ModelResult(
+                    success=True,
+                    message="adapted from MP/1 CandidateFit",
+                    coefficients={
+                        str(key): float(value)
+                        for key, value in coeffs.items()
+                        if value is not None and _finite_number(value)
+                    },
+                    model_object=winner.get("model_object"),
+                )
         grau = None
         if best_model is not None and best_model.validation_result is not None:
             grau = best_model.validation_result.grau_fundamentacao
@@ -1338,6 +1369,11 @@ def _public_record(record: Optional[Mapping[str, Any]], include_legacy: bool) ->
         "discard_reason": record.get("discard_reason"),
         "statistical": record.get("statistical"),
         "normative": record.get("normative"),
+        "coefficients": record.get("coefficients"),
+        "diagnostics": record.get("diagnostics") or {},
+        # In-process only: C04.evaluate_fitted / C03 predict_original.
+        "candidate_fit": record.get("candidate_fit"),
+        "model_object": record.get("model_object"),
     }
     if include_legacy:
         out["_legacy_model_result"] = record.get("_legacy_model_result")
@@ -1599,18 +1635,21 @@ def _fit_and_score(
         )
         diagnostics = candidate_fit.get("diagnostics") if isinstance(candidate_fit, dict) else getattr(candidate_fit, "diagnostics", {}) or {}
         record["diagnostics"] = diagnostics or {}
+        record["candidate_fit"] = candidate_fit
         if callable(evaluate_fitted) and subject_design is not None:
             try:
                 assessment = evaluate_fitted(candidate_fit, subject_design, request_spec)
             except Exception as exc:
                 issues.append(_issue("evaluate_fitted_error", "warning", str(exc), [spec["candidate_id"]]))
                 assessment = None
-            if isinstance(assessment, dict):
-                record["value"] = assessment.get("value") or record["value"]
-                record["statistical"] = assessment.get("statistical")
-                record["normative"] = assessment.get("normative")
-                rec_metrics = (assessment.get("statistical") or {})
+            assessment_map = _as_mapping(assessment) if assessment is not None else {}
+            if assessment_map:
+                record["value"] = assessment_map.get("value") or record["value"]
+                record["statistical"] = assessment_map.get("statistical")
+                record["normative"] = assessment_map.get("normative")
+                rec_metrics = assessment_map.get("statistical") or {}
                 amplitude = rec_metrics.get("precision_amplitude_pct") or rec_metrics.get("amplitude_pct")
+                record["candidate_fit"] = candidate_fit
         rmse = _original_rmse_from_model(
             model_obj, X_design, y_original, y_state, hooks, spec.get("intercept", True)
         )
@@ -1695,7 +1734,8 @@ def _fit_and_score(
 
     record["status"] = "fitted"
     record["coefficients"] = coefficients
-    record["model_object"] = model_obj if retain_legacy else None
+    # Winner must remain evaluable by C04.evaluate_fitted; trim drops extras.
+    record["model_object"] = model_obj
     record["used_row_ids"] = used_row_ids
     metrics: Dict[str, Any] = {
         "complexity": len(spec.get("features") or []),

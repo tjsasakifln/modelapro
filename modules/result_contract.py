@@ -511,7 +511,40 @@ def _validate_interval(value: Any, *, field: str, issues: List[dict]) -> Optiona
     return out
 
 
-def validate_request_spec(payload: Any) -> dict:
+def fill_preview_spec(payload: Any) -> dict:
+    """Preview RequestSpec: target_col may be empty; structural defaults only.
+
+    Does not invent BRL, today's date, or candidate_cols=[]→all. Used by
+    POST /preview so the first file view works before the user picks a target.
+    """
+    raw = dict(payload) if isinstance(payload, Mapping) else {}
+    raw.setdefault("schema_version", SCHEMA_VERSION)
+    if raw.get("target_col") is None:
+        raw["target_col"] = ""
+    if "candidate_cols" not in raw:
+        raw["candidate_cols"] = None
+    raw.setdefault("roles", {})
+    raw.setdefault("units", {})
+    raw.setdefault("import_options", {"locale": "auto", "delimiter": None, "encoding": None})
+    raw.setdefault("missing_policy", {"target": "never_impute", "predictors": "complete_case"})
+    raw.setdefault("outlier_policy", {"mode": OUTLIER_MODE_DEFAULT, "reviewed_exclusions": []})
+    raw.setdefault(
+        "search_policy",
+        {"mode": "exact", "budget": 64, "objective": "aic", "seed": 0},
+    )
+    raw.setdefault(
+        "evaluation_policy",
+        {"method": EVALUATION_METHOD_NONE, "partitions": None, "groups": None, "seed": 0},
+    )
+    raw.setdefault("reference_date", None)
+    raw.setdefault("inspection_date", None)
+    raw.setdefault("target_unit", "")
+    raw.setdefault("applicant", "")
+    raw.setdefault("purpose", "preview")
+    return validate_request_spec(raw, allow_empty_target=True)
+
+
+def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> dict:
     """Validate and normalize a RequestSpec mapping.
 
     Returns a new dict. Raises RequestSpecError with .issues on rejection.
@@ -547,7 +580,13 @@ def validate_request_spec(payload: Any) -> dict:
             )],
         )
 
-    spec["target_col"] = _require_str(spec.get("target_col"), field="target_col", allow_empty=False)
+    raw_target = spec.get("target_col")
+    if raw_target is None and allow_empty_target:
+        spec["target_col"] = ""
+    else:
+        spec["target_col"] = _require_str(
+            raw_target, field="target_col", allow_empty=allow_empty_target
+        )
 
     candidate_cols = spec.get("candidate_cols")
     if candidate_cols is None:
@@ -604,25 +643,26 @@ def validate_request_spec(payload: Any) -> dict:
                 )],
             )
         normalized_roles[col_s] = role
-    if spec["target_col"] not in normalized_roles:
-        raise RequestSpecError(
-            "target_col must be declared in roles as target",
-            [make_issue(
-                "TARGET_ROLE_MISSING",
-                f"roles must include {spec['target_col']!r} with role 'target' before cleaning",
-                evidence={"target_col": spec["target_col"]},
-            )],
-        )
-    if normalized_roles[spec["target_col"]] != ROLE_TARGET:
-        raise RequestSpecError(
-            "target_col role must be target",
-            [make_issue(
-                "TARGET_ROLE_MISSING",
-                f"roles[{spec['target_col']!r}] must be 'target'",
-                evidence={"target_col": spec["target_col"],
-                          "role": normalized_roles[spec["target_col"]]},
-            )],
-        )
+    if spec["target_col"]:
+        if spec["target_col"] not in normalized_roles:
+            raise RequestSpecError(
+                "target_col must be declared in roles as target",
+                [make_issue(
+                    "TARGET_ROLE_MISSING",
+                    f"roles must include {spec['target_col']!r} with role 'target' before cleaning",
+                    evidence={"target_col": spec["target_col"]},
+                )],
+            )
+        if normalized_roles[spec["target_col"]] != ROLE_TARGET:
+            raise RequestSpecError(
+                "target_col role must be target",
+                [make_issue(
+                    "TARGET_ROLE_MISSING",
+                    f"roles[{spec['target_col']!r}] must be 'target'",
+                    evidence={"target_col": spec["target_col"],
+                              "role": normalized_roles[spec["target_col"]]},
+                )],
+            )
     spec["roles"] = normalized_roles
 
     units = spec.get("units")
