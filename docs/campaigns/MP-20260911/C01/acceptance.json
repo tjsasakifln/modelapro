@@ -1,0 +1,79 @@
+{
+  "campaign_id": "C01",
+  "head_sha": "7c665df5c9c8714a265843b8e8ab70b4a0098740",
+  "pr": "https://github.com/tjsasakifln/modelapro/pull/4",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "READY_COMPONENT",
+  "criteria": [
+    {
+      "id": "C01-A01",
+      "status": "pass",
+      "evidence": "tests/c01_input/test_ingest_market.py::TestA01NoInventedPrices and tests/test_data_loader.py::TestDataLoader::test_load_data_does_not_impute_missing_target_with_mean. ingest_market on [600000,800000,ausente] yields two observed_target, pending_target in ledger, 700000 absent. load_data adapter also leaves NA."
+    },
+    {
+      "id": "C01-A02",
+      "status": "pass",
+      "evidence": "TestA02NumericLocale: pt-BR R$ 1.234,56→1234.56; en-US 1,234.56→1234.56; 123.45→123.45; auto 1.234 stays 1.234 with ambiguous_number; identifiers/CEP/phone/date preserved."
+    },
+    {
+      "id": "C01-A03",
+      "status": "pass",
+      "evidence": "TestA03CsvExcelParity: BOM+semicolon+pt-BR CSV (.CSV) and xlsx share interpreted prices/areas/bairro and dispositions; hashes differ. unsupported_format includes field=filename. file_size_limit reports to C10. .xls without xlrd → excel_engine_missing or excel_parse_error."
+    },
+    {
+      "id": "C01-A04",
+      "status": "pass",
+      "evidence": "TestA04ExplicitErrors: column_name_collision, duplicate_identifier, non_finite_value, empty_file, target_not_found, empty_candidate_selection, requested_column_absent, malformed_number, reserved row_id."
+    },
+    {
+      "id": "C01-A05",
+      "status": "pass",
+      "evidence": "TestA05ProvenanceRoundTrip.reconstruct_original_record recovers raw values and changes. Fixtures are synthetic."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/test_data_loader.py tests/c01_input/ -q",
+      "exit_code": 0,
+      "note": "40 passed"
+    },
+    {
+      "command": "PYTHONPATH=. python3 {SCRATCH}/c01_launch_consumer.py",
+      "exit_code": 0,
+      "note": "launch 1 and launch 2 both LAUNCH_OK, observed=2, no 700000"
+    },
+    {
+      "command": "DataLoader.load_data(A01 fixture)",
+      "exit_code": 0,
+      "note": "ADAPTER_OK, 700000 not materialised"
+    }
+  ],
+  "unmet_dependencies": [
+    "C09 must switch forms.py preview to C10 /preview (C01 does not edit forms.py).",
+    "C10 must call ingest_market on /preview and /jobs; worker still expects one-hot from load_data.",
+    "C15 must declare openpyxl and xlrd. xlrd is missing in this environment.",
+    "C16 test_verification.py still asserts dummy columns from legacy load_data."
+  ],
+  "deferred_items": [
+    "Excel .xls parity cannot be proven here without xlrd; the missing engine is a structured issue, not a fake read.",
+    "Composition of /preview is C10; C17 owns PASS_E2E."
+  ],
+  "review_findings": [
+    {
+      "source": "author",
+      "severity": "info",
+      "finding": "load_data without request_spec does not guess target_col; all rows remain in the frame and missing prices stay NA instead of the mean."
+    },
+    {
+      "source": "author",
+      "severity": "info",
+      "finding": "Source column named row_id is remapped (row_id is reserved for generated identity)."
+    },
+    {
+      "source": "author",
+      "severity": "warning",
+      "finding": "C16/C10 still couple to one-hot + mean fill. Documented in handoff.json; not restored."
+    }
+  ]
+}
