@@ -1,0 +1,94 @@
+{
+  "campaign_id": "C11",
+  "contract_version": "MP/1",
+  "producer": "C11",
+  "exported_interface": {
+    "JobStore": "modules.job_store.JobStore",
+    "ProjectStore": "modules.project_store.ProjectStore",
+    "LocalTaskRunner": "modules.local_task_runner.LocalTaskRunner",
+    "WebSocketNotifier": "modules.websocket_notifier.WebSocketNotifier",
+    "ws_route": "GET /ws?job_id=&token=",
+    "frozen_methods": [
+      "JobStore.create",
+      "JobStore.get",
+      "JobStore.update_transition",
+      "JobStore.save_snapshot",
+      "JobStore.get_snapshot",
+      "ProjectStore.save_revision",
+      "ProjectStore.load_revision",
+      "LocalTaskRunner.submit",
+      "LocalTaskRunner.cancel"
+    ]
+  },
+  "connections": [
+    {
+      "consumer": "C10",
+      "required_callsite": [
+        "backend/api.py:_create_job_record store.create(idempotency_key=, project_id=, payload=)",
+        "backend/api.py:_submit_valuation runner.submit(job_id, callable_job)",
+        "backend/api.py:cancel_job runner.cancel(job_id)",
+        "backend/api.py:get_job_artifact job_store.get_artifact",
+        "backend/api.py:recover_interrupted_jobs job_store.interrupt_stale_running",
+        "backend/worker.py:run_job update_transition / save_snapshot / save_artifact",
+        "backend/worker.py:_notify_optional notifier.send_notification({job_id, state, stage, progress})"
+      ],
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "acceptance_case": "C10 already calls these names with getattr fallbacks. C11 implements them. POST /jobs 202 should add access_token and ws_url from JobStore.get; GET /jobs/{id}/result already maps get_snapshot None to HTTP 409.",
+      "error_durability_contract": {
+        "JobNotFound": "HTTP 404 JOB_NOT_FOUND",
+        "InvalidTransition": "HTTP 409 illegal state change",
+        "StaleState": "HTTP 409 expected_state mismatch (CAS lost)",
+        "get_snapshot None": "HTTP 409 RESULT_NOT_AVAILABLE — never empty JSON as success",
+        "SchemaVersionError": "HTTP 500; do not mutate the store",
+        "UnsafePayloadError": "HTTP 400 (NaN/Inf, model_object, non-JSON)",
+        "PathEscapeError": "HTTP 400 traversal",
+        "update_transition(job_id, expected, new, patch=None)": "atomic; same-state is a patch; queued->failed allowed; succeeded is terminal",
+        "calculation vs artifacts": "job.state succeeded means calculation; artifact_states patched separately via patch_record or save_artifact",
+        "store root": "MODELA_STORE_ROOT or ~/.local/share/modelapro/store; JobStore() and LocalTaskRunner() take no required args"
+      }
+    },
+    {
+      "consumer": "C09",
+      "required_callsite": "frontend/app.py listen_websocket WS_URL",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "acceptance_case": "Connect to ws://127.0.0.1:8000/ws?job_id={id}&token={access_token} (or first JSON {job_id, token}). Notifications are light status/progress only. Recover snapshot via GET /jobs/{id}/result, never from a completed WS body or report_pdf_base64."
+    },
+    {
+      "consumer": "C12",
+      "required_callsite": "read JobStore snapshot and save_artifact files; do not write a second canonical result.json",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "acceptance_case": "Snapshot path jobs/<job_id>/snapshot.json. Named artifacts under jobs/<job_id>/artifacts/<name>. Hashes of those files belong to C12 manifests; C11 does not embed PDF hashes into the frozen snapshot."
+    },
+    {
+      "consumer": "C16",
+      "required_callsite": "tests/test_audit_fixes.py::TestWebsocketJsonSafety::test_send_notification_delivers_realistic_completed_payload",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "acceptance_case": "C11 removed global broadcast. send_notification without job_id serializes via _json_safe then drops the payload. test_json_safe_round_trips_datetime_numpy_and_nonfinite_floats still passes. C16 should retarget delivery to send_progress(job_id, light) or keep only the _json_safe test. Do not restore active_connections fan-out of completed/PDF bodies."
+    },
+    {
+      "consumer": "C04",
+      "required_callsite": "restore CandidateFit from FrozenProject encoder_state/model_state/model_spec — never pickle.loads",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "acceptance_case": "ProjectStore persists JSON metadata/refs. candidate_fit and model_object are rejected on save. C04 refits from verified spec."
+    },
+    {
+      "consumer": "C14",
+      "required_callsite": "evaluate_batch(..., cancel_requested=runner.cancel_requested / is_cancelled)",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "acceptance_case": "Batch jobs are ordinary JobStore jobs. Cooperative cancel reaches a callable that accepts cancel_requested= or a closure over runner.is_cancelled(job_id)."
+    },
+    {
+      "consumer": "C15",
+      "required_callsite": "document MODELA_STORE_ROOT; no new pip dependency",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "acceptance_case": "sqlite3 is stdlib. Default root is XDG data dir, never the source tree. Bind/public exposure remains C15."
+    }
+  ]
+}
