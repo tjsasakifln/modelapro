@@ -1,0 +1,66 @@
+{
+  "campaign_id": "C06",
+  "head_sha": "a416db2ea85c245018dd270171153800e6d494f1",
+  "pr": "https://github.com/tjsasakifln/modelapro/pull/1",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "READY_COMPONENT",
+  "criteria": [
+    {
+      "id": "C06-A01",
+      "status": "pass",
+      "evidence": "tests/c06_transformations/test_a01_x_domains.py and tests/test_transformations.py drive Transformer.apply_transformation. sqrt([0,1,4]) -> [0,1,2]; ln(0)/inv_sqrt(0)/inverse(0) fail with domain_zero; sqrt(-1)/ln(-1) fail with domain_negative; NaN/inf/overflow/unknown name fail with success False."
+    },
+    {
+      "id": "C06-A02",
+      "status": "pass",
+      "evidence": "tests/c06_transformations/test_a02_roundtrip.py calls fit_target_transform -> transform_target -> inverse_target_prediction. Identity is exact; log round-trips positives within 1e-12; invalid names/types raise."
+    },
+    {
+      "id": "C06-A03",
+      "status": "pass",
+      "evidence": "tests/c06_transformations/test_a03_lognormal_estimand.py uses Y~LogNormal(μ=1,σ=0.5), seed 20260911, analytic median exp(μ) and mean exp(μ+σ²/2). Default inverse matches exp(E[log Y|X]) not E[Y|X]; lognormal correction matches the mean and is labeled distinctly; exponentiated interval is not mean_ci80."
+    },
+    {
+      "id": "C06-A04",
+      "status": "pass",
+      "evidence": "tests/c06_transformations/test_a04_train_isolation.py: reserved fit/transform does not mutate train state; holdout residual_context does not apply lognormal correction; log intervals have value.mean_ci80=null, precisao.grade=null, normative_classification.status=unavailable."
+    },
+    {
+      "id": "C06-A05",
+      "status": "pass",
+      "evidence": "tests/c06_transformations/test_a05_original_unit.py: inverse unit/comparison_scale=original with estimand/method/assumptions/limitations; identity passes original-scale mean_ci80; sqrt-on-X still succeeds while log-Y intervals stay experimental; test_transformations order is definition order, not Shapiro ranking."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/test_transformations.py tests/c06_transformations/ -q",
+      "exit_code": 0,
+      "note": "run 1, 43 passed"
+    },
+    {
+      "command": "python3 -m pytest tests/test_transformations.py tests/c06_transformations/ -q",
+      "exit_code": 0,
+      "note": "run 2, 43 passed"
+    },
+    {
+      "command": "PYTHONPATH=. python3 tests/c06_transformations/print_observables.py",
+      "exit_code": 0,
+      "note": "launch 1 and 2 identical; sqrt_line=0,1,2"
+    }
+  ],
+  "unmet_dependencies": [
+    "C16 must update tests/test_audit_fixes.py so sqrt(0) is no longer required to be rejected (ln/inv_sqrt/inverse of 0 stay invalid).",
+    "C04/C05/C03/C07 must wire target_transform_state and inverse_target_prediction at their callsites (handoff.json). X-domain fix is already consumed via apply_transformation."
+  ],
+  "deferred_items": [
+    "Additional Y-transform families (Box-Cox, Yeo-Johnson, sqrt-on-Y, inverse-Y) until an incremental-value test justifies them.",
+    "Validated monetary-mean interval for log-Y (not publishing mean_ci80 by exponentiating endpoints)."
+  ],
+  "review_findings": [
+    "Author self-review (not an independent reviewer): identity and sqrt-on-X are not blocked by the experimental log-Y interval path.",
+    "C16 transversal test will fail on this PR until C16 applies the handoff; that is expected and must not revert the sqrt(0) domain.",
+    "residual_context.origin is a caller-supplied label; C04/C07 must not mark holdout residuals as origin=train.",
+    "Marginal log moments stored on log state are diagnostic and are not used as residual variance for the mean correction."
+  ]
+}
