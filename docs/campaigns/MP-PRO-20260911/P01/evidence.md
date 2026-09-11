@@ -28,17 +28,17 @@ Dossiê grava `model/residual_state.json` além do `residual_context` C12. `abse
 | ID | Resultado | Prova |
 |----|-----------|--------|
 | P01-A01 | pass | `tests/pro_workflow/p01/test_a01_ols_oracle.py` — n=36, categoria dummy, oracle `numpy.linalg.lstsq` + t 80%; ponto/IC/predição coincidem; `xtx_inv` não é σ²(X′X)⁻¹ |
-| P01-A02 | pass | freeze JSON → subprocesso novo → dois sujeitos; matriz malformada/incompleta sem IC fabricado; log sem IC de média monetária; HTTP POST revision + GET |
+| P01-A02 | pass | freeze JSON → processo 1 POST `/projects/{id}/revisions` → processo 2 GET e avalia dois sujeitos; matriz 3×3 `status=malformed` não gera IC; log sem IC de média monetária |
 | P01-A03 | pass | aliases canônico / `target_degree` / `min_fundamentacao_grade` / UI `build_request_spec` / adapter legado; conflito 400; grau 3 pendente ≠ `met` |
 | P01-A04 | pass | sujeito que invalida ln altera o espaço só em `subject_specific`; `population_model` idêntico entre sujeitos |
-| P01-A05 | pass | dossiê com bases/políticas/residual; CLI `reproduce.py` duas vezes; tamper de coeficiente invalida integridade ou reprodução |
+| P01-A05 | pass | dossiê com `subject_x` do freeze; `reproduce.py` recupera ponto e intervalos; GET `/jobs/{id}/artifacts/evidence_bundle.zip` com `application/zip`; tamper invalida integridade/reprodução |
 | P01-A06 | pass | `workflow_context` MP-PRO/1; séries = `used_row_ids`; exemplo sanitizado em `sanitized_snapshot_context.example.json` |
 
 ## Comandos
 
 ```text
 PYTHONPATH=. python3 -m pytest tests/pro_workflow/p01 -q
-# 15 passed, exit 0 (duas execuções, mesma contagem)
+# 18 passed, exit 0 (duas execuções, mesma contagem)
 
 PYTHONPATH=. python3 -m pytest tests/c05_search tests/c12_evidence tests/c14_batch tests/c10_pipeline -q
 # exit 0 no recorte atribuído exercitado

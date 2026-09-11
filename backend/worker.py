@@ -39,8 +39,7 @@ from modules.result_contract import (
 from modules.pro_workflow.report_context import aligned_fit_series, formula_from_coefficients
 from modules.pro_workflow.residual_state import (
     CALCULATION_VERSION,
-    extract_residual_state,
-    json_safe_residual_state,
+    complete_residual_state_for_persist,
     residual_state_is_complete,
 )
 from modules.pro_workflow.workflow_context import build_workflow_context
@@ -522,7 +521,7 @@ def build_frozen_project(
     encoder_state = _as_dict(_get(prepared_dataset, "encoder_state")) or _as_dict(
         _get(winner_fit, "encoder_state")
     ) or {}
-    residual_state = json_safe_residual_state(extract_residual_state(winner_fit))
+    residual_state = complete_residual_state_for_persist(winner_fit, subject_design)
     diagnostics = _as_dict(_get(winner_fit, "diagnostics")) or {}
     feature_order = list(
         residual_state.get("feature_order")
@@ -1476,7 +1475,7 @@ def compose_valuation_job(
                 pack.setdefault("y_transformation", y_tr)
             if cand_spec:
                 pack.setdefault("candidate_spec", cand_spec)
-            residual_for_pack = json_safe_residual_state(extract_residual_state(winner_fit))
+            residual_for_pack = complete_residual_state_for_persist(winner_fit, subject_design)
             if residual_for_pack:
                 pack.setdefault("residual_context", residual_for_pack)
                 pack.setdefault("residual_state", residual_for_pack)

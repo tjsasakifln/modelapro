@@ -88,7 +88,7 @@
   ],
   "tests": {
     "p01": "python3 -m pytest tests/pro_workflow/p01 -q",
-    "p01_pass_count": 15,
+    "p01_pass_count": 18,
     "p01_exit": 0,
     "domain_regression": "python3 -m pytest tests/c05_search tests/c12_evidence tests/c14_batch tests/c10_pipeline tests/c03_normative/test_a04_classifiers.py tests/c03_normative/test_a05_precisao_documentary.py -q"
   },

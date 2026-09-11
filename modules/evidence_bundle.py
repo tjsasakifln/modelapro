@@ -450,7 +450,13 @@ def build_evidence_bundle(
         arts.get("residual_state"),
         _as_mapping(snap.get("model")).get("residual_state"),
     )
-    residual_context = dict(provided_residual_context) if provided_residual_context else _residual_context_for_reproduction(residual_state)
+    mapped_residual = _residual_context_for_reproduction(provided_residual_context or residual_state)
+    if mapped_residual:
+        residual_context = mapped_residual
+    elif provided_residual_context:
+        residual_context = dict(provided_residual_context)
+    else:
+        residual_context = {}
     if residual_state:
         write_json(resolve_inside(out, "model/residual_state.json"), residual_state)
         _register(files_meta, out, "model/residual_state.json", "application/json", BUNDLE_VERSION, "residual_state")
@@ -1714,8 +1720,21 @@ def _residual_context_for_reproduction(residual_state: Mapping[str, Any]) -> Dic
     state = _as_mapping(residual_state)
     if not state:
         return {}
-    if state.get("interval_method") and (state.get("std_error") or state.get("residual_std_error") or state.get("t_crit")):
-        return dict(state)
+    if state.get("interval_method") and (
+        state.get("std_error")
+        or state.get("residual_std_error")
+        or state.get("residual_std")
+        or state.get("t_crit")
+        or state.get("t_crit_80")
+    ):
+        mapped = dict(state)
+        if mapped.get("std_error") is None:
+            mapped["std_error"] = state.get("residual_std") or state.get("residual_std_error")
+        if mapped.get("t_crit") is None:
+            mapped["t_crit"] = state.get("t_crit_80")
+        if mapped.get("subject_x") is None:
+            mapped["subject_x"] = state.get("x0")
+        return mapped
     std = state.get("residual_std") or state.get("std_error") or state.get("residual_std_error")
     t_crit = state.get("t_crit_80") or state.get("t_crit")
     xtx = state.get("xtx_inv")
@@ -1727,6 +1746,7 @@ def _residual_context_for_reproduction(residual_state: Mapping[str, Any]) -> Dic
         "std_error": std,
         "residual_std_error": std,
         "t_crit": t_crit,
+        "subject_x": state.get("subject_x") or state.get("x0"),
         "xtx_inv": xtx,
         "xtx_inv_kind": state.get("xtx_inv_kind"),
         "scale_convention": state.get("scale_convention"),

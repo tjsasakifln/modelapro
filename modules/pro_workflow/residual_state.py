@@ -155,6 +155,7 @@ def _empty_state(*, status: str, limitations: Sequence[str], **extra: Any) -> Di
         "interval_scale": "transformed",
         "t_crit_80": None,
         "mean_ci_level": MEAN_CI_LEVEL,
+        "subject_x": None,
     }
     payload.update(extra)
     return payload
@@ -201,6 +202,8 @@ def json_safe_residual_state(state: Any) -> Dict[str, Any]:
     out["used_row_ids"] = [str(x) for x in list(out.get("used_row_ids") or [])]
     xtx = _matrix_to_lists(out.get("xtx_inv"))
     out["xtx_inv"] = xtx
+    if out.get("subject_x") is not None:
+        out["subject_x"] = _vector_to_list(out.get("subject_x"))
     for numeric_key in (
         "n",
         "k",
@@ -363,15 +366,49 @@ def _from_design_qr(x_design: Any, y_design: Any, order: Sequence[str]) -> Optio
     }
 
 
+def declared_residual_status(state: Any) -> Optional[str]:
+    block = _as_mapping(state)
+    status = block.get("status")
+    if status in {STATUS_COMPLETE, STATUS_INCOMPLETE, STATUS_MALFORMED}:
+        return str(status)
+    return None
+
+
 def extract_residual_state(winner_fit: Any) -> Dict[str, Any]:
-    """Pull JSON-safe residual/design state from a live CandidateFit or mapping."""
+    """Pull JSON-safe residual/design state from a live CandidateFit or mapping.
+
+    A declared MP-PRO/1 block with status incomplete/malformed is never
+    rebuilt from stored xtx_inv. Live reconstruction uses model_object or
+    the QR of X_design, not an untyped inverse already on disk.
+    """
     existing = _get(winner_fit, "residual_state")
     if existing is None:
         existing = _as_mapping(_get(winner_fit, "model_state")).get("residual_state")
     if isinstance(existing, Mapping) and existing.get("schema_version") == RESIDUAL_STATE_SCHEMA:
+        status = declared_residual_status(existing)
         safe = json_safe_residual_state(existing)
+        if status in {STATUS_INCOMPLETE, STATUS_MALFORMED}:
+            limitations = list(safe.get("limitations") or [])
+            if status == STATUS_MALFORMED and LIMITATION_MALFORMED not in limitations:
+                limitations.append(LIMITATION_MALFORMED)
+            if LIMITATION_NO_INTERVALS not in limitations:
+                limitations.append(LIMITATION_NO_INTERVALS)
+            if status == STATUS_INCOMPLETE and LIMITATION_INCOMPLETE not in limitations:
+                limitations.append(LIMITATION_INCOMPLETE)
+            safe["status"] = status
+            safe["limitations"] = limitations
+            return safe
         if residual_state_is_complete(safe):
             return safe
+        # Declared schema but not complete: do not promote stored xtx_inv.
+        limitations = list(safe.get("limitations") or [])
+        if LIMITATION_INCOMPLETE not in limitations:
+            limitations.append(LIMITATION_INCOMPLETE)
+        if LIMITATION_NO_INTERVALS not in limitations:
+            limitations.append(LIMITATION_NO_INTERVALS)
+        safe["status"] = STATUS_INCOMPLETE
+        safe["limitations"] = limitations
+        return safe
 
     diagnostics = _as_mapping(_get(winner_fit, "diagnostics"))
     model_state = _as_mapping(_get(winner_fit, "model_state"))
@@ -388,43 +425,21 @@ def extract_residual_state(winner_fit: Any) -> Dict[str, Any]:
     if extracted is None:
         extracted = _from_design_qr(x_design, y_design, order)
         if extracted is None:
-            # Do not invert a stored matrix of unknown convention or rank.
-            stored_xtx = _matrix_to_lists(model_state.get("xtx_inv") or diagnostics.get("xtx_inv"))
-            stored_std = _finite(model_state.get("residual_std") or diagnostics.get("residual_std"))
-            stored_df = _finite(
-                model_state.get("df_resid")
-                or diagnostics.get("df_resid")
-                or model_state.get("df")
-            )
-            if stored_xtx is None or stored_std is None or stored_df is None:
-                limitations = [LIMITATION_INCOMPLETE, LIMITATION_NO_INTERVALS, LIMITATION_NO_PINV]
-                return json_safe_residual_state(
-                    _empty_state(
-                        status=STATUS_INCOMPLETE,
-                        limitations=limitations,
-                        feature_order=order,
-                        coefficients={str(k): v for k, v in coefficients.items() if _finite(v) is not None},
-                        used_row_ids=[str(x) for x in list(_get(winner_fit, "used_row_ids") or [])],
-                        n=_finite(diagnostics.get("n") or model_state.get("n") or _get(winner_fit, "n")),
-                        k=_finite(diagnostics.get("k") or model_state.get("k") or _get(winner_fit, "k")),
-                        has_intercept=diagnostics.get("has_intercept"),
-                        intercept_column=diagnostics.get("intercept_column"),
-                    )
+            # Stored xtx_inv without a complete residual_state is not (X'X)^{-1}.
+            limitations = [LIMITATION_INCOMPLETE, LIMITATION_NO_INTERVALS, LIMITATION_NO_PINV]
+            return json_safe_residual_state(
+                _empty_state(
+                    status=STATUS_INCOMPLETE,
+                    limitations=limitations,
+                    feature_order=order,
+                    coefficients={str(k): v for k, v in coefficients.items() if _finite(v) is not None},
+                    used_row_ids=[str(x) for x in list(_get(winner_fit, "used_row_ids") or [])],
+                    n=_finite(diagnostics.get("n") or model_state.get("n") or _get(winner_fit, "n")),
+                    k=_finite(diagnostics.get("k") or model_state.get("k") or _get(winner_fit, "k")),
+                    has_intercept=diagnostics.get("has_intercept"),
+                    intercept_column=diagnostics.get("intercept_column"),
                 )
-            extracted = {
-                "xtx_inv": stored_xtx,
-                "xtx_inv_kind": model_state.get("xtx_inv_kind") or XTX_INV_KIND_NORMALIZED,
-                "residual_scale": (stored_std ** 2) if stored_std is not None else None,
-                "residual_std": stored_std,
-                "df_resid": stored_df,
-                "n": _finite(diagnostics.get("n") or model_state.get("n")),
-                "n_design_columns": len(stored_xtx),
-                "coefficients": coefficients,
-                "feature_order": order if len(order) == len(stored_xtx) else [f"x{i}" for i in range(len(stored_xtx))],
-                "solver": diagnostics.get("fit_method") or "qr",
-                "source": "stored_model_state",
-            }
-            source_limitations.append("residual_state_from_stored_fields")
+            )
 
     n = extracted.get("n")
     if n is None:
@@ -444,6 +459,17 @@ def extract_residual_state(winner_fit: Any) -> Dict[str, Any]:
     df_resid = extracted.get("df_resid")
     t_crit = _t_critical(float(df_resid), MEAN_CI_LEVEL) if df_resid is not None else None
     used = [str(x) for x in list(_get(winner_fit, "used_row_ids") or [])]
+    y_state = _get(winner_fit, "target_transform_state") or model_state.get("target_transform_state")
+    y_name = None
+    if isinstance(y_state, Mapping):
+        y_name = y_state.get("name")
+    elif isinstance(y_state, str):
+        y_name = y_state
+    spec = _as_mapping(_get(winner_fit, "candidate_spec"))
+    if y_name is None:
+        raw_y = spec.get("y_transformation")
+        y_name = raw_y.get("name") if isinstance(raw_y, Mapping) else raw_y
+    identity = str(y_name or "identity").lower() in {"", "identity", "linear", "none"}
     payload = _empty_state(
         status=STATUS_COMPLETE,
         limitations=source_limitations,
@@ -464,8 +490,50 @@ def extract_residual_state(winner_fit: Any) -> Dict[str, Any]:
         used_row_ids=used,
         t_crit_80=t_crit,
         source=extracted.get("source"),
+        interval_scale="original" if identity else "transformed",
     )
     return json_safe_residual_state(payload)
+
+
+def subject_x_from_design(subject_design: Any, feature_order: Sequence[str]) -> Optional[List[float]]:
+    """Row of the design in residual feature_order. Missing entries → None (not 0)."""
+    if not feature_order:
+        return None
+    x_obj = _get(subject_design, "X")
+    x_map: Dict[str, Any] = {}
+    if isinstance(x_obj, Mapping):
+        x_map = dict(x_obj)
+    elif hasattr(x_obj, "iloc"):
+        try:
+            x_map = dict(x_obj.iloc[0])
+        except Exception:
+            x_map = {}
+    raw = _get(subject_design, "raw_values") or _get(subject_design, "raw") or {}
+    if not isinstance(raw, Mapping):
+        raw = {}
+    vec: List[float] = []
+    for name in feature_order:
+        if name == "const":
+            value = _finite(x_map.get(name))
+            vec.append(1.0 if value is None else value)
+            continue
+        value = _finite(x_map.get(name))
+        if value is None:
+            value = _finite(raw.get(name))
+        if value is None:
+            return None
+        vec.append(value)
+    return vec
+
+
+def complete_residual_state_for_persist(winner_fit: Any, subject_design: Any = None) -> Dict[str, Any]:
+    """Freeze/dossier residual block, including subject_x when the design row exists."""
+    residual_state = json_safe_residual_state(extract_residual_state(winner_fit))
+    subject_x = subject_x_from_design(subject_design, residual_state.get("feature_order") or [])
+    if subject_x is not None:
+        residual_state["subject_x"] = subject_x
+        residual_state = json_safe_residual_state(residual_state)
+    return residual_state
 
 
 def apply_mean_prediction_intervals(

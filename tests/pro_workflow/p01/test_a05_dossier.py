@@ -10,7 +10,6 @@ from pathlib import Path
 from backend.worker import build_frozen_project
 from modules.evidence_bundle import build_evidence_bundle, reproduce_from_bundle, verify_bundle
 from modules.model_builder import CandidateSpec, fit_candidate
-from modules.pro_workflow.residual_state import extract_residual_state
 from tests.pro_workflow.p01.conftest import documented_identity_ols_frame, documented_request_spec
 from tests.pro_workflow.p01.test_a01_ols_oracle import _prepared
 
@@ -32,7 +31,6 @@ def _bundle(tmp_path: Path):
     )
     req = documented_request_spec()
     fit = fit_candidate(prepared, spec, req)
-    residual = extract_residual_state(fit)
     from modules.valuation_batch import builtin_evaluate_fitted, restore_candidate_fit
     frozen = build_frozen_project(
         project_id="p01-a05",
@@ -62,12 +60,8 @@ def _bundle(tmp_path: Path):
         },
         req,
     )
-    residual = dict(residual)
-    residual["subject_x"] = [1.0, 100.0, 1.0]
-    residual["interval_method"] = "ols_mean_and_prediction"
-    residual["interval_scale"] = "original"
-    residual["std_error"] = residual.get("residual_std")
-    residual["t_crit"] = residual.get("t_crit_80")
+    residual = frozen.get("residual_state") or frozen["model_state"]["residual_state"]
+    assert residual.get("subject_x"), "compose/freeze must pack subject_x from subject_design.X"
     snapshot = {
         "schema_version": "MP/1",
         "job_id": "job-p01-a05",
@@ -159,13 +153,15 @@ def test_p01_a05_bundle_contains_bases_policies_and_reproduces(tmp_path):
     SCRATCH.mkdir(parents=True, exist_ok=True)
     (SCRATCH / "p01-a05-repro-1.json").write_text(r1.stdout or r1.stderr, encoding="utf-8")
     (SCRATCH / "p01-a05-repro-2.json").write_text(r2.stdout or r2.stderr, encoding="utf-8")
-    assert r1.returncode in {0, 3}, r1.stdout + r1.stderr
-    assert r2.returncode == r1.returncode
+    assert r1.returncode == 0, r1.stdout + r1.stderr
+    assert r2.returncode == 0, r2.stdout + r2.stderr
     j1 = json.loads(r1.stdout)
     j2 = json.loads(r2.stdout)
-    if r1.returncode == 0:
-        assert j1.get("point") is not None
-        assert j1.get("point") == j2.get("point")
+    assert j1.get("point") is not None
+    assert j1.get("point") == j2.get("point")
+    assert j1.get("mean_ci80") is not None
+    assert j1.get("prediction_interval") is not None
+    assert j1["mean_ci80"]["lower"] == j2["mean_ci80"]["lower"]
 
 
 def test_p01_a05_tamper_invalidates_integrity_or_reproduction(tmp_path):
@@ -195,3 +191,127 @@ def test_p01_a05_tamper_invalidates_integrity_or_reproduction(tmp_path):
         encoding="utf-8",
     )
     assert integrity.get("ok") is False or repro.get("ok") is False
+
+
+def test_p01_a05_artifact_zip_route_serves_zip_bytes(isolated_p01_runtime, tmp_path):
+    import io
+    import zipfile
+
+    from fastapi.testclient import TestClient
+
+    from backend.api import app
+
+    out, _manifest, _residual, _fit = _bundle(tmp_path)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in out.rglob("*"):
+            if path.is_file():
+                zf.write(path, arcname=str(path.relative_to(out)).replace("\\", "/"))
+    zip_bytes = buf.getvalue()
+    assert zip_bytes[:2] == b"PK"
+    store = isolated_p01_runtime["job_store"]
+    job = store.create()
+    job_id = job["job_id"]
+    store.save_artifact(job_id, "evidence_bundle.zip", zip_bytes)
+    client = TestClient(app)
+    resp = client.get(f"/jobs/{job_id}/artifacts/evidence_bundle.zip")
+    assert resp.status_code == 200, resp.text
+    assert "application/zip" in (resp.headers.get("content-type") or "")
+    assert resp.content[:2] == b"PK"
+    assert resp.content == zip_bytes
+
+
+def test_p01_a05_compose_zip_residual_has_subject_x(isolated_p01_runtime, tmp_path):
+    """Job artifact zip is packed before freeze; it must still carry subject_x."""
+    import io
+    import zipfile
+
+    from fastapi.testclient import TestClient
+
+    from backend.api import app
+    from backend.worker import compose_valuation_job, resolve_peers
+    from tests.pro_workflow.p01.conftest import documented_csv_bytes, documented_request_spec
+
+    store = isolated_p01_runtime["job_store"]
+    job = store.create()
+    job_id = job["job_id"]
+    ctx = compose_valuation_job(
+        job_id=job_id,
+        file_bytes=documented_csv_bytes(),
+        filename="mercado.csv",
+        request_spec=documented_request_spec(),
+        subject_raw={"area": 100.0, "bairro": "Sul"},
+        project_id=None,
+        peers=resolve_peers(),
+        job_store=store,
+    )
+    zip_state = (ctx.get("artifact_states") or {}).get("evidence_bundle.zip") or {}
+    client = TestClient(app)
+    resp = client.get(f"/jobs/{job_id}/artifacts/evidence_bundle.zip")
+    assert resp.status_code == 200, resp.text + json.dumps(zip_state)
+    assert "application/zip" in (resp.headers.get("content-type") or "")
+    assert resp.content[:2] == b"PK"
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        names = zf.namelist()
+        residual_name = "model/residual_context.json"
+        if residual_name not in names:
+            residual_name = "model/residual_state.json"
+        assert residual_name in names, names
+        residual = json.loads(zf.read(residual_name).decode("utf-8"))
+        extract_dir = tmp_path / "from-zip"
+        zf.extractall(extract_dir)
+    assert residual.get("subject_x"), residual
+    assert isinstance(residual["subject_x"], list)
+    order = residual.get("feature_order") or []
+    if order:
+        assert len(residual["subject_x"]) == len(order)
+    cmd = [
+        sys.executable,
+        str(REPO / "scripts" / "c12_reproduce" / "reproduce.py"),
+        "--bundle",
+        str(extract_dir),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    (SCRATCH / "p01-a05-compose-zip-repro.json").write_text(proc.stdout or proc.stderr, encoding="utf-8")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    report = json.loads(proc.stdout)
+    assert report.get("point") is not None
+    assert report.get("mean_ci80") is not None
+    assert report.get("prediction_interval") is not None
+
+
+def test_p01_submission_key_material_and_calc_version(monkeypatch, tmp_path):
+    from backend.api import submission_key
+    from tests.pro_workflow.p01.conftest import documented_csv_bytes, documented_request_spec
+
+    file_bytes = documented_csv_bytes()
+    spec = documented_request_spec()
+    subject = {"area": 90.0, "bairro": "Centro"}
+    k1 = submission_key(file_bytes, spec, subject)
+    changed = documented_request_spec()
+    changed["target_unit"] = "BRL/m2"
+    k2 = submission_key(file_bytes, changed, subject)
+    assert k1 != k2
+    import modules.pro_workflow.residual_state as rs
+
+    monkeypatch.setattr(rs, "CALCULATION_VERSION", "MP-PRO/1-other-calc")
+    k3 = submission_key(file_bytes, spec, subject)
+    assert k3 != k1
+
+    store_root = tmp_path / "key-store"
+    store_root.mkdir()
+    from modules.job_store import JobStore
+
+    JobStore.reset_default()
+    store = JobStore.configure_default(store_root, recover_abandoned=True)
+    created = store.create(idempotency_key=k1, request_spec=spec, input_sha256="a" * 64)
+    job_id = created["job_id"]
+    JobStore.reset_default()
+    recovered = JobStore.configure_default(store_root, recover_abandoned=True)
+    hit = recovered.get_by_idempotency_key(k1)
+    assert hit is not None
+    assert hit["job_id"] == job_id
+    miss = recovered.get_by_idempotency_key(k2)
+    assert miss is None
+    JobStore.reset_default()
