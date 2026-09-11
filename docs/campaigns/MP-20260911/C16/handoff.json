@@ -5,7 +5,7 @@
   "required_callsite": "python scripts/c16_acceptance/run_harness.py --sha <composite> --output <summary.json>",
   "contract_version": "MP/1",
   "dependency_pr": null,
-  "head_sha": "PENDING_COMMIT",
+  "head_sha": "875f70408d3d65cda24f2082f565e6fee9511f66",
   "acceptance_case": "Harness prints disjoint aprovados/reprovados/nao_executados; pytest targets tests/test_audit_fixes.py tests/test_full_flow.py tests/acceptance/; mapping at tests/fixtures/independent/mapping.json",
   "notes": [
     "READY_COMPONENT means corpus/harness, not PASS_E2E.",
