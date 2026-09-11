@@ -80,8 +80,8 @@ The skipped test in the default C15 suite is `test_clean_venv_install_imports_re
 
 Oracle: GitHub Actions run on PR #13, SHA `b8941e6b3300896767e2882b8bf9b1c373281255`.
 
-- PR workflow: https://github.com/tjsasakifln/modelapro/actions/runs/34597990388 — **conclusion=success**
-- Push workflow (same SHA): https://github.com/tjsasakifln/modelapro/actions/runs/34597974163 — **conclusion=success**
+- PR workflow (SHA `9e86441`, includes `.env.example` blank-dir fix): https://github.com/tjsasakifln/modelapro/actions/runs/34599132777 — **conclusion=success**
+- Earlier PR workflow (SHA `b8941e6`): https://github.com/tjsasakifln/modelapro/actions/runs/34597990388 — **conclusion=success**
 
 | Job | OS | Conclusion |
 | --- | --- | --- |

@@ -1,11 +1,11 @@
 {
   "campaign_id": "C15",
-  "head_sha": "b8941e6b3300896767e2882b8bf9b1c373281255",
+  "head_sha": "9e864419591ab48de1fcb04975f35d51c3d145f4",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
   "status": "READY_COMPONENT",
   "pr": "https://github.com/tjsasakifln/modelapro/pull/13",
-  "ci_run": "https://github.com/tjsasakifln/modelapro/actions/runs/34597990388",
+  "ci_run": "https://github.com/tjsasakifln/modelapro/actions/runs/34599132777",
   "criteria": [
     {
       "id": "C15-A01",
@@ -20,12 +20,12 @@
     {
       "id": "C15-A03",
       "status": "PASS",
-      "evidence": "Launcher uses streamlit CLI process and uvicorn --host 127.0.0.1. /health {status:healthy} twice locally and in Linux install-smoke job. Redis not required. C10/C11 keys validated. CORS * still hardcoded in backend/api.py (C10 handoff); bind host already uses config.API_HOST."
+      "evidence": "Launcher uses streamlit CLI process and uvicorn --host 127.0.0.1. /health {status:healthy} twice locally and in Linux install-smoke job. Redis not required. C10/C11 keys validated. Copying .env.example (blank JOBS_DIR/PROJECTS_DIR) loads via dotenv without error. CORS * still hardcoded in backend/api.py (C10 handoff); bind host already uses config.API_HOST."
     },
     {
       "id": "C15-A04",
       "status": "PASS",
-      "evidence": "PR Actions run 34597990388 conclusion=success on ubuntu-latest and windows-latest. Jobs: lint, C15 tests Linux, C15 tests Windows (33 passed), build, install smoke, inherited baseline (success, not omitted). macOS untested. Python 3.11 declared not matrixed."
+      "evidence": "PR Actions run 34599132777 (fix SHA 9e86441) conclusion=success on ubuntu-latest and windows-latest. Prior run 34597990388 also success. Jobs: lint, C15 tests Linux, C15 tests Windows, build, install smoke, inherited baseline (not omitted). macOS untested. Python 3.11 declared not matrixed."
     },
     {
       "id": "C15-A05",
@@ -43,7 +43,7 @@
     {"command": "python -m c15_local.launcher --check-pdf", "exit_code": 0, "note": "Linux native stack present"},
     {"command": "backend+frontend start x2 GET /health", "exit_code": 0},
     {"command": "pytest tests --ignore=tests/c15_packaging -q (inherited baseline)", "exit_code": 0},
-    {"command": "GitHub Actions run 34597990388 (pull_request)", "exit_code": 0, "note": "conclusion=success"}
+    {"command": "GitHub Actions run 34599132777 (pull_request, SHA 9e86441)", "exit_code": 0, "note": "conclusion=success after JOBS_DIR blank fix"}
   ],
   "unmet_dependencies": [
     "C10 must consume config.CORS_ORIGINS in backend/api.py",
