@@ -1,0 +1,74 @@
+{
+  "campaign_id": "C09",
+  "head_sha": "081dc4c6590bbfef2ad3c2893efbc8e7ae67e596",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "pr_url": "https://github.com/tjsasakifln/modelapro/pull/10",
+  "status": "INTEGRATION_PENDING",
+  "criteria": [
+    {
+      "id": "C09-A01",
+      "status": "pass",
+      "evidence": "tests/test_forms_heuristics.py::TestRequestSpecFromBairroAndFormattedNumber e tests/c09_frontend/test_request_spec.py chamam build_request_spec/build_subject_payload/validate_dispatch enviados. bairro é preditor; '1.234,56' permanece em raw_values; candidate_cols=[] bloqueia disparo; categoria fora do esquema exige resolução."
+    },
+    {
+      "id": "C09-A02",
+      "status": "pass",
+      "evidence": "tests/c09_frontend/test_snapshot_presenter.py contra present_snapshot enviado. Ponto null não vira zero nem :.4f; precisão not_computed/classified/unclassified/error distintos; issues persistem; sem banner 'atende à norma'; intervalos e ações C13 em português com evidência e limitações."
+    },
+    {
+      "id": "C09-A03",
+      "status": "pass",
+      "evidence": "tests/c09_frontend/test_job_client.py contra JobClient enviado e HTTP stub das rotas C11. POST /jobs 202 guarda job_id; GET fechado/timeout preserva job_id; recover() lê o snapshot. WebSocket não é usado na recuperação."
+    },
+    {
+      "id": "C09-A04",
+      "status": "pass",
+      "evidence": "test_rerun_does_not_post_second_job_while_running (jobs_posted==1) e test_cancel_save_and_artifacts_reflect_real_state. PDF failed oferece cálculo; save_revision usa POST /projects/{id}/revisions."
+    },
+    {
+      "id": "C09-A05",
+      "status": "pass",
+      "evidence": "tests/c09_frontend/test_layout_states.py (viewport 360, tabela 200, estados de precisão) e test_app_launch.py (AppTest.from_file frontend/app.py duas vezes). Fixture visual rotulada. E2E API real adiado a C17."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/test_forms_heuristics.py tests/c09_frontend/test_request_spec.py -q",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c09_frontend/test_snapshot_presenter.py -q",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c09_frontend/test_job_client.py -q",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c09_frontend/test_layout_states.py tests/c09_frontend/test_app_launch.py -q",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/test_forms_heuristics.py tests/c09_frontend/ -q",
+      "exit_code": 0
+    }
+  ],
+  "unmet_dependencies": [
+    "C10: POST /preview e POST /jobs + ResultSnapshot HTTP ainda não publicados na base auditada",
+    "C11: GET /jobs/{id}, cancel, artifacts, projects/revisions ainda não publicados",
+    "C13: next_actions reais no snapshot (C09 apenas apresenta o campo)",
+    "C14: POST /projects/{id}/batch ainda não publicado",
+    "C15: frontend/__init__.py e components/__init__.py (C09 usa fallback de importação)",
+    "C17: E2E contra API publicada"
+  ],
+  "deferred_items": [
+    "E2E Streamlit+API ao vivo (C17)",
+    "Pacote instalável modelapro=frontend.app:main após __init__.py da C15"
+  ],
+  "review_findings": [
+    "Autorrevisão: o cliente HTTP e o apresentador são testados no código enviado; o stub HTTP é simulador de pares rotulado, não integração real.",
+    "Risco residual: se C10 alterar nomes multipart (request_json/subject_json) a UI precisará de ajuste coordenado.",
+    "Risco residual: AppTest cobre o entrypoint sem arquivo enviado; o preenchimento visual completo do avaliando depende da prévia publicada."
+  ]
+}
