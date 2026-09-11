@@ -1,0 +1,50 @@
+/* Global Styles */
+.stApp {
+    background-color: #0e1117;
+    color: #fafafa;
+    font-family: 'Inter', sans-serif;
+}
+
+h1, h2, h3 {
+    color: #00d4ff;
+    font-weight: 700;
+}
+
+/* Custom Buttons */
+.stButton>button {
+    background-color: #00d4ff;
+    color: #000000;
+    border-radius: 8px;
+    border: none;
+    padding: 0.5rem 1rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.stButton>button:hover {
+    background-color: #00a3cc;
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+}
+
+/* Cards/Containers */
+.css-1r6slb0 {
+    background-color: #1e2130;
+    border-radius: 12px;
+    padding: 1.5rem;
+    border: 1px solid #2d3342;
+}
+
+/* Metrics */
+div[data-testid="stMetricValue"] {
+    color: #00d4ff;
+}
+
+/* Progress Bar */
+.stProgress > div > div > div > div {
+    background-color: #00d4ff;
+}
+
+/* Sidebar */
+.css-1d391kg {
+    background-color: #161924;
+}

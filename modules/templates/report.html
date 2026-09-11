@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Laudo de Avaliação — {{ app_name }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 2cm 1.8cm;
+    @bottom-center {
+      content: "Página " counter(page) " de " counter(pages);
+      font-size: 8pt;
+      color: #666;
+    }
+  }
+  body {
+    font-family: "Helvetica", "Arial", sans-serif;
+    font-size: 10.5pt;
+    color: #1a1a1a;
+    line-height: 1.4;
+  }
+  h1 {
+    font-size: 15pt;
+    color: #0b3d5c;
+    margin-bottom: 0.2em;
+  }
+  h2 {
+    font-size: 12.5pt;
+    color: #0b3d5c;
+    border-bottom: 1.5pt solid #0b3d5c;
+    padding-bottom: 3px;
+    margin-top: 1.4em;
+    margin-bottom: 0.6em;
+  }
+  .subtitle {
+    font-size: 10pt;
+    color: #444;
+    margin-bottom: 1em;
+  }
+  .meta-block p {
+    margin: 2px 0;
+  }
+  .meta-block b {
+    display: inline-block;
+    min-width: 120px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6em 0 1em 0;
+    font-size: 9.5pt;
+  }
+  th, td {
+    border: 1px solid #ccc;
+    padding: 4px 6px;
+    text-align: left;
+  }
+  th {
+    background-color: #0b3d5c;
+    color: #fff;
+    font-weight: bold;
+  }
+  tr:nth-child(even) td {
+    background-color: #f4f7f9;
+  }
+  .formula-box {
+    background-color: #f4f7f9;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 8px 10px;
+    font-family: "Courier New", monospace;
+    font-size: 10pt;
+    margin: 0.6em 0;
+  }
+  .chart-img {
+    width: 100%;
+    max-width: 480px;
+    display: block;
+    margin: 0.6em auto;
+  }
+  .disclaimer {
+    font-size: 9pt;
+    color: #333;
+    background-color: #fff8e1;
+    border: 1px solid #e0c060;
+    border-radius: 3px;
+    padding: 8px 10px;
+    margin: 0.6em 0;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background-color: #0b3d5c;
+    color: #fff;
+    font-weight: bold;
+  }
+  .metrics-grid {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6em 0;
+  }
+  .metrics-grid td {
+    border: 1px solid #ccc;
+    padding: 6px 8px;
+  }
+  .metrics-grid td.label {
+    background-color: #f4f7f9;
+    font-weight: bold;
+    width: 55%;
+  }
+  footer.report-footer {
+    margin-top: 1.6em;
+    padding-top: 8px;
+    border-top: 1px solid #ccc;
+    font-size: 8.5pt;
+    color: #555;
+  }
+  .no-data {
+    color: #777;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+  <h1>{{ app_name }} — Laudo de Avaliação</h1>
+  <div class="subtitle">Método Comparativo Direto de Dados de Mercado — Tratamento Científico por Regressão Linear</div>
+
+  <div class="meta-block">
+    <p><b>Data de referência:</b> {{ data_referencia }}</p>
+    <p><b>Solicitante:</b> {{ solicitante or "Não informado" }}</p>
+    <p><b>Finalidade:</b> {{ finalidade or "Não informado" }}</p>
+    <p><b>Objetivo:</b> Determinação do valor de mercado do imóvel avaliando{{ (" (" + target_col + ")") if target_col else "" }}, pelo Método Comparativo Direto de Dados de Mercado, com tratamento científico por Inferência Estatística (Regressão Linear Múltipla), conforme NBR 14653-2.</p>
+  </div>
+
+  <div class="disclaimer">
+    <b>Pressupostos e ressalvas:</b> os dados de mercado e as características do imóvel avaliando foram
+    considerados verídicos e representativos, conforme informados pelo usuário. Este laudo não dispensa
+    vistoria técnica in loco nem substitui a responsabilidade técnica do profissional habilitado.
+  </div>
+
+  {% if market_summary_rows %}
+  <h2>Diagnóstico do Mercado (NBR 14653-2 §10.1-f)</h2>
+  <p>Amostra de mercado utilizada na modelagem: <b>{{ market_summary_n }}</b> dados.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Variável-base</th>
+        <th>Mínimo</th>
+        <th>Média</th>
+        <th>Máximo</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in market_summary_rows %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ row.min }}</td>
+        <td>{{ row.mean }}</td>
+        <td>{{ row.max }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>Especificação da Avaliação (Tabela 1 — NBR 14653-2)</h2>
+  <p>
+    Grau de Fundamentação atingido: <span class="badge">{{ grau_fundamentacao_label }}</span>
+    &nbsp;&nbsp;
+    Grau de Precisão atingido: <span class="badge">{{ grau_precisao_label }}</span>
+  </p>
+  {% if grau_precisao_note %}
+  <p class="no-data">{{ grau_precisao_note }}</p>
+  {% endif %}
+  {% if item_scores %}
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Descrição</th>
+        <th>Grau Atingido</th>
+        <th>Detalhe</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in item_scores %}
+      <tr>
+        <td>{{ it.item }}</td>
+        <td>{{ it.description }}</td>
+        <td>{{ it.grau_label }}</td>
+        <td>{{ it.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="no-data">Detalhamento por item não disponível.</p>
+  {% endif %}
+
+  {% if exhaustive is sameas false %}
+  <div class="disclaimer">
+    <b>Ressalva metodológica sobre a busca de variáveis/transformações:</b> o espaço de combinações
+    (variável x transformação) excedeu o limite de segurança combinatória e a busca recorreu ao
+    fallback documentado de poda por correlação (top-N variáveis mais correlacionadas com o alvo){% if combinations_tested %}, tendo testado {{ combinations_tested }} combinações{% endif %}.
+    A garantia de ótimo global sobre TODO o espaço de busca NÃO se aplica a este resultado.
+  </div>
+  {% elif exhaustive is sameas true %}
+  <p class="no-data">
+    Busca exaustiva: todas{% if combinations_tested %} ({{ combinations_tested }}){% endif %} as combinações
+    válidas de variável x transformação foram testadas; o modelo selecionado é o ótimo sobre todo o
+    espaço de busca.
+  </p>
+  {% endif %}
+
+  {% if search_message %}
+  <div class="disclaimer">
+    <b>Observações adicionais da busca de variáveis/transformações:</b> {{ search_message }}
+  </div>
+  {% endif %}
+
+  <h2>Método e Procedimento — Modelo de Regressão</h2>
+  <p>Fórmula do modelo ajustado:</p>
+  <div class="formula-box">{{ formula or "Não disponível" }}</div>
+
+  {% if coef_rows %}
+  <table>
+    <thead>
+      <tr>
+        <th>Variável</th>
+        <th>Coeficiente</th>
+        <th>P-valor</th>
+        <th>VIF</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in coef_rows %}
+      <tr>
+        <td>{{ row.variable }}</td>
+        <td>{{ row.coefficient }}</td>
+        <td>{{ row.pvalue }}</td>
+        <td>{{ row.vif }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="no-data">
+    Observação (Anexo A.2.1.5.2): a norma não define limiar de corte para o VIF (Fator de Inflação de
+    Variância) — atenção especial é recomendada para correlações superiores a 0,80. O VIF acima é
+    apresentado a título informativo e não reprova o modelo.
+  </p>
+  {% else %}
+  <p class="no-data">Tabela de coeficientes não disponível.</p>
+  {% endif %}
+
+  <h2>Tratamento dos Dados e Identificação do Resultado</h2>
+  <table class="metrics-grid">
+    <tr><td class="label">R²</td><td>{{ metrics.r2 }}</td></tr>
+    <tr><td class="label">R² Ajustado</td><td>{{ metrics.r2_adjusted }}</td></tr>
+    <tr><td class="label">Estatística F (p-valor)</td><td>{{ metrics.f_statistic }} ({{ metrics.f_pvalue }})</td></tr>
+    <tr><td class="label">Durbin-Watson</td><td>{{ metrics.durbin_watson }}</td></tr>
+  </table>
+
+  {% if chart_b64 %}
+  <p><b>Gráfico: Preços Observados vs. Valores Estimados</b> (NBR 14653-2, §8.2.1.4.1 / §10.1-k)</p>
+  <img class="chart-img" src="data:image/png;base64,{{ chart_b64 }}" alt="Observado vs. Estimado">
+  {% else %}
+  <p class="no-data">Gráfico Observado vs. Estimado não disponível.</p>
+  {% endif %}
+
+  {% if has_avaliando %}
+  <h2>Imóvel Avaliando</h2>
+  {% if avaliando_items %}
+  <table>
+    <thead><tr><th>Variável</th><th>Valor Informado</th></tr></thead>
+    <tbody>
+      {% for k, v in avaliando_items %}
+      <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <table class="metrics-grid">
+    <tr><td class="label">Estimativa pontual de valor{{ (" (" + target_col + ")") if target_col else "" }}</td><td>{{ central_estimate }}</td></tr>
+    <tr><td class="label">Intervalo de confiança de 80% (Tabela 5)</td><td>{{ ic80_inferior }} a {{ ic80_superior }}</td></tr>
+    <tr><td class="label">Campo de arbítrio (±15%, NBR 14653-1 3.8 / NBR 14653-2 8.2.1.5.1)</td><td>{{ campo_arbitrio_inferior }} a {{ campo_arbitrio_superior }}</td></tr>
+    <tr><td class="label">Valores admissíveis (interseção IC 80% ∩ campo de arbítrio — Anexo A.10.1.1)</td><td>{{ valores_admissiveis_inferior }} a {{ valores_admissiveis_superior }}</td></tr>
+  </table>
+  {% endif %}
+
+  {% if market_data_table %}
+  <h2>Planilha dos Dados de Mercado Utilizados (NBR 14653-2 §10.1-i)</h2>
+  <table>
+    <thead>
+      <tr>
+        {% for col in market_data_table.columns %}
+        <th>{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in market_data_table.rows %}
+      <tr>
+        {% for v in row %}
+        <td>{{ v }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if market_data_table.truncated %}
+  <p class="no-data">
+    Exibindo {{ market_data_table.shown_rows }} de {{ market_data_table.total_rows }} registros
+    (tabela truncada para manter o laudo em tamanho gerenciável).
+  </p>
+  {% endif %}
+  {% endif %}
+
+  <footer class="report-footer">
+    Laudo gerado automaticamente pelo CONFENGE MODELA PRO — requer revisão e assinatura de profissional
+    habilitado (Engenheiro de Avaliações) antes de uso oficial, conforme NBR 14653-2 §10.1-m.
+  </footer>
+
+</body>
+</html>

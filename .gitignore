@@ -1,0 +1,31 @@
+# Normas ABNT protegidas por direito autoral — não redistribuir publicamente
+docs/normas/
+
+# Ambiente / segredos
+.env
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Dados/execução local (não versionar uploads/relatórios gerados em runtime)
+uploads/*
+!uploads/.gitkeep
+reports/*
+!reports/.gitkeep
+.benchmarks/
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+
+# Playwright MCP test artifacts (browser snapshots/logs from manual QA)
+.playwright-mcp/
