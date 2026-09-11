@@ -195,3 +195,14 @@ class TestBairroAndFormattedNumberMapping:
         assert spec["reference_date"] == "2024-02-01"
         assert spec["inspection_date"] == "2024-01-20"
         assert spec["reference_date"] != spec["inspection_date"]
+
+    def test_request_spec_emits_only_canonical_grade_key(self):
+        spec = _spec_from_preview(candidate_cols=["bairro", "area"])
+        search = spec["search_policy"]
+        evaluation = spec["evaluation_policy"]
+        assert "minimum_fundamentacao_grade" in search
+        assert search["minimum_fundamentacao_grade"] == 2
+        assert "target_degree" not in search
+        assert "min_fundamentacao_grade" not in search
+        assert "minimum_fundamentacao_grade" not in evaluation
+        assert "target_degree" not in evaluation

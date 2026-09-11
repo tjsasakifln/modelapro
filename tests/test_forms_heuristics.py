@@ -87,3 +87,15 @@ class TestRequestSpecFromBairroAndFormattedNumber:
         decision = validate_dispatch(spec, {"supported": True, "issues": []}, preview=PREVIEW_BAIRRO_FORMATTED)
         assert decision["can_dispatch"] is False
         assert any(item["code"] == "no_authorized_variables" for item in decision["blocking"])
+
+    def test_null_grade_and_none_method_are_explicit(self):
+        spec = build_request_spec(
+            target_col="preco",
+            candidate_cols=["area"],
+            roles={"preco": "target", "area": "predictor"},
+            minimum_fundamentacao_grade=None,
+            evaluation_method="none",
+        )
+        assert spec["search_policy"]["minimum_fundamentacao_grade"] is None
+        assert spec["evaluation_policy"]["method"] == "none"
+        assert "minimum_fundamentacao_grade" not in spec["evaluation_policy"]

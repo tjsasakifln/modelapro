@@ -1,7 +1,7 @@
-"""Entrada Streamlit da avaliação (campanha C09).
+"""Entrada Streamlit da avaliação (campanha P02).
 
-Fluxo: importar e revisar interpretação → papéis/unidades/alvo → avaliando
-→ executar → revisar valor/faixas/pendências → salvar/reabrir/evidências.
+Fluxo: preparação da amostra → imóvel avaliando → resultado e revisão
+→ projeto salvo.
 
 O resultado é recuperado por GET /jobs/{id}; o WebSocket é notificação
 opcional e nunca a única via. Importável em testes sem disparar a UI.
@@ -39,8 +39,15 @@ def _import_components():
             present_snapshot,
             render_artifact_panel,
             render_job_panel,
+            render_project_panel,
             render_snapshot_panel,
             sidebar,
+        )
+        from components.workflow import (
+            present_batch_items,
+            present_delivery_state,
+            revision_recovery_plan,
+            should_block_duplicate_submit,
         )
         return locals()
     except ImportError:
@@ -68,8 +75,15 @@ def _import_components():
             present_snapshot,
             render_artifact_panel,
             render_job_panel,
+            render_project_panel,
             render_snapshot_panel,
             sidebar,
+        )
+        from frontend.components.workflow import (
+            present_batch_items,
+            present_delivery_state,
+            revision_recovery_plan,
+            should_block_duplicate_submit,
         )
         return locals()
 
@@ -95,10 +109,15 @@ present_job_status = _COMP["present_job_status"]
 present_snapshot = _COMP["present_snapshot"]
 render_artifact_panel = _COMP["render_artifact_panel"]
 render_job_panel = _COMP["render_job_panel"]
+render_project_panel = _COMP["render_project_panel"]
 render_snapshot_panel = _COMP["render_snapshot_panel"]
 sidebar = _COMP["sidebar"]
 render_charts = _COMP["render_charts"]
 render_snapshot_charts = _COMP["render_snapshot_charts"]
+present_batch_items = _COMP["present_batch_items"]
+present_delivery_state = _COMP["present_delivery_state"]
+revision_recovery_plan = _COMP["revision_recovery_plan"]
+should_block_duplicate_submit = _COMP["should_block_duplicate_submit"]
 
 
 def _should_run_ui() -> bool:
@@ -195,6 +214,18 @@ def main() -> None:
 
     form = upload_form(preview_provider=_preview_provider_for(client))
     persist_client_to_session(st.session_state, client)
+    if form.get("stale_reason"):
+        st.session_state["p02_result_stale_reason"] = form["stale_reason"]
+    current_fp = form.get("fingerprint")
+    last_fp = st.session_state.get("p02_form_fingerprint")
+    if current_fp and last_fp and current_fp != last_fp and client.last_snapshot is not None:
+        st.session_state["p02_result_stale"] = True
+        st.session_state["p02_result_stale_reason"] = (
+            st.session_state.get("p02_result_stale_reason")
+            or "Há um resultado da versão anterior deste pedido."
+        )
+    if current_fp:
+        st.session_state["p02_form_fingerprint"] = current_fp
 
     job_view = present_job_status(client.last_status if client.last_status else {
         "job_id": client.job_id,
@@ -241,6 +272,19 @@ def main() -> None:
                 st.error(item.get("message") or "Disparo recusado.")
         elif uploaded is None or spec is None:
             st.error("Arquivo e especificação são necessários para executar.")
+        elif should_block_duplicate_submit(
+            current_fingerprint=form.get("fingerprint"),
+            last_fingerprint=client.last_submit_fingerprint,
+            job_status=client.last_status,
+            last_job_id=client.job_id,
+        ):
+            st.info("Pedido equivalente já enviado. Recuperando o trabalho existente, sem novo POST.")
+            if client.job_id:
+                try:
+                    client.recover(client.job_id)
+                    persist_client_to_session(st.session_state, client)
+                except (ApiConnectionError, ApiResponseError) as exc:
+                    st.warning(str(exc))
         else:
             try:
                 response = client.submit_job(
@@ -249,7 +293,12 @@ def main() -> None:
                     spec,
                     subject=subject,
                     content_type=getattr(uploaded, "type", None) or "application/octet-stream",
+                    project_id=side.get("project_id"),
+                    input_sha256=(form.get("preview") or {}).get("input_sha256"),
                 )
+                st.session_state["p02_result_stale"] = False
+                st.session_state.pop("p02_result_stale_reason", None)
+                st.session_state["p02_last_request_spec"] = spec
                 persist_client_to_session(st.session_state, client)
                 st.info(f"Trabalho aceito: {response.get('job_id')}. Recuperação pelo identificador, não pelo WebSocket.")
                 ws_url = os.environ.get("MODELA_WS_URL", "ws://127.0.0.1:8000/ws")
@@ -286,13 +335,23 @@ def main() -> None:
         except (ApiConnectionError, ApiResponseError) as exc:
             st.error(str(exc))
 
-    view = present_snapshot(snapshot, viewport_width=720)
+    stale_reason = st.session_state.get("p02_result_stale_reason") if st.session_state.get("p02_result_stale") else None
+    view = present_snapshot(
+        snapshot,
+        viewport_width=1366,
+        request_spec=form.get("request_spec") or st.session_state.get("p02_last_request_spec") or client.last_request_spec,
+        stale_reason=stale_reason,
+    )
     render_snapshot_panel(view, fixture=False)
     if snapshot:
-        render_snapshot_charts(snapshot)
-        legacy_charts = snapshot.get("charts") or {}
-        if legacy_charts and not (snapshot.get("model") or {}).get("charts"):
-            render_charts(legacy_charts)
+        with st.expander("Gráficos e equação (segundo nível)", expanded=False):
+            render_snapshot_charts(snapshot)
+            legacy_charts = snapshot.get("charts") or {}
+            if legacy_charts and not (snapshot.get("model") or {}).get("charts"):
+                render_charts(legacy_charts)
+            report_ctx = snapshot.get("report_context")
+            if not report_ctx:
+                st.caption("Séries gráficas de resíduos/ajustes dependem de P03 (report_context) — indisponíveis neste resultado.")
 
     artifact_states = (client.last_status or {}).get("artifact_states") or {}
     artifact_view = present_artifacts(artifact_states)
@@ -301,7 +360,8 @@ def main() -> None:
         "state": None,
         "result_available": snapshot is not None,
     })
-    art_actions = render_artifact_panel(artifact_view, job_view, snapshot=snapshot)
+    delivery = present_delivery_state(job_view, artifact_view)
+    art_actions = render_artifact_panel(artifact_view, job_view, snapshot=snapshot, delivery=delivery)
 
     if art_actions.get("download_named") and client.job_id:
         try:
@@ -314,10 +374,52 @@ def main() -> None:
         except (ApiConnectionError, ApiResponseError) as exc:
             st.error(str(exc))
 
+    if "p02_projects" not in st.session_state:
+        st.session_state.p02_projects = []
+    if "p02_selected_project" not in st.session_state:
+        st.session_state.p02_selected_project = None
+    if "p02_revisions" not in st.session_state:
+        st.session_state.p02_revisions = None
+    if "p02_batch_rows" not in st.session_state:
+        st.session_state.p02_batch_rows = []
+    if "p02_revisions_handoff" not in st.session_state:
+        st.session_state.p02_revisions_handoff = None
+
+    project_actions = render_project_panel(
+        projects=st.session_state.p02_projects,
+        selected_project=st.session_state.p02_selected_project,
+        revisions=st.session_state.p02_revisions,
+        batch_rows=st.session_state.p02_batch_rows,
+        revisions_handoff=st.session_state.p02_revisions_handoff,
+    )
+
+    if project_actions.get("refresh_projects"):
+        try:
+            st.session_state.p02_projects = client.list_projects() or []
+        except (ApiConnectionError, ApiResponseError) as exc:
+            st.error(str(exc))
+
+    open_id = project_actions.get("open_project_id") or None
+    if open_id:
+        try:
+            loaded = client.get_project(open_id)
+            st.session_state.p02_selected_project = loaded
+            plan = revision_recovery_plan(loaded)
+            st.caption(f"Recuperação canônica via {plan['recover_via']} — não pelo texto da tela.")
+            if plan.get("job_id"):
+                client.recover(plan["job_id"])
+                persist_client_to_session(st.session_state, client)
+            revs = client.list_revisions(open_id)
+            st.session_state.p02_revisions = revs
+            st.session_state.p02_revisions_handoff = revs.get("handoff") if revs.get("list_route_available") is False else None
+        except (ApiConnectionError, ApiResponseError) as exc:
+            st.error(str(exc))
+
+    save_project_id = side.get("project_id") or project_actions.get("create_project_id")
     if art_actions.get("save"):
-        project_id = side.get("project_id")
+        project_id = save_project_id
         if not project_id:
-            st.error("Informe o identificador do projeto na barra lateral para salvar a revisão.")
+            st.error("Informe o identificador do projeto para salvar a revisão.")
         elif snapshot is None:
             st.error("Não há cálculo para salvar.")
         else:
@@ -325,15 +427,49 @@ def main() -> None:
                 saved = client.save_revision(
                     project_id,
                     {
+                        "schema_version": "MP/1",
                         "job_id": client.job_id,
                         "snapshot_ref": {"job_id": client.job_id},
-                        "request_spec": form.get("request_spec"),
+                        "request_spec": form.get("request_spec") or client.last_request_spec,
                     },
                 )
-                st.success(f"Revisão registrada: {saved.get('revision_id') or saved}")
+                st.success(f"Nova revisão registrada: {saved.get('revision_id') or saved} (a anterior permanece).")
+                st.session_state.p02_projects = client.list_projects() or st.session_state.p02_projects
             except (ApiConnectionError, ApiResponseError) as exc:
                 st.error(str(exc))
                 st.caption("A interface não grava uma cópia paralela local do projeto.")
+
+    if project_actions.get("batch_submit"):
+        project_id = save_project_id or (
+            (st.session_state.p02_selected_project or {}).get("project_id")
+        )
+        if not project_id:
+            st.error("Selecione ou informe um projeto para o lote.")
+        else:
+            try:
+                subjects = json.loads(project_actions.get("batch_subjects_text") or "[]")
+            except json.JSONDecodeError:
+                st.error("Sujeitos do lote precisam ser um JSON lista.")
+                subjects = None
+            if isinstance(subjects, list):
+                try:
+                    batch = client.submit_batch(
+                        project_id,
+                        {
+                            "subjects": subjects,
+                            "request_spec": form.get("request_spec") or client.last_request_spec,
+                        },
+                    )
+                    st.info(f"Lote aceito: {batch.get('job_id')}. A consulta de estado é por GET, não por WebSocket.")
+                    if batch.get("job_id"):
+                        try:
+                            recovered = client.recover(batch["job_id"])
+                            snap = client.last_snapshot or recovered
+                            st.session_state.p02_batch_rows = present_batch_items(snap if isinstance(snap, dict) else {})
+                        except (ApiConnectionError, ApiResponseError):
+                            st.session_state.p02_batch_rows = present_batch_items({"items": [{"status": "pending", "subject_id": i} for i, _ in enumerate(subjects)]})
+                except (ApiConnectionError, ApiResponseError) as exc:
+                    st.error(str(exc))
 
     persist_client_to_session(st.session_state, client)
 

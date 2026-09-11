@@ -1,11 +1,12 @@
-"""Formulário da avaliação e contrato HTTP C10/C11 (campanha C09).
+"""Formulário da avaliação e contrato HTTP C10/C11 (campanha P02 / C09).
 
 A leitura semântica do arquivo e a codificação de categorias NÃO são feitas
 aqui: /preview e o esquema de C02 são a fonte. Este módulo apenas:
 
 - monta RequestSpec / payload do avaliando a partir das escolhas do usuário;
 - valida o disparo (lista vazia = nenhuma autorizada, nunca todas);
-- consome a API com timeout e recuperação por job_id.
+- consome a API com timeout e recuperação por job_id;
+- vincula o mapeamento ao arquivo/esquema e emite só a chave canônica de grau.
 """
 
 from __future__ import annotations
@@ -18,6 +19,25 @@ from typing import Any, Callable, Mapping, MutableMapping, Optional, Sequence
 import httpx
 import pandas as pd
 import streamlit as st
+
+from .workflow import (
+    SUPPORTED_EVALUATION_METHODS,
+    SUPPORTED_EVALUATION_METHOD_IDS,
+    canonical_evaluation_policy,
+    canonical_search_policy,
+    cost_estimate_from_payload,
+    execution_fingerprint,
+    interpreted_sample_rows,
+    mapping_binding_token,
+    normalize_minimum_grade,
+    normalize_projects_list,
+    policies_on_the_wire,
+    preview_failure_clears_interpretation,
+    schema_fingerprint,
+    should_block_duplicate_submit,
+    unused_columns_view,
+    widget_namespace,
+)
 
 SCHEMA_VERSION = "MP/1"
 DEFAULT_API_URL = os.environ.get("MODELA_API_URL", "http://127.0.0.1:8000")
@@ -40,7 +60,15 @@ EMPTY_SELECTION_MESSAGE = (
 )
 DEGREE_HELP = (
     "Grau de fundamentação mínimo solicitado: objetivo da busca, não "
-    "promessa de emissão nem de classificação integral."
+    "promessa de emissão nem de classificação integral. Ausência = não solicitado."
+)
+METHOD_HELP = (
+    "Validação independente só corre se um método suportado pela API for "
+    "escolhido. «Não executar» envia evaluation_policy.method=none — não é erro."
+)
+HOLD_OUT_HELP = (
+    "O holdout não fica oculto e não é disparado a cada edição de campo. "
+    "Entra no pedido apenas quando você executar o cálculo."
 )
 
 
@@ -268,30 +296,20 @@ def default_import_options() -> dict:
 
 
 def default_search_policy(minimum_grade: Optional[int] = None) -> dict:
-    return {
-        "mode": "default",
-        "budget": None,
-        "objective": "minimum_fundamentacao_grade",
-        "seed": None,
-        "minimum_fundamentacao_grade": minimum_grade,
-    }
+    """P02 emite só search_policy.minimum_fundamentacao_grade como chave de grau."""
+    return canonical_search_policy(minimum_grade)
 
 
 def default_evaluation_policy(
     minimum_grade: Optional[int] = None,
     *,
     documentary: Optional[Mapping[str, Any]] = None,
+    method: str = "none",
+    seed: Optional[int] = None,
 ) -> dict:
-    policy = {
-        "method": "none",
-        "partitions": None,
-        "groups": None,
-        "seed": None,
-        "minimum_fundamentacao_grade": minimum_grade,
-    }
-    if documentary is not None:
-        policy["documentary"] = dict(documentary)
-    return policy
+    """P02 não copia o grau para evaluation_policy (chave canônica só em search_policy)."""
+    del minimum_grade  # grau canônico não vive aqui
+    return canonical_evaluation_policy(method=method, seed=seed, documentary=documentary)
 
 
 def build_request_spec(
@@ -312,11 +330,13 @@ def build_request_spec(
     purpose: str = "",
     minimum_fundamentacao_grade: Optional[int] = None,
     documentary: Optional[Mapping[str, Any]] = None,
+    evaluation_method: Optional[str] = None,
 ) -> dict:
     """Monta RequestSpec MP/1. Não presume BRL, BRL/m² nem data de hoje.
 
     candidate_cols=None → seleção automática por papel.
     candidate_cols=[] → nenhuma variável autorizada (nunca expandido para todas).
+    Grau mínimo só em search_policy.minimum_fundamentacao_grade (null ou 1..3).
     """
     if candidate_cols is not None and not isinstance(candidate_cols, (list, tuple)):
         raise TypeError("candidate_cols deve ser None ou lista")
@@ -329,15 +349,25 @@ def build_request_spec(
 
     unit_map = dict(units or {})
     declared_target_unit = target_unit if target_unit else ""
+    grade = normalize_minimum_grade(minimum_fundamentacao_grade)
 
-    search = dict(search_policy or default_search_policy(minimum_fundamentacao_grade))
-    evaluation = dict(
-        evaluation_policy
-        or default_evaluation_policy(minimum_fundamentacao_grade, documentary=documentary)
+    method = evaluation_method
+    if method is None and evaluation_policy:
+        method = evaluation_policy.get("method")
+    if method is None:
+        method = "none"
+
+    search = canonical_search_policy(grade, base=search_policy)
+    evaluation = canonical_evaluation_policy(
+        method=method,
+        partitions=(evaluation_policy or {}).get("partitions") if evaluation_policy else None,
+        groups=(evaluation_policy or {}).get("groups") if evaluation_policy else None,
+        seed=(evaluation_policy or {}).get("seed") if evaluation_policy else None,
+        documentary=documentary if documentary is not None else (
+            (evaluation_policy or {}).get("documentary") if evaluation_policy else None
+        ),
+        extra=evaluation_policy,
     )
-    if minimum_fundamentacao_grade is not None:
-        search.setdefault("minimum_fundamentacao_grade", minimum_fundamentacao_grade)
-        evaluation.setdefault("minimum_fundamentacao_grade", minimum_fundamentacao_grade)
     if documentary is not None and "documentary" not in evaluation:
         evaluation["documentary"] = dict(documentary)
 
@@ -704,6 +734,8 @@ class JobClient:
         self.last_status: Optional[dict] = None
         self.last_snapshot: Optional[dict] = None
         self.last_error: Optional[str] = None
+        self.last_submit_fingerprint: Optional[str] = None
+        self.last_request_spec: Optional[dict] = None
 
     def _own_client(self) -> httpx.Client:
         if self._http is not None:
@@ -768,7 +800,26 @@ class JobClient:
         request_spec: Mapping[str, Any],
         subject: Optional[Mapping[str, Any]] = None,
         content_type: str = "application/octet-stream",
+        project_id: Optional[str] = None,
+        input_sha256: Optional[str] = None,
     ) -> dict:
+        fingerprint = execution_fingerprint(
+            input_sha256=input_sha256,
+            filename=filename,
+            nbytes=len(file_bytes) if file_bytes is not None else None,
+            request_spec=request_spec,
+            subject=subject,
+        )
+        if should_block_duplicate_submit(
+            current_fingerprint=fingerprint,
+            last_fingerprint=self.last_submit_fingerprint,
+            job_status=self.last_status,
+            last_job_id=self.job_id,
+        ):
+            raise DuplicateExecutionError(
+                "Este mesmo pedido já foi enviado. A interface não dispara "
+                "trabalho equivalente de novo por reexecução ou duplo clique."
+            )
         if self.is_active():
             raise DuplicateExecutionError(
                 "Já existe uma execução em andamento para este trabalho. "
@@ -776,6 +827,8 @@ class JobClient:
             )
         files = {"file": (filename, file_bytes, content_type)}
         data = {"request_json": request_spec_json(request_spec)}
+        if project_id:
+            data["project_id"] = project_id
         if subject is not None:
             payload = subject
             if isinstance(subject, Mapping) and isinstance(subject.get("raw_values"), Mapping):
@@ -789,6 +842,8 @@ class JobClient:
                 status_code=response.status_code,
                 payload=payload,
             )
+        self.last_submit_fingerprint = fingerprint
+        self.last_request_spec = dict(request_spec)
         self.job_id = str(payload["job_id"])
         self.status_url = payload.get("status_url") or f"/jobs/{self.job_id}"
         if "state" in payload:
@@ -895,7 +950,69 @@ class JobClient:
                 status_code=response.status_code,
                 payload=payload,
             )
-        return payload
+        return normalize_projects_list(payload)
+
+    def list_revisions(self, project_id: str) -> dict:
+        """GET /projects/{id}/revisions if the producer exposes it; else latest only.
+
+        BASE_SHA has GET /projects/{id} (latest revision) and POST .../revisions.
+        A list route is a P01 handoff when missing — this client does not invent it.
+        """
+        response = self._call("GET", f"/projects/{project_id}/revisions")
+        payload = _json_or_text(response)
+        if response.status_code == 404:
+            items = []
+            try:
+                latest = self.get_project(project_id)
+                revision = latest.get("revision") if isinstance(latest, Mapping) else None
+                if isinstance(revision, Mapping):
+                    items = [revision]
+            except ApiResponseError:
+                items = []
+            return {
+                "project_id": project_id,
+                "revisions": items,
+                "list_route_available": False,
+                "integration": "INTEGRATION_PENDING",
+                "handoff": {
+                    "producer": "P01",
+                    "method": "GET",
+                    "path": f"/projects/{project_id}/revisions",
+                    "example_response": {
+                        "schema_version": SCHEMA_VERSION,
+                        "project_id": project_id,
+                        "revisions": [
+                            {"revision_id": "rev-…", "created_at": "ISO-8601", "job_id": "job-…"}
+                        ],
+                    },
+                },
+            }
+        if response.status_code >= 400:
+            raise ApiResponseError(
+                f"Revisões indisponíveis (HTTP {response.status_code}).",
+                status_code=response.status_code,
+                payload=payload,
+            )
+        if isinstance(payload, Mapping) and isinstance(payload.get("revisions"), list):
+            return {
+                "project_id": project_id,
+                "revisions": list(payload["revisions"]),
+                "list_route_available": True,
+                "integration": None,
+            }
+        if isinstance(payload, list):
+            return {
+                "project_id": project_id,
+                "revisions": payload,
+                "list_route_available": True,
+                "integration": None,
+            }
+        return {
+            "project_id": project_id,
+            "revisions": [payload] if payload else [],
+            "list_route_available": True,
+            "integration": None,
+        }
 
     def get_project(self, project_id: str) -> dict:
         response = self._call("GET", f"/projects/{project_id}")
@@ -955,6 +1072,8 @@ def restore_client_from_session(
     job_client.job_id = session.get("c09_job_id")
     job_client.last_status = session.get("c09_job_status")
     job_client.last_snapshot = session.get("c09_snapshot")
+    job_client.last_submit_fingerprint = session.get("p02_submit_fingerprint")
+    job_client.last_request_spec = session.get("p02_last_request_spec")
     return job_client
 
 
@@ -962,6 +1081,8 @@ def persist_client_to_session(session: MutableMapping[str, Any], job_client: Job
     session["c09_job_id"] = job_client.job_id
     session["c09_job_status"] = job_client.last_status
     session["c09_snapshot"] = job_client.last_snapshot
+    session["p02_submit_fingerprint"] = job_client.last_submit_fingerprint
+    session["p02_last_request_spec"] = job_client.last_request_spec
 
 
 # ---------------------------------------------------------------------------
@@ -981,16 +1102,19 @@ def upload_form(
     preview_provider: Optional[Callable[..., dict]] = None,
     cached_preview: Optional[Mapping[str, Any]] = None,
 ) -> dict:
-    """Fluxo: importar → papéis/unidades/alvo → avaliando.
+    """Fluxo: preparação da amostra → imóvel avaliando.
 
     Não lê CSV/Excel para interpretar colunas. Se a prévia falhar por
-    conexão, devolve erro e não fabrica uma leitura local.
+    conexão, devolve erro e não fabrica uma leitura local. O mapeamento
+    fica vinculado ao arquivo/esquema — outro arquivo não herda o imóvel anterior.
     """
-    st.subheader("1. Importar e revisar interpretação")
+    st.subheader("1. Preparação da amostra")
+    st.caption("A interpretação vem da prévia da API. Esta tela não relê a planilha.")
     uploaded_file = st.file_uploader(
         "Arquivo de dados de mercado (CSV ou Excel)",
         type=["csv", "xlsx", "xls"],
         help="A interpretação das colunas vem da prévia da API, não de uma leitura paralela nesta tela.",
+        key="p02_uploader",
     )
 
     locale = st.selectbox(
@@ -1012,10 +1136,25 @@ def upload_form(
     connection_error = None
     preview_error = None
 
+    binding_token = mapping_binding_token(
+        filename=getattr(uploaded_file, "name", None),
+        nbytes=len(uploaded_file.getvalue()) if uploaded_file is not None else None,
+        import_options=import_options,
+    )
+    ns = widget_namespace(binding_token) if uploaded_file is not None else "none"
+
     if uploaded_file is not None:
-        file_token = f"{uploaded_file.name}:{len(uploaded_file.getvalue())}:{locale}:{delimiter}:{encoding}"
-        if st.session_state.get("c09_preview_token") != file_token:
-            st.session_state.pop("c09_preview", None)
+        previous_token = st.session_state.get("p02_preview_token") or st.session_state.get("c09_preview_token")
+        if previous_token != binding_token:
+            snapshot_now = st.session_state.get("c09_snapshot")
+            for key in ("c09_preview", "c09_preview_token", "p02_preview", "p02_preview_token", "p02_form_model"):
+                st.session_state.pop(key, None)
+            if snapshot_now is not None:
+                st.session_state["p02_result_stale"] = True
+                st.session_state["p02_result_stale_reason"] = (
+                    "O arquivo mudou. O resultado abaixo pertence à versão anterior."
+                )
+                st.session_state["p02_previous_snapshot"] = snapshot_now
             preview = None
         if preview is None:
             if preview_provider is None:
@@ -1033,18 +1172,39 @@ def upload_form(
                         uploaded_file.name,
                         draft,
                     )
+                    fingerprint = schema_fingerprint(preview)
+                    binding_token = mapping_binding_token(
+                        filename=uploaded_file.name,
+                        nbytes=len(uploaded_file.getvalue()),
+                        import_options=import_options,
+                        input_sha256=(preview or {}).get("input_sha256"),
+                        schema_fingerprint=fingerprint,
+                    )
+                    ns = widget_namespace(binding_token)
                     st.session_state["c09_preview"] = preview
-                    st.session_state["c09_preview_token"] = file_token
+                    st.session_state["c09_preview_token"] = binding_token
+                    st.session_state["p02_preview"] = preview
+                    st.session_state["p02_preview_token"] = binding_token
                 except ApiConnectionError as exc:
                     connection_error = str(exc) or PREVIEW_CONNECTION_ERROR
                     preview = None
+                    for key, value in preview_failure_clears_interpretation(dict(st.session_state)).items():
+                        if value is True or key.endswith("_cleared"):
+                            st.session_state[key] = value
+                    st.session_state.pop("c09_preview", None)
+                    st.session_state.pop("p02_preview", None)
                 except ApiResponseError as exc:
                     preview_error = str(exc)
                     preview = None
+                    st.session_state.pop("c09_preview", None)
+                    st.session_state.pop("p02_preview", None)
+                    st.session_state["p02_preview_error_cleared"] = True
                 except Exception as exc:  # noqa: BLE001 — falha de rede inesperada vira erro de conexão
                     connection_error = PREVIEW_CONNECTION_ERROR
                     preview = None
                     st.session_state["c09_preview_exception"] = repr(exc)
+                    st.session_state.pop("c09_preview", None)
+                    st.session_state.pop("p02_preview", None)
 
     if connection_error:
         st.error(connection_error)
@@ -1124,7 +1284,14 @@ def upload_form(
             hide_index=True,
         )
 
-    st.subheader("2. Definir papéis, unidades e alvo")
+    sample_rows = interpreted_sample_rows(preview)
+    if sample_rows:
+        st.markdown("#### Amostra interpretada")
+        st.caption("Primeiras linhas devolvidas pela prévia — não é uma leitura local do arquivo.")
+        st.dataframe(sample_rows, use_container_width=True, hide_index=True)
+
+    st.markdown("#### Alvo, características e unidades")
+    st.caption("Mapeamento editável, vinculado a este arquivo e ao esquema da prévia.")
     columns = model["columns"]
     suggested = suggest_roles(model["column_map"])
     target_options = columns or [""]
@@ -1150,14 +1317,14 @@ def upload_form(
                 f"Papel de «{original}»",
                 options=list(VALID_ROLES),
                 index=list(VALID_ROLES).index(default_role) if default_role in VALID_ROLES else 1,
-                key=f"c09_role_{name}",
+                key=f"p02_{ns}_role_{name}",
             )
         with cols_unit:
             detected = meta.get("unit") or ""
             entered = st.text_input(
                 f"Unidade de «{original}»",
                 value=detected,
-                key=f"c09_unit_{name}",
+                key=f"p02_{ns}_unit_{name}",
                 help="Vazio = unidade desconhecida (permanece pendente).",
             )
             if entered:
@@ -1169,6 +1336,7 @@ def upload_form(
     auto_candidates = st.checkbox(
         "Seleção automática das variáveis autorizadas conforme o papel preditor",
         value=False,
+        key=f"p02_{ns}_auto_candidates",
         help="Marcado: candidate_cols=null. Desmarcado: a lista abaixo é a autorização explícita.",
     )
     predictor_names = [n for n, role in roles.items() if role == "predictor"]
@@ -1181,6 +1349,7 @@ def upload_form(
         options=predictor_names,
         default=default_selected,
         disabled=auto_candidates,
+        key=f"p02_{ns}_candidates",
         help="Lista vazia significa nenhuma autorizada, nunca todas as colunas.",
     )
     if auto_candidates:
@@ -1191,9 +1360,33 @@ def upload_form(
         if candidate_cols == []:
             st.warning(EMPTY_SELECTION_MESSAGE)
 
+    unused = unused_columns_view(
+        model["column_map"],
+        roles=roles,
+        candidate_cols=None if auto_candidates else selected_candidates,
+        target_col=target_col,
+        preview_issues=model.get("issues"),
+    )
+    st.markdown("#### Dados não utilizados")
+    if unused:
+        st.dataframe(
+            [
+                {
+                    "Coluna": item.get("original_name") or item["name"],
+                    "Razão": item["reason"],
+                }
+                for item in unused
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("Nenhuma coluna candidata ficou de fora sem razão visível.")
+
     target_unit = st.text_input(
         "Unidade do valor-alvo",
         value=units.get(target_col, ""),
+        key=f"p02_{ns}_target_unit",
         help="Campo próprio. Vazio permanece pendente — não se presume BRL ou BRL/m².",
     )
     if target_unit:
@@ -1201,50 +1394,82 @@ def upload_form(
 
     col_ref, col_insp = st.columns(2)
     with col_ref:
-        has_reference = st.checkbox("Informar data da avaliação (data-base)", value=False)
+        has_reference = st.checkbox(
+            "Informar data da avaliação (data-base)",
+            value=False,
+            key=f"p02_{ns}_has_reference",
+        )
         reference_date = None
         if has_reference:
-            reference_date = _iso_or_none(st.date_input("Data da avaliação (data-base)"))
+            reference_date = _iso_or_none(
+                st.date_input("Data da avaliação (data-base)", key=f"p02_{ns}_reference_date")
+            )
         else:
             st.caption("Data-base pendente. Não se usa a data de hoje nem a data de emissão.")
     with col_insp:
-        has_inspection = st.checkbox("Informar data da vistoria", value=False)
+        has_inspection = st.checkbox(
+            "Informar data da vistoria",
+            value=False,
+            key=f"p02_{ns}_has_inspection",
+        )
         inspection_date = None
         if has_inspection:
-            inspection_date = _iso_or_none(st.date_input("Data da vistoria"))
+            inspection_date = _iso_or_none(
+                st.date_input("Data da vistoria", key=f"p02_{ns}_inspection_date")
+            )
         else:
             st.caption("Data da vistoria é campo próprio, distinto da data-base e da emissão.")
 
     col_sol, col_fin = st.columns(2)
     with col_sol:
-        applicant = st.text_input("Solicitante", value="")
+        applicant = st.text_input("Solicitante", value="", key=f"p02_{ns}_applicant")
     with col_fin:
-        purpose = st.text_input("Finalidade da avaliação", value="")
+        purpose = st.text_input("Finalidade da avaliação", value="", key=f"p02_{ns}_purpose")
 
-    degree = st.selectbox(
+    degree_choice = st.selectbox(
         "Grau mínimo solicitado",
-        options=[1, 2, 3],
+        options=["not_requested", 1, 2, 3],
+        format_func=lambda value: "Não solicitar" if value == "not_requested" else f"Grau {value}",
         index=0,
+        key=f"p02_{ns}_degree",
         help=DEGREE_HELP,
     )
+    degree = None if degree_choice == "not_requested" else int(degree_choice)
     st.caption(DEGREE_HELP)
+
+    method_ids = list(SUPPORTED_EVALUATION_METHOD_IDS)
+    method_labels = {item[0]: item[1] for item in SUPPORTED_EVALUATION_METHODS}
+    evaluation_method = st.selectbox(
+        "Validação independente",
+        options=method_ids,
+        format_func=lambda value: method_labels.get(value, value),
+        index=0,
+        key=f"p02_{ns}_eval_method",
+        help=METHOD_HELP,
+    )
+    st.caption(METHOD_HELP)
+    if evaluation_method == "holdout":
+        st.caption(HOLD_OUT_HELP)
 
     missing_predictors = st.selectbox(
         "Política para características ausentes nos preditores",
         options=["complete_case", "declared_method_on_train"],
         index=0,
+        key=f"p02_{ns}_missing_pred",
         help="O alvo nunca é imputado. Exclusões precisam ser declaradas.",
     )
     grau_item1 = st.selectbox(
         "Grau declarado de caracterização do imóvel avaliando (item documental)",
         options=[1, 2, 3],
         index=0,
+        key=f"p02_{ns}_grau_item1",
         help="Declaração do profissional, não verificação automática da planilha.",
     )
     grau_item3 = st.selectbox(
         "Grau declarado de identificação dos dados de mercado (item documental)",
         options=[1, 2, 3],
         index=0,
+        key=f"p02_{ns}_grau_item3",
         help="Declaração do profissional. Pontuação documental declarada não vira comprovação.",
     )
 
@@ -1261,6 +1486,7 @@ def upload_form(
         applicant=applicant,
         purpose=purpose,
         minimum_fundamentacao_grade=degree,
+        evaluation_method=evaluation_method,
         documentary={
             "item1_grade_declared": grau_item1,
             "item3_grade_declared": grau_item3,
@@ -1268,7 +1494,22 @@ def upload_form(
         },
     )
 
-    st.subheader("3. Informar o avaliando")
+    policies = policies_on_the_wire(request_spec)
+    with st.expander("Políticas que serão enviadas no pedido", expanded=False):
+        st.caption("Somente o que entra no RequestSpec. Controle que não muda o pedido não aparece aqui.")
+        st.json({
+            "search_policy": policies["search_policy"],
+            "evaluation_policy": {
+                k: v for k, v in policies["evaluation_policy"].items() if k != "documentary"
+            },
+            "missing_policy": policies["missing_policy"],
+            "outlier_policy": policies["outlier_policy"],
+        })
+        cost = cost_estimate_from_payload(preview)
+        if cost:
+            st.write("Estimativa de custo devolvida pela API:", cost["value"])
+
+    st.subheader("2. Imóvel avaliando")
     st.caption(
         "Use as variáveis-base do esquema (categorias, números já interpretados, "
         "ausências e unidades). Não preencha colunas dummy. "
@@ -1287,7 +1528,7 @@ def upload_form(
     dummies = dummy_column_names(feature_schema)
     execute_clicked = False
 
-    with st.form("c09_avaliando_executar", clear_on_submit=False):
+    with st.form(f"p02_{ns}_avaliando_executar", clear_on_submit=False):
         for internal, meta in schema_columns.items():
             meta = meta or {}
             if meta.get("role") in {"target", "identifier", "excluded", "source", "date"} or internal in dummies:
@@ -1302,20 +1543,20 @@ def upload_form(
                 chosen = st.selectbox(
                     f"{original}{unit_note}",
                     options=options,
-                    key=f"c09_subj_{internal}",
+                    key=f"p02_{ns}_subj_{internal}",
                 )
                 if chosen == "(ausente)":
                     raw_values[internal] = None
                 elif chosen == "(categoria não suportada)":
                     custom = st.text_input(
                         f"Categoria informada para «{original}» (não está no esquema)",
-                        key=f"c09_subj_custom_{internal}",
+                        key=f"p02_{ns}_subj_custom_{internal}",
                     )
                     raw_values[internal] = custom or "__unsupported__"
                     resolution = st.radio(
                         f"Resolução para categoria não suportada de «{original}»",
                         options=["pendente", "map_to_supported", "exclude", "abort"],
-                        key=f"c09_res_{internal}",
+                        key=f"p02_{ns}_res_{internal}",
                         help="Coluna/categoria fora de suporte exige decisão explícita.",
                     )
                     mapped = None
@@ -1323,7 +1564,7 @@ def upload_form(
                         mapped = st.selectbox(
                             f"Mapear «{original}» para",
                             options=list(categories),
-                            key=f"c09_map_{internal}",
+                            key=f"p02_{ns}_map_{internal}",
                         )
                     if resolution != "pendente":
                         resolutions[internal] = {"action": resolution, "mapped_value": mapped}
@@ -1333,7 +1574,7 @@ def upload_form(
                 entered = st.text_input(
                     f"{original}{unit_note}",
                     value="",
-                    key=f"c09_subj_{internal}",
+                    key=f"p02_{ns}_subj_{internal}",
                     placeholder="ex.: 73,5",
                     help="Número pode permanecer no formato original; a interpretação é da API/C02, não desta tela.",
                 )
@@ -1350,7 +1591,7 @@ def upload_form(
             extra_res = st.radio(
                 "Resolução para coluna não suportada",
                 options=["pendente", "exclude", "abort"],
-                key="c09_res_extra_col",
+                key=f"p02_{ns}_res_extra_col",
             )
             if extra_res != "pendente":
                 resolutions[extra_unsupported] = {"action": extra_res}
@@ -1376,6 +1617,13 @@ def upload_form(
     for item in dispatch["pending"]:
         st.info(item["message"])
 
+    fingerprint = execution_fingerprint(
+        input_sha256=(preview or {}).get("input_sha256"),
+        filename=getattr(uploaded_file, "name", None),
+        nbytes=len(uploaded_file.getvalue()) if uploaded_file is not None else None,
+        request_spec=request_spec,
+        subject=subject,
+    )
     return {
         "uploaded_file": uploaded_file,
         "request_spec": request_spec,
@@ -1385,8 +1633,14 @@ def upload_form(
         "connection_error": None,
         "preview_error": preview_error,
         "degree": degree,
+        "evaluation_method": evaluation_method,
         "feature_schema": feature_schema,
         "execute": bool(execute_clicked),
+        "binding_token": binding_token,
+        "unused_columns": unused,
+        "policies": policies,
+        "fingerprint": fingerprint,
+        "stale_reason": st.session_state.get("p02_result_stale_reason"),
     }
 
 
