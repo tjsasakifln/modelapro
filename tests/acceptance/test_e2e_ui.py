@@ -90,15 +90,21 @@ class TestE2EUiStreamlit:
                     raise AssertionError(f"NOT_RUN:playwright chromium: {exc}") from exc
                 page = browser.new_page()
                 page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(2000)
+                page.wait_for_selector("input[type=file]", state="attached", timeout=30000)
                 file_input = page.locator("input[type=file]")
                 assert file_input.count() >= 1, "upload widget not found"
                 file_input.first.set_input_files(csv_path)
-                page.wait_for_timeout(2500)
-                start = page.get_by_text("Iniciar Análise")
-                assert start.count() >= 1, "start button not found after upload"
-                start.first.click()
                 page.wait_for_timeout(4000)
+                start = page.locator("button").filter(has_text="Executar")
+                if start.count() == 0:
+                    start = page.get_by_text("Executar", exact=False)
+                page.screenshot(path=str(screenshot), full_page=True)
+                assert start.count() >= 1, (
+                    "start button not found after upload; body="
+                    + page.inner_text("body")[:800]
+                )
+                start.first.click(force=True)
+                page.wait_for_timeout(6000)
                 body = page.inner_text("body")
                 page.screenshot(path=str(screenshot), full_page=True)
                 browser.close()

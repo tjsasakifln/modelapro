@@ -248,7 +248,7 @@ def default_evaluation_policy(
     documentary: Optional[Mapping[str, Any]] = None,
 ) -> dict:
     policy = {
-        "method": None,
+        "method": "none",
         "partitions": None,
         "groups": None,
         "seed": None,

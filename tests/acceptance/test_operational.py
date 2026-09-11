@@ -86,10 +86,12 @@ class TestOperationalFlows:
 
     def test_two_executions_do_not_share_job_identity(self):
         client = _client()
-        files = {"file": ("market_minimal.csv", fixture_bytes("market_minimal.csv"), "text/csv")}
-        data = {"degree": "1", "target_col": "preco"}
-        a = client.post("/upload", files=files, data=data)
-        b = client.post("/upload", files=files, data=data)
+        files_a = {"file": ("market_a.csv", fixture_bytes("market_minimal.csv"), "text/csv")}
+        files_b = {"file": ("market_b.csv", fixture_bytes("market_minimal.csv") + b"\n#distinct\n", "text/csv")}
+        data_a = {"degree": "1", "target_col": "preco", "solicitante": "A"}
+        data_b = {"degree": "1", "target_col": "preco", "solicitante": "B"}
+        a = client.post("/upload", files=files_a, data=data_a)
+        b = client.post("/upload", files=files_b, data=data_b)
         assert a.status_code in (200, 202)
         assert b.status_code in (200, 202)
         id_a = a.json().get("job_id")

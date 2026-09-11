@@ -144,7 +144,11 @@ def make_model_state() -> Dict[str, Any]:
         "diagnostics": {
             "item_scores": {1: 2, 2: 3, 3: 2, 5: 3, 6: 3},
             "sample_evidence_status": "declared",
+            "pvalues": {"const": 0.001, "area": 0.01, "bairro_Sul": 0.02},
+            "f_pvalue": 0.001,
         },
+        "pvalues": {"const": 0.001, "area": 0.01, "bairro_Sul": 0.02},
+        "f_pvalue": 0.001,
     }
 
 
@@ -200,15 +204,45 @@ def make_subject(
     area: float,
     bairro: str,
     documentary_items: Optional[List[Dict[str, Any]]] = None,
+    *,
+    documentary: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    return {
-        "subject_id": subject_id,
-        "raw": {"area": area, "bairro": bairro},
-        "documentary": {
+    doc: Dict[str, Any]
+    if documentary is not None:
+        doc = dict(documentary)
+        doc.setdefault("subject_id", subject_id)
+        doc.setdefault("origin", "subject")
+        if documentary_items is not None:
+            doc["items"] = list(documentary_items)
+        else:
+            doc.setdefault("items", list(doc.get("items") or []))
+    else:
+        doc = {
             "subject_id": subject_id,
             "origin": "subject",
             "items": list(documentary_items or []),
+        }
+    return {
+        "subject_id": subject_id,
+        "raw": {"area": area, "bairro": bairro},
+        "documentary": doc,
+    }
+
+
+def c03_documentary(subject_id: str, *, item1: int = 2, item3: int = 2) -> Dict[str, Any]:
+    """Subject-owned C03 documentary with provenance. Not inherited across imóveis."""
+    return {
+        "subject_id": subject_id,
+        "origin": "subject",
+        "item1": {
+            "grade": item1,
+            "provenance": {"kind": "synthetic-test", "subject_id": subject_id, "rule": "tabela1_item1"},
         },
+        "item3": {
+            "grade": item3,
+            "provenance": {"kind": "synthetic-test", "subject_id": subject_id, "rule": "tabela1_item3"},
+        },
+        "items": [],
     }
 
 

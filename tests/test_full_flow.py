@@ -111,4 +111,4 @@ class TestDataLoaderToOptimalCombinationWithCandidateCols:
         assert loaded is not None
         observed_in_model = int(loaded["preco"].notna().sum())
         assert observed_in_model == n_observed
-        assert len(loaded) == n_observed
+        assert len(loaded) == len(raw)

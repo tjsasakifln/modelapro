@@ -41,6 +41,28 @@ def market_rows(*, n: int = 24, missing_target_at: Optional[int] = 7):
     return rows
 
 
+def analytic_linear_csv(
+    *,
+    n: int = 24,
+    slope: float = 10000.0,
+    intercept: float = 0.0,
+    missing_target_at: Optional[int] = None,
+    tag: str = "LIN",
+) -> bytes:
+    """Identified linear market: preco = intercept + slope * area. Synthetic."""
+    lines = ["id;bairro;area;preco"]
+    for i in range(n):
+        area = 50.0 + i * 2.0
+        price = intercept + slope * area
+        price_txt = "" if missing_target_at is not None and i == missing_target_at else fmt_ptbr(price)
+        lines.append(f"{tag}-{i + 1:03d};Centro;{fmt_ptbr(area)};{price_txt}")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def analytic_point(*, area: float, slope: float = 10000.0, intercept: float = 0.0) -> float:
+    return intercept + slope * float(area)
+
+
 def ptbr_csv_bytes(*, n: int = 24, missing_target_at: Optional[int] = 7, tag: str = "A") -> bytes:
     lines = ["id;bairro;area;preco"]
     for row in market_rows(n=n, missing_target_at=missing_target_at):

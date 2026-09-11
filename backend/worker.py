@@ -489,7 +489,50 @@ def build_frozen_project(
         "target_transform_state": _as_dict(_get(winner_fit, "target_transform_state")) or {},
         "model_sha256": _get(winner_fit, "model_sha256"),
         "status": _get(winner_fit, "status"),
+        "used_row_ids": list(_get(winner_fit, "used_row_ids") or _get(prepared_dataset, "row_ids") or []),
+        "n": _get(winner_fit, "n") or (_as_dict(_get(winner_fit, "diagnostics")) or {}).get("n"),
+        "k": _get(winner_fit, "k") or (_as_dict(_get(winner_fit, "diagnostics")) or {}).get("k"),
+        "feature_order": list(
+            (_as_dict(_get(winner_fit, "model_state")) or {}).get("feature_order")
+            or (_as_dict(_get(winner_fit, "coefficients")) or {}).keys()
+        ),
     }
+    declared_scope = (
+        (request_spec.get("search_policy") or {}).get("model_scope")
+        or request_spec.get("model_scope")
+    )
+    # Presence of a subject_design for prediction is not subject-conditioned
+    # selection. Only an explicit subject_specific policy binds the freeze.
+    if declared_scope == "subject_specific":
+        model_scope = "subject_specific"
+        subject_constraints = {
+            "selection_subject_id": _get(subject_design, "subject_id"),
+            "bound_variables": {},
+        }
+    else:
+        model_scope = "population_model"
+        subject_constraints = {}
+    locale = str((_as_dict(request_spec.get("import_options")) or {}).get("locale") or "auto")
+    axes = _axes_from_fit(
+        winner_fit,
+        prepared_dataset,
+        _as_dict(_get(subject_design, "raw_values")) or None,
+        locale=locale,
+    )
+    domain_variables: Dict[str, Any] = {}
+    for axis in axes:
+        name = str(axis.get("variable") or axis.get("name") or "")
+        if not name:
+            continue
+        if axis.get("kind") == "categorical":
+            allowed = list(axis.get("sample_values") or axis.get("categories") or [])
+            if allowed:
+                domain_variables[name] = {"allowed_categories": allowed}
+        else:
+            vmin = axis.get("sample_min")
+            vmax = axis.get("sample_max")
+            if vmin is not None and vmax is not None:
+                domain_variables[name] = {"min": vmin, "max": vmax, "kind": "sample_used"}
     # Never pickle model_object into the frozen project.
     return {
         "schema_version": SCHEMA_VERSION,
@@ -502,12 +545,14 @@ def build_frozen_project(
         "encoder_state": encoder_state,
         "model_spec": candidate_spec,
         "model_state": model_state,
-        "model_scope": "subject_specific" if subject_design is not None else "population_model",
-        "subject_constraints": _as_dict(_get(subject_design, "issues")) or {},
+        "model_scope": model_scope,
+        "subject_constraints": subject_constraints,
         "domain": {
+            "kind": "sample_used",
             "target_col": request_spec.get("target_col"),
             "target_unit": request_spec.get("target_unit"),
             "reference_date": request_spec.get("reference_date"),
+            "variables": domain_variables,
         },
         "sample_ledger": _as_dict(sample_ledger) or {},
         "normative_version": _get(normative, "edition"),
@@ -710,8 +755,40 @@ def _column_values(frame: Any, name: str) -> List[Any]:
         return [series]
 
 
-def _axes_from_fit(winner_fit: Any, prepared: Any, subject_raw: Optional[Mapping[str, Any]]) -> List[dict]:
-    """Item-4 axes from CandidateFit.base_frame (fallback: prepared.base_frame / X)."""
+def _parse_subject_numeric(aval: Any, locale: str = "auto") -> Optional[float]:
+    if aval is None or aval == "":
+        return None
+    if isinstance(aval, bool):
+        return None
+    if isinstance(aval, (int, float)):
+        try:
+            number = float(aval)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+    try:
+        from modules.variable_schema import parse_numeric
+
+        parsed = parse_numeric(aval, locale=locale or "auto")
+        if parsed is not None and math.isfinite(parsed):
+            return float(parsed)
+    except Exception:
+        pass
+    return None
+
+
+def _axes_from_fit(
+    winner_fit: Any,
+    prepared: Any,
+    subject_raw: Optional[Mapping[str, Any]],
+    *,
+    locale: str = "auto",
+) -> List[dict]:
+    """Item-4 axes from CandidateFit.base_frame (fallback: prepared.base_frame / X).
+
+    Extra form fields that are not part of the fitted candidate do not create
+    extrapolation axes for that model.
+    """
     raw = dict(subject_raw or {})
     nested = _get(winner_fit, "candidate_fit")
     frame = _first_present(
@@ -722,14 +799,13 @@ def _axes_from_fit(winner_fit: Any, prepared: Any, subject_raw: Optional[Mapping
         _get(prepared, "X"),
     )
     spec = _as_dict(_get(winner_fit, "candidate_spec")) or {}
-    names = [str(n) for n in (spec.get("base_variables") or spec.get("features") or [])]
+    names = [str(n) for n in (spec.get("base_variables") or [])]
     frame_cols = _frame_columns(frame)
     intercept_names = {"const", "intercept", "Intercept"}
     if not names:
+        names = [str(n) for n in (spec.get("features") or [])]
+    if not names:
         names = [c for c in frame_cols if c not in intercept_names]
-    for key in raw:
-        if key not in names and key in frame_cols:
-            names.append(str(key))
     schema = _as_dict(_get(winner_fit, "feature_schema") or _get(prepared, "feature_schema")) or {}
     columns_meta = schema.get("columns") if isinstance(schema.get("columns"), Mapping) else {}
     groups = schema.get("groups") if isinstance(schema.get("groups"), Mapping) else {}
@@ -785,11 +861,7 @@ def _axes_from_fit(winner_fit: Any, prepared: Any, subject_raw: Optional[Mapping
         if not nums:
             continue
         aval = raw.get(name)
-        aval_f = None
-        try:
-            aval_f = float(aval) if aval is not None and aval != "" else None
-        except (TypeError, ValueError):
-            aval_f = None
+        aval_f = _parse_subject_numeric(aval, locale=locale)
         axes.append(
             {
                 "name": name,
@@ -855,7 +927,8 @@ def _normative_context_from_fit(
             coeffs = _json_coeffs(winner_fit)
             drop = 1 if intercept or "const" in coeffs else 0
             k = max(0, len(coeffs) - drop) if coeffs else None
-    axes = _axes_from_fit(winner_fit, prepared, subject_raw)
+    locale = str((_as_dict(spec.get("import_options")) or {}).get("locale") or "auto")
+    axes = _axes_from_fit(winner_fit, prepared, subject_raw, locale=locale)
     value_block = _as_dict(_get(assessment, "value")) or {}
     nested_norm = _as_dict(_get(assessment, "normative")) or {}
     precisao = nested_norm.get("precisao") if isinstance(nested_norm.get("precisao"), Mapping) else {}
@@ -1380,15 +1453,22 @@ def _map_validation(normative: Any, assessment: Any, procedure: Any = None) -> d
         statistical.setdefault("intercept", n.get("intercept"))
     if procedure is not None:
         proc = _as_dict(procedure) or {}
+        provenance = _as_dict(proc.get("procedure_provenance")) or {}
+        partition = _as_dict(proc.get("partition")) or {}
         statistical = dict(statistical)
         statistical["procedure"] = {
+            "method": partition.get("method") or provenance.get("evaluated_unit"),
+            "seed": provenance.get("evaluation_seed") or partition.get("seed"),
             "coverage": proc.get("coverage") or proc.get("generalization"),
             "metrics": proc.get("metrics") or proc.get("original_unit_metrics") or proc.get("scores"),
             "stability": proc.get("stability"),
             "limitations": proc.get("limitations") or [],
+            "partition": partition,
+            "predictions": proc.get("predictions"),
             "usable_for_model_selection": proc.get("usable_for_model_selection"),
             "reserved_filtered_by_error": proc.get("reserved_filtered_by_error"),
             "winner_retrained_on_full_data": proc.get("winner_retrained_on_full_data"),
+            "not_normative_classification": True,
         }
     issuance = {
         "status": "draft",

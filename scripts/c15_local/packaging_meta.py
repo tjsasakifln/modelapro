@@ -42,7 +42,20 @@ ANNOUNCED_FORMAT_ENGINES = {
     "xls": "xlrd",
     "pdf": "weasyprint",
 }
-DEV_ONLY = frozenset({"pytest", "httpx", "black", "flake8", "mypy", "build", "wheel", "setuptools"})
+DEV_ONLY = frozenset(
+    {
+        "pytest",
+        "httpx",
+        "black",
+        "flake8",
+        "mypy",
+        "build",
+        "wheel",
+        "setuptools",
+        "pypdf",
+        "playwright",
+    }
+)
 
 
 def requirement_name(spec: str) -> str:

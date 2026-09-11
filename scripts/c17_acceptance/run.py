@@ -41,8 +41,20 @@ def run_pytest(args: list[str], log_path: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="C17 acceptance on the current SHA")
     parser.add_argument("--output", required=True, help="Directory for logs and SHA")
-    parser.add_argument("--full", action="store_true", help="Also run campaign suites and C16 harness")
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Diagnostic: only tests/c17_integration twice. Cannot release the PR.",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        default=True,
+        help="Mandatory coverage (default): campaign suites + C16 harness.",
+    )
     args = parser.parse_args()
+    if args.quick:
+        args.full = False
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
 

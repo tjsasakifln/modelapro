@@ -373,11 +373,10 @@ class TestModelBuilderPrecisionAndExtrapolation:
         result = builder.build_model(X, y, degree=1)
         assert result.success is True
 
-        # Sanity check the fixture: the outlier must actually have been
-        # detected and excluded from the refit, and n (item 2) must reflect
-        # that post-removal sample.
-        assert result.outliers_removed, "fixture outlier was not detected; test is not exercising the fix"
-        assert len(result.residuals) == len(X) - len(result.outliers_removed)
+        # Report-only: influence is identified, rows stay in the principal sample.
+        warnings = " ".join(result.validation_result.warnings or [])
+        assert "influen" in warnings.lower() or result.outliers_removed == []
+        assert len(result.residuals) == len(X)
 
         avaliando_raw = {'area': 120.0, 'quartos': 3}
         result2 = builder.add_precision_and_extrapolation(
@@ -387,11 +386,9 @@ class TestModelBuilderPrecisionAndExtrapolation:
         details = result2.validation_result.details.get("extrapolation_details")
         area_detail = next(d for d in details if d["variable"] == "area")
 
-        # The raw original_df contains the planted outlier (area=900), but
-        # item 4's sample_max must come from the data effectively used by
-        # the fitted model (max area ~200), not the raw 900.
-        assert area_detail["sample_max"] < X['area'].max()
-        assert area_detail["sample_max"] == pytest.approx(200.0, abs=1.0)
+        # Report-only: the principal sample keeps the influential point.
+        # Silent drop would hide 900 from item 4's range.
+        assert area_detail["sample_max"] == pytest.approx(float(X["area"].max()), abs=1.0)
 
 
 class TestVIFDoesNotBlock:

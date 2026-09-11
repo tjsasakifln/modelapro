@@ -10,7 +10,7 @@ from modules.valuation_batch import (
     evaluate_batch,
 )
 
-from .conftest import expected_point, make_frozen_project, make_request_spec, make_subject
+from .conftest import c03_documentary, expected_point, make_frozen_project, make_request_spec, make_subject
 
 
 def test_in_and_out_of_domain_keep_independent_classifications():
@@ -21,12 +21,14 @@ def test_in_and_out_of_domain_keep_independent_classifications():
         area=100.0,
         bairro="Centro",
         documentary_items=[{"id": "doc-in", "label": "matricula-A", "status": "declared"}],
+        documentary=c03_documentary("s-in"),
     )
     outside = make_subject(
         "s-out",
         area=400.0,
         bairro="Centro",
         documentary_items=[{"id": "doc-out", "label": "matricula-B", "status": "declared"}],
+        documentary=c03_documentary("s-out"),
     )
 
     result = evaluate_batch(frozen, [inside, outside], spec)

@@ -680,13 +680,38 @@ def _apply_x_transform(value: Optional[float], transform_name: str) -> Tuple[Opt
 
 
 def _invert_target(prediction: Any, state: Any, residual_context: Any = None) -> Dict[str, Any]:
-    """Use C06 inverse only when the frozen state is a complete C06 mapping."""
+    """Use C06 inverse for identity/log; never treat unknown Y as identity."""
     st = _as_mapping(state, "target_transform_state")
-    inverse_meta = st.get("inverse") if isinstance(st.get("inverse"), Mapping) else {}
+    name = str(st.get("name") if st.get("name") is not None else "linear").lower()
+    if name not in _KNOWN_Y_NAMES:
+        return {
+            "value": empty_value(),
+            "estimand": None,
+            "supported": False,
+            "error": f"unknown target transform {st.get('name')!r}",
+            "limitations": [f"unknown_y_transform:{st.get('name')}"],
+        }
     c06 = _try_import("modules.target_transform", "inverse_target_prediction")
-    if callable(c06) and inverse_meta.get("invocation"):
-        return c06(prediction, st, residual_context)
+    inverse_meta = st.get("inverse") if isinstance(st.get("inverse"), Mapping) else {}
+    complete_c06 = (
+        name in {"identity", "log", "ln", "logarithm"}
+        and (isinstance(st.get("domain"), Mapping) or bool(inverse_meta.get("invocation")))
+    )
+    if callable(c06) and complete_c06:
+        try:
+            return c06(prediction, st, residual_context)
+        except Exception as exc:
+            return {
+                "value": empty_value(),
+                "estimand": None,
+                "supported": False,
+                "error": f"target inverse failed for {name!r}: {exc}",
+                "limitations": [f"y_inverse_failed:{name}"],
+            }
     return builtin_inverse_target_prediction(prediction, st, residual_context)
+
+
+_KNOWN_Y_NAMES = frozenset({"linear", "identity", "none", "", "ln", "log", "logarithm"})
 
 
 def builtin_inverse_target_prediction(
@@ -696,30 +721,29 @@ def builtin_inverse_target_prediction(
 ) -> Dict[str, Any]:
     """Invert a transformed prediction to the original unit. No silent IC claim."""
     st = _as_mapping(state, "target_transform_state")
-    name = str(st.get("name") or "linear").lower()
+    raw_name = st.get("name")
+    name = str(raw_name if raw_name is not None else "linear").lower()
     limitations: List[str] = []
+    if name not in _KNOWN_Y_NAMES:
+        return {
+            "value": empty_value(),
+            "estimand": None,
+            "supported": False,
+            "error": f"unknown target transform {raw_name!r}",
+            "limitations": [f"unknown_y_transform:{raw_name}"],
+        }
 
     def _inv_scalar(z: Optional[float]) -> Optional[float]:
         if z is None:
             return None
         if name in {"linear", "identity", "none", ""}:
             return _finite_or_none(z)
-        if name == "ln":
+        if name in {"ln", "log", "logarithm"}:
             try:
                 return _finite_or_none(math.exp(z))
             except Exception:
                 return None
-        if name == "sqrt":
-            return _finite_or_none(z * z if z >= 0 else None)
-        if name == "sqr":
-            if z < 0:
-                return None
-            return _finite_or_none(math.sqrt(z))
-        if name == "inverse":
-            if z == 0:
-                return None
-            return _finite_or_none(1.0 / z)
-        return _finite_or_none(z)
+        return None
 
     if isinstance(prediction, Mapping):
         out = empty_value()
@@ -1270,8 +1294,22 @@ def _peer_transform_subject(subject_raw: Any, feature_schema: Any, encoder_state
         return builtin_transform_subject(subject_raw, feature_schema, encoder_state)
     try:
         design = peer(subject_raw, feature_schema, encoder_state)
-    except Exception:
-        return builtin_transform_subject(subject_raw, feature_schema, encoder_state)
+    except Exception as exc:
+        fallback = builtin_transform_subject(subject_raw, feature_schema, encoder_state)
+        mapped = _subject_design_to_mapping(fallback)
+        issues = list(mapped.get("issues") or [])
+        issues.append(
+            _issue(
+                "peer_transform_exception",
+                "error",
+                "c14.transform_subject",
+                f"C02 transform_subject recusou o sujeito: {type(exc).__name__}: {exc}",
+            )
+        )
+        mapped["issues"] = issues
+        if any(str(i.get("code")) == REASON_UNKNOWN_CATEGORY for i in issues):
+            mapped["supported"] = False
+        return mapped
     mapped = _subject_design_to_mapping(design)
     # C02 may return an empty design if encoder_state is not its full fit output.
     # In that case the frozen-application encoder still has to run so the batch
@@ -1733,38 +1771,48 @@ def _assess_subject_normative(
     if sample_item_scores is None:
         sample_item_scores = _as_mapping(diagnostics.get("item_scores"))
 
+    pvalues = extra.pop("pvalues", None)
+    if not isinstance(pvalues, Mapping) or not pvalues:
+        pvalues = diagnostics.get("pvalues") or model_state.get("pvalues") or {}
+    f_pvalue = extra.pop("f_pvalue", None)
+    if f_pvalue is None:
+        f_pvalue = diagnostics.get("f_pvalue")
+    if f_pvalue is None:
+        f_pvalue = model_state.get("f_pvalue")
+
     ctx: Dict[str, Any] = {
         "subject_id": sid,
         "subject_raw": raw,
         "documentary": documentary,
+        # Sample-level scores are evidence about the fitted sample, not a
+        # substitute for this subject's items 1/3. C03 ignores them as grades.
         "sample_item_scores": sample_item_scores,
         "sample_ranges": ranges,
         "axes": axes,
         "extrapolation_details": details,
         "n": n,
         "k": k,
-        "intercept": True if "const" in coefficients else None,
+        "intercept": True if "const" in coefficients else extra.get("intercept"),
+        "pvalues": pvalues,
+        "f_pvalue": f_pvalue,
         "normative_version": frozen.get("normative_version"),
         "edition": frozen.get("normative_version"),
     }
     ctx.update(extra)
 
     peer = adapters.get("assess_normative") or builtin_assess_normative
-    result = peer(ctx)
-    result = _as_mapping(result, "normative")
-    fund = _as_mapping(result.get("fundamentacao"), "fundamentacao")
-    # Frozen C14 fixtures declare sample_item_scores; C03 grade stays None when
-    # items 1/3 are documentary-pending. Builtin then classifies per subject.
-    if fund.get("grade") is None and sample_item_scores and peer is not builtin_assess_normative:
-        result = _as_mapping(builtin_assess_normative(ctx), "normative")
+    # Grade None is a legitimate pending/unclassified result. It does not
+    # authorize a second classifier, even when sample_item_scores exist.
+    result = _as_mapping(peer(ctx), "normative")
 
     doc = result.get("documentary")
     if not isinstance(doc, dict):
         doc = {}
         result["documentary"] = doc
     doc["subject_id"] = documentary.get("subject_id") or sid
-    doc["items"] = list(documentary.get("items") or [])
     doc.setdefault("origin", documentary.get("origin") or "subject")
+    if "items" not in doc:
+        doc["items"] = list(documentary.get("items") or [])
     return result
 
 
@@ -2255,4 +2303,6 @@ def evaluate_batch(
     completed_real = summary["succeeded"] + summary["failed"] + summary["unsupported"]
     result["progress"] = (completed_real / summary["total"]) if summary["total"] else 1.0
     result["export"] = export_batch_result({k: v for k, v in result.items() if k != "export"})
+    # Public alias: C14 items are the per-subject assessments.
+    result["assessments"] = result["items"]
     return result

@@ -1929,7 +1929,7 @@ class ModelBuilder:
         X: pd.DataFrame,
         y: pd.Series,
         degree: int = 1,
-        remove_outliers: bool = True,
+        remove_outliers: bool = False,
         grau_item1: int = 1,
         grau_item3: int = 1,
     ) -> ModelResult:
@@ -2107,6 +2107,24 @@ class ModelBuilder:
             ci_upper = summary["mean_ci_upper"].iloc[0]
             amplitude_pct = abs(ci_upper - ci_lower) / abs(mean) * 100 if mean != 0 else float("inf")
 
+            def predict_original(subject_next):
+                raw = dict(subject_next or {})
+                row = {"const": 1.0}
+                for col_name in columns:
+                    if "(" in col_name and col_name.endswith(")"):
+                        func_name = col_name[: col_name.index("(")]
+                        base = col_name[col_name.index("(") + 1 : -1]
+                    else:
+                        func_name = "linear"
+                        base = col_name
+                    series, ok = Transformer.apply_transformation(pd.Series([raw.get(base)]), func_name)
+                    if not ok:
+                        return None
+                    row[col_name] = series.iloc[0]
+                frame = pd.DataFrame([row], columns=ordered_columns)
+                pred = model_result.model_object.get_prediction(frame)
+                return float(pred.summary_frame().iloc[0]["mean"])
+
             model_result.validation_result = NBRValidator.finalize_precision_and_extrapolation(
                 model_result.validation_result,
                 amplitude_pct,
@@ -2115,7 +2133,27 @@ class ModelBuilder:
                 ci_lower=ci_lower,
                 ci_upper=ci_upper,
                 central_estimate=mean,
+                predict_original=predict_original,
+                subject_raw=avaliando_raw,
             )
+            for detail in extrapolation_details:
+                sample_min = detail.get("sample_min")
+                sample_max = detail.get("sample_max")
+                aval = detail.get("avaliando_value")
+                if sample_min is None or sample_max is None or aval is None:
+                    continue
+                if aval < sample_min or aval > sample_max:
+                    frontier = sample_max if aval > sample_max else sample_min
+                    clamped = {k: v for k, v in avaliando_raw.items() if k != detail["variable"]}
+                    clamped[detail["variable"]] = frontier
+                    y_front = predict_original(clamped)
+                    y_sub = predict_original(avaliando_raw)
+                    if y_front is not None and y_sub is not None and y_front != 0:
+                        efeito = abs(y_sub - y_front) / abs(y_front)
+                        model_result.validation_result.details["efeito_monetario"] = efeito
+                        model_result.validation_result.warnings.append(
+                            f"efeito_monetario={efeito:.4f} price_outside_sample predicted={y_sub}"
+                        )
             if fit is not None:
                 influential = (fit.diagnostics or {}).get("influence", {}).get("influential_row_ids") or []
                 if influential:

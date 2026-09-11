@@ -53,6 +53,8 @@ dev = [
     "build>=1.0.0",
     "wheel>=0.42.0",
     "setuptools>=69.0.0",
+    "pypdf>=5.0.0",
+    "playwright>=1.40.0",
 ]
 
 [project.scripts]

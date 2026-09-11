@@ -12,7 +12,11 @@ from backend.worker import compose_valuation_job
 from modules.data_loader import ingest_market, observed_target_count
 from modules.valuation_batch import evaluate_batch
 
+from typing import Mapping
+
 from .helpers import (
+    analytic_linear_csv,
+    analytic_point,
     client,
     excel_bytes,
     finite_or_null,
@@ -248,106 +252,192 @@ class TestDInfluence:
 
 
 class TestEIndependentValidation:
-    def test_holdout_requested_does_not_filter_reserved_set_in_snapshot(self):
+    def test_holdout_requested_is_posted_and_scored(self):
         test_client = client()
-        from modules.data_loader import ingest_market
-        from modules.preprocessing import fit_dataset
-
         spec = request_spec(
+            candidate_cols=["area"],
+            roles={"preco": "target", "area": "predictor", "id": "identifier", "bairro": "excluded"},
             evaluation_policy={
                 "method": "holdout",
                 "partitions": 1,
                 "groups": None,
                 "seed": 17,
-            }
+            },
+            search_policy={
+                "mode": "exact",
+                "budget": 16,
+                "objective": "aic",
+                "seed": 17,
+                "target_degree": 1,
+                "y_transformations": ["identity"],
+            },
         )
-        bundle = ingest_market(ptbr_csv_bytes(n=30, tag="E"), "mercado.csv", spec)
-        row_ids = [entry["row_id"] for entry in bundle.row_ledger if entry.get("observed_target")]
-        train_ids = row_ids[: max(8, len(row_ids) - 6)]
-        held = [rid for rid in row_ids if rid not in set(train_ids)]
-        prepared = fit_dataset(bundle, spec, train_ids)
-        encoder = prepared.encoder_state or {}
-        fitted_on = encoder.get("fitted_on") or encoder.get("train_row_ids")
-        if fitted_on:
-            assert not set(map(str, held)).intersection(set(map(str, fitted_on)))
         _job_id, _status, snap = _require_success(
             test_client,
-            ptbr_csv_bytes(n=30, tag="E"),
+            analytic_linear_csv(n=30, tag="E"),
             filename="mercado.csv",
-            spec=request_spec(),
-            subject=subject_raw(),
+            spec=spec,
+            subject={"area": 90.0},
         )
         statistical = (snap.get("validation") or {}).get("statistical") or {}
-        assert snap["schema_version"] == "MP/1"
-        assert finite_or_null(snap["value"]["point"])
-        if statistical:
-            assert "reserved_used_for_selection" not in statistical or statistical[
-                "reserved_used_for_selection"
-            ] is False
+        procedure = statistical.get("procedure") or {}
+        assert procedure, "holdout was requested; validation.statistical.procedure must exist"
+        assert procedure.get("usable_for_model_selection") is False
+        assert procedure.get("reserved_filtered_by_error") is False
+        partition = procedure.get("partition") or {}
+        folds = partition.get("folds") or []
+        assert folds, "holdout must record partitions"
+        reserved = []
+        for fold in folds:
+            reserved.extend(fold.get("reserved_row_ids") or [])
+        assert reserved, "holdout must keep a reserved set"
+        used = set(map(str, (snap.get("sample") or {}).get("used_row_ids") or []))
+        assert used.isdisjoint(set(map(str, reserved))) or procedure.get("winner_retrained_on_full_data") is False
+        predictions = procedure.get("predictions") or []
+        assert predictions, "at least one reserved prediction must be observable"
+        ys = []
+        ps = []
+        n_reserved = 0
+        n_finite = 0
+        for item in predictions:
+            if not isinstance(item, Mapping):
+                continue
+            n_reserved += 1
+            y = item.get("y_true")
+            if y is None:
+                y = item.get("y") or item.get("observed") or item.get("y_original")
+            p = item.get("y_pred")
+            if p is None:
+                p = item.get("value") or item.get("yhat") or item.get("predicted") or item.get("point")
+            if y is None:
+                continue
+            if p is not None:
+                try:
+                    pf = float(p)
+                except (TypeError, ValueError):
+                    pf = None
+            else:
+                pf = None
+            n_finite += 1 if pf is not None and math.isfinite(pf) else 0
+            if pf is None:
+                continue
+            ys.append(float(y))
+            ps.append(pf)
+        assert n_reserved >= 1
+        coverage = n_finite / n_reserved
+        reported = (procedure.get("coverage") or {})
+        if isinstance(reported, Mapping):
+            reported_cov = reported.get("coverage")
+        else:
+            reported_cov = reported
+        if reported_cov is not None:
+            assert abs(float(reported_cov) - coverage) < 1e-9 or math.isfinite(float(reported_cov))
+        assert any(abs(y - p) < 1.0 for y, p in zip(ys, ps)), "at least one reserved prediction must match the linear case"
+        if ys:
+            mae = sum(abs(y - p) for y, p in zip(ys, ps)) / len(ys)
+            rmse = (sum((y - p) ** 2 for y, p in zip(ys, ps)) / len(ys)) ** 0.5
+            metrics = procedure.get("metrics") or {}
+            if metrics.get("mae") is not None:
+                assert abs(float(metrics["mae"]) - mae) < 1.0
+            if metrics.get("rmse") is not None:
+                assert abs(float(metrics["rmse"]) - rmse) < 1.0
+        assert snap["value"]["point"] is not None
+
+    def test_method_none_does_not_satisfy_holdout_scenario(self):
+        test_client = client()
+        _job_id, _status, snap = _require_success(
+            test_client,
+            analytic_linear_csv(n=24, tag="E0"),
+            filename="mercado.csv",
+            spec=request_spec(
+                candidate_cols=["area"],
+                roles={"preco": "target", "area": "predictor", "id": "identifier", "bairro": "excluded"},
+                evaluation_policy={"method": "none", "partitions": None, "groups": None, "seed": 17},
+                search_policy={
+                    "mode": "exact",
+                    "budget": 16,
+                    "objective": "aic",
+                    "seed": 17,
+                    "target_degree": 1,
+                    "y_transformations": ["identity"],
+                },
+            ),
+            subject={"area": 90.0},
+        )
+        procedure = ((snap.get("validation") or {}).get("statistical") or {}).get("procedure")
+        assert not procedure, "method=none must not be scored as independent validation"
 
 
 class TestFArtifacts:
     def test_snapshot_pdf_and_dossier_identity_when_ready(self):
         test_client = client()
+        expected = analytic_point(area=90.0)
+        spec = request_spec(
+            candidate_cols=["area"],
+            roles={"preco": "target", "area": "predictor", "id": "identifier", "bairro": "excluded"},
+            reference_date="2024-06-01",
+            inspection_date="2024-06-15",
+        )
         job_id, status, snap = _require_success(
             test_client,
-            ptbr_csv_bytes(n=24, tag="F"),
+            analytic_linear_csv(n=24, tag="F"),
             filename="mercado.csv",
-            spec=request_spec(),
-            subject=subject_raw(),
+            spec=spec,
+            subject={"area": 90.0},
         )
         point = snap["value"]["point"]
-        assert finite_or_null(point)
+        assert point is not None and math.isfinite(float(point))
+        assert abs(float(point) - expected) < 1.0
         pdf_state = (status.get("artifact_states") or {}).get("report.pdf") or {}
         evidence_state = (status.get("artifact_states") or {}).get("evidence_manifest.json") or {}
-        if pdf_state.get("state") == "ready":
-            pdf = test_client.get(f"/jobs/{job_id}/artifacts/report.pdf")
-            assert pdf.status_code == 200
-            assert pdf.content.startswith(b"%PDF")
-            from .helpers import pdf_text
+        assert pdf_state.get("state") == "ready", pdf_state
+        pdf = test_client.get(f"/jobs/{job_id}/artifacts/report.pdf")
+        assert pdf.status_code == 200
+        assert pdf.content.startswith(b"%PDF")
+        from .helpers import pdf_text
 
-            text = pdf_text(pdf.content)
-            compact = "".join(ch for ch in text if ch.isalnum())
-            assert (
-                snap["job_id"] in text
-                or "MP1" in compact
-                or "preco" in text.lower()
-                or "avali" in text.lower()
-                or "NBR" in compact
-                or "14653" in compact
-            )
-            if point is not None:
-                pretty = f"{point:.0f}"
-                digits = pretty.replace(".", "").replace(",", "")
-                assert pretty in text or digits[:4] in compact or "MP1" in compact or "14653" in compact
-        else:
-            assert pdf_state.get("state") == "failed"
-            assert pdf_state.get("error")
-        if evidence_state.get("state") == "ready":
-            manifest = test_client.get(f"/jobs/{job_id}/artifacts/evidence_manifest.json")
-            assert manifest.status_code == 200
-            body = manifest.json() if manifest.headers.get("content-type", "").startswith("application/json") else None
-            if body is None:
-                import json
+        text = pdf_text(pdf.content)
+        digits = "".join(ch for ch in text if ch.isdigit())
+        expected_int = f"{expected:.0f}"
+        assert expected_int in text.replace(".", "").replace(",", "") or expected_int in digits
+        assert "2024-06-01" in text or "01/06/2024" in text or "2024" in text
+        assert snap["job_id"] in text or job_id in text
+        assert evidence_state.get("state") == "ready", evidence_state
+        manifest = test_client.get(f"/jobs/{job_id}/artifacts/evidence_manifest.json")
+        assert manifest.status_code == 200
+        body = manifest.json() if "json" in manifest.headers.get("content-type", "") else None
+        if body is None:
+            import json
 
-                body = json.loads(manifest.content.decode("utf-8"))
-            assert body
-        else:
-            assert evidence_state.get("state") in {"failed", "pending", None}
+            body = json.loads(manifest.content.decode("utf-8"))
+        assert body
 
-    def test_more_than_200_rows_keeps_sample_counts(self):
+    def test_more_than_200_rows_keeps_every_id(self):
         test_client = client()
-        spec = request_spec(candidate_cols=["area"], roles={"preco": "target", "area": "predictor", "id": "identifier", "bairro": "excluded"})
-        _job_id, _status, snap = _require_success(
+        spec = request_spec(
+            candidate_cols=["area"],
+            roles={"preco": "target", "area": "predictor", "id": "identifier", "bairro": "excluded"},
+        )
+        job_id, status, snap = _require_success(
             test_client,
-            ptbr_csv_bytes(n=210, missing_target_at=9, tag="F200"),
+            analytic_linear_csv(n=210, missing_target_at=9, tag="F200"),
             filename="mercado.csv",
             spec=spec,
             subject={"area": 90.0},
         )
         assert snap["sample"]["received"] == 210
         assert snap["sample"]["observed_target"] == 209
-        assert len(snap["sample"]["used_row_ids"]) == snap["sample"]["used"]
+        used = list(snap["sample"]["used_row_ids"])
+        excluded = list(snap["sample"].get("excluded_row_ids") or [])
+        assert len(used) == snap["sample"]["used"]
+        pdf_state = (status.get("artifact_states") or {}).get("report.pdf") or {}
+        assert pdf_state.get("state") == "ready", pdf_state
+        pdf = test_client.get(f"/jobs/{job_id}/artifacts/report.pdf")
+        from .helpers import pdf_text
+
+        text = pdf_text(pdf.content)
+        missing = [rid for rid in used + excluded if str(rid) not in text]
+        assert not missing, f"annex omitted {len(missing)} ids, e.g. {missing[:8]}"
 
 
 class TestGRecovery:
@@ -376,44 +466,62 @@ class TestHIsolationBatch:
         store = isolated_c17_runtime["job_store"]
         created = store.create(payload={"filename": "mercado.csv"})
         peers = production_peers()
+        spec = request_spec(
+            candidate_cols=["area", "bairro"],
+            search_policy={
+                "mode": "exact",
+                "budget": 32,
+                "objective": "aic",
+                "seed": 17,
+                "target_degree": 1,
+                "y_transformations": ["identity"],
+            },
+        )
         ctx = compose_valuation_job(
             job_id=created["job_id"],
             file_bytes=ptbr_csv_bytes(tag="H"),
             filename="mercado.csv",
-            request_spec=request_spec(),
+            request_spec=spec,
             subject_raw=subject_raw(),
             project_id=None,
             peers=peers,
             job_store=store,
         )
         frozen = ctx["frozen_project"]
+        assert frozen.get("model_scope") == "population_model"
         subjects = [
             {"subject_id": "s1", "bairro": "Centro", "area": 80.0},
             {"subject_id": "s2", "bairro": "Sul", "area": 110.0},
             {"subject_id": "s3", "bairro": "bairro_inexistente", "area": 90.0},
+            {
+                "subject_id": "s4",
+                "bairro": "Centro",
+                "area": 95.0,
+                "documentary": {"subject_id": "s4", "origin": "subject", "items": []},
+            },
         ]
-        batch = evaluate_batch(frozen, subjects, request_spec())
-        items = batch.get("items") or []
-        assert len(items) == 3
-        points = [item.get("value", {}).get("point") for item in items]
-        grades = []
-        for item in items:
-            assessment = item.get("assessment") or {}
-            normative = assessment.get("normative") or {}
-            fund = (normative.get("fundamentacao") or {})
-            grades.append(fund.get("grade"))
-            documentary = normative.get("documentary") or {}
-            assert documentary.get("subject_id") == item.get("subject_id")
-            if item.get("subject_id") == "s3":
-                eligibility = (assessment.get("model_eligibility") or item.get("model_eligibility") or {}).get("status")
-                assert item.get("status") in {"unsupported", "failed", "succeeded", "pending"}
-                assert eligibility in {"unsupported", "review_required", "error", "eligible", None}
-                # Unknown category must not inherit another imóvel's point/grade.
-                if item.get("status") in {"unsupported", "failed"}:
-                    assert item.get("value", {}).get("point") in (None, 0) or item["value"]["point"] != points[0]
-        assert len(set(str(p) for p in points)) >= 2 or any(p is None for p in points)
-        assert len(set(str(g) for g in grades)) >= 1
-        assert len({item.get("subject_id") for item in items}) == 3
+        batch = evaluate_batch(frozen, subjects, spec)
+        items = {item["subject_id"]: item for item in (batch.get("items") or [])}
+        assert set(items) == {"s1", "s2", "s3", "s4"}
+        p1 = items["s1"]["value"]["point"]
+        p2 = items["s2"]["value"]["point"]
+        assert p1 is not None and math.isfinite(float(p1))
+        assert p2 is not None and math.isfinite(float(p2))
+        assert p1 != 0 and p2 != 0
+        assert items["s3"]["value"]["point"] is None
+        elig3 = (items["s3"].get("assessment") or {}).get("model_eligibility") or {}
+        assert items["s3"]["status"] in {"unsupported", "failed"}
+        assert elig3.get("status") in {"unsupported", "error"}
+        assert "unknown_category" in (elig3.get("reasons") or []) or any(
+            "unknown" in str(i.get("code", "")).lower()
+            for i in (items["s3"].get("assessment") or {}).get("issues") or []
+        )
+        fund4 = ((items["s4"].get("assessment") or {}).get("normative") or {}).get("fundamentacao") or {}
+        assert fund4.get("grade") is None
+        assert items["s4"]["value"]["point"] is not None
+        for sid, item in items.items():
+            documentary = ((item.get("assessment") or {}).get("normative") or {}).get("documentary") or {}
+            assert documentary.get("subject_id") == sid
 
 
 class TestISearchCoverage:

@@ -45,7 +45,7 @@ Ajustes só na branch consolidada (não reescritos nas branches dos donos):
 6. CORS da API usa `config.cors_origin_list()` (C15), nunca `*`.
 7. Adaptador legado C05 preenche `ModelResult.coefficients` a partir do winner MP/1.
 8. C10 chama C03 sempre a partir do `CandidateFit` vivo (`axes` da `base_frame`, `n`/`k` inteiros, p-valores, `predict_original` → `{point}`); não reutiliza `assessment.normative` incompleto da busca. `resolve_effective_n_k` conta `len(sample.used)` quando `used` é lista. Alternatives JSON perdem `candidate_fit`.
-9. C14 envia eixos/`n`/`k` do domínio/sample_ranges a C03, carimba `documentary.subject_id` do imóvel, e se o grau C03 fica `None` com `sample_item_scores` usa o classificador builtin.
+9. C14 envia eixos/`n`/`k`/p-valores/`predict_original` a C03 por sujeito. Grau C03 `None` (documentação pendente ou item 4 reprovado) **não** autoriza o classificador builtin. `documentary.subject_id` identifica o imóvel; não cria evidência. `build_frozen_project` congela `population_model` com `domain.variables` da amostra usada, salvo `search_policy.model_scope=subject_specific`.
 
 ## Ambiente executado
 

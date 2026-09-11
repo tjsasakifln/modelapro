@@ -43,7 +43,7 @@ class TestF01MissingTarget:
         loaded = result.dataframe
         n_loaded_target = int(loaded["preco"].notna().sum())
         assert n_loaded_target == independent["observed_target"]
-        assert len(loaded) == independent["observed_target"]
+        assert len(loaded) == independent["received"]
 
         # The 5 missing prices must not equal the observed mean.
         observed_mean = oracles.f01_observed_mean_preco(path)

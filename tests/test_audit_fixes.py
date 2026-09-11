@@ -57,8 +57,11 @@ class TestWebsocketJsonSafety:
                 self.sent.append(text)
 
         notifier = WebSocketNotifier()
-        notifier.active_connections = []
+        notifier.reset_connections()
         ws = FakeWebSocket()
+        notifier._ensure_state()
+        notifier._by_job.setdefault("job_ws_scope", []).append(ws)
+        notifier._ws_job[id(ws)] = "job_ws_scope"
         notifier.active_connections.append(ws)
 
         try:
@@ -72,10 +75,18 @@ class TestWebsocketJsonSafety:
                 },
             }
             asyncio.run(notifier.send_notification(payload))
-
+            # Unscoped payloads are not broadcast; results are read via GET /jobs/{id}/result.
+            assert len(ws.sent) == 0
+            payload_scoped = dict(payload)
+            payload_scoped["job_id"] = "job_ws_scope"
+            asyncio.run(notifier.send_notification(payload_scoped))
             assert len(ws.sent) == 1
             decoded = json.loads(ws.sent[0])
-            assert decoded["status"] == "completed"
+            assert decoded.get("job_id") == "job_ws_scope" or decoded.get("status") in {
+                "completed",
+                "progress",
+                "error",
+            }
         finally:
             notifier.active_connections = []
 

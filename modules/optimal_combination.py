@@ -810,7 +810,23 @@ class OptimalCombinationFinder:
                 candidate_cols=candidate_cols,
             )
             result = search_models(prepared, subject, request_spec)
-            return self._to_legacy_result(result, degree=degree)
+            legacy = self._to_legacy_result(result, degree=degree)
+            if avaliando_raw and legacy.best_model is not None:
+                builder = ModelBuilder()
+                original_df = prepared.get("base_frame")
+                if original_df is None:
+                    original_df = df.drop(columns=[target_col])
+                legacy.best_model = builder.add_precision_and_extrapolation(
+                    legacy.best_model, dict(avaliando_raw), original_df, degree=degree
+                )
+                vr = legacy.best_model.validation_result
+                if vr is not None:
+                    legacy.best_grau_reached = vr.grau_fundamentacao
+                    legacy.target_achieved = (
+                        vr.grau_fundamentacao is not None
+                        and vr.grau_fundamentacao >= degree
+                    )
+            return legacy
         except Exception as e:
             logger.error(f"Error finding optimal combination: {str(e)}")
             return OptimalCombinationResult(
@@ -876,8 +892,8 @@ class OptimalCombinationFinder:
                 "n_jobs": 1,
             },
             "evaluation_policy": {
-                "sample_size_rule": "nbr_item2_grau1",
-                "min_fundamentacao_grade": degree if avaliando_raw else None,
+                "sample_size_rule": None,
+                "min_fundamentacao_grade": None,
                 "remove_outliers": False,
                 "outlier_action": "report_only",
                 "grau_item1": grau_item1,
@@ -937,7 +953,50 @@ class OptimalCombinationFinder:
                         if value is not None and _finite_number(value)
                     },
                     model_object=winner.get("model_object"),
+                    pvalues={},
                 )
+                fit_obj = winner.get("candidate_fit") or winner
+                records = winner.get("coefficient_records")
+                if not records and fit_obj is not None:
+                    records = getattr(fit_obj, "coefficient_records", None)
+                    if records is None and isinstance(fit_obj, Mapping):
+                        records = fit_obj.get("coefficient_records")
+                if records:
+                    best_model.pvalues = {
+                        str(rec.get("name")): rec.get("pvalue")
+                        for rec in records
+                        if isinstance(rec, Mapping) and rec.get("name") is not None
+                    }
+                setattr(best_model, "_c04_candidate_fit", fit_obj)
+                setattr(best_model, "_c04_used_row_ids", list(winner.get("used_row_ids") or []))
+                X_design = winner.get("X_design")
+                y_design = winner.get("y_design")
+                if X_design is None and fit_obj is not None:
+                    X_design = getattr(fit_obj, "X_design", None)
+                    if X_design is None and isinstance(fit_obj, Mapping):
+                        X_design = fit_obj.get("X_design")
+                if y_design is None and fit_obj is not None:
+                    y_design = getattr(fit_obj, "y_design", None)
+                    if y_design is None and isinstance(fit_obj, Mapping):
+                        y_design = fit_obj.get("y_design")
+                if best_model.model_metrics is None and best_model.model_object is not None and X_design is not None:
+                    try:
+                        best_model.model_metrics = ModelBuilder()._calculate_metrics(
+                            best_model.model_object, X_design, y_design
+                        )
+                    except Exception:
+                        pass
+                if X_design is not None and y_design is not None and best_model.model_object is not None:
+                    try:
+                        from modules.nbr14653_validation import NBRValidator
+
+                        best_model.validation_result = NBRValidator.validate_model(
+                            best_model, X_design, y_design, degree
+                        )
+                    except Exception:
+                        pass
+        # Item 4/precision for the legacy DataFrame API is completed in
+        # find_best_model via add_precision_and_extrapolation when avaliando exists.
         grau = None
         if best_model is not None and best_model.validation_result is not None:
             grau = best_model.validation_result.grau_fundamentacao
@@ -965,9 +1024,14 @@ class OptimalCombinationFinder:
                 }
             )
         profile = (search.get("search_audit") or {}).get("profile") or {}
-        return OptimalCombinationResult(
-            success=True,
-            message=" ".join(p for p in message_parts if p),
+        result = OptimalCombinationResult(
+            success=best_model is not None,
+            message=" ".join(p for p in message_parts if p)
+            or (
+                "No admissible candidate produced a fitted model."
+                if best_model is None
+                else ""
+            ),
             best_model=best_model,
             combinations_tested=int(audit.get("evaluated") or 0),
             time_elapsed=float(profile.get("elapsed_s") or 0.0),
@@ -976,6 +1040,8 @@ class OptimalCombinationFinder:
             best_grau_reached=grau,
             exhaustive=bool(audit.get("coverage", {}).get("exact_optimum_guaranteed")),
         )
+        result.search_audit = dict(audit)
+        return result
 
 
 def _configure_local_threads(n_jobs: Any) -> int:

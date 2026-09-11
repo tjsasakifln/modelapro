@@ -308,7 +308,7 @@ def _redact_mapping(value: Any, *, depth: int = 0) -> Any:
                 out[key_s] = _redact_mapping(item, depth=depth + 1)
         return out
     if isinstance(value, list):
-        return [_redact_mapping(item, depth=depth + 1) for item in value[:200]]
+        return [_redact_mapping(item, depth=depth + 1) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         if isinstance(value, str):
             return _safe_text(value)

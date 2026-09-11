@@ -76,6 +76,10 @@ def test_pytest_is_dev_extra_not_runtime():
     assert "pytest" not in runtime
     assert "pytest" in dev
     assert "httpx" in dev
+    assert "pypdf" in dev
+    assert "playwright" in dev
+    assert "pypdf" not in runtime
+    assert "playwright" not in runtime
 
 
 def test_redis_is_optional_extra():
