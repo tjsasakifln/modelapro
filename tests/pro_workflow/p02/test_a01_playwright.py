@@ -22,7 +22,6 @@ EVIDENCE = ROOT / "docs" / "campaigns" / "MP-PRO-20260911" / "P02"
 
 def _port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
             return True
@@ -88,10 +87,13 @@ def test_a01_playwright_real_path_or_record_unavailability(tmp_path):
         assert "playwright" in log_path.read_text(encoding="utf-8").lower()
         return
 
-    api_port = 8765
-    ui_port = 8766
-    if not _port_free(api_port) or not _port_free(ui_port):
-        log_path = _record_block(f"ports {api_port}/{ui_port} already bound")
+    api_port = ui_port = None
+    for candidate in range(18200, 18280, 2):
+        if _port_free(candidate) and _port_free(candidate + 1):
+            api_port, ui_port = candidate, candidate + 1
+            break
+    if api_port is None:
+        log_path = _record_block("no free loopback ports in 18200-18280")
         assert log_path.is_file()
         return
 
@@ -107,6 +109,7 @@ def test_a01_playwright_real_path_or_record_unavailability(tmp_path):
 
     env = os.environ.copy()
     env["MODELA_API_URL"] = f"http://127.0.0.1:{api_port}"
+    env["MODELA_API_TIMEOUT"] = "120"
     env["MODELA_DISABLE_WS"] = "1"
     env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
 
@@ -177,9 +180,11 @@ def _drive_two_files(sync_playwright, ui_port: int, csv_path: Path, xlsx_path: P
         context.tracing.stop(path=str(shots / "trace.zip"))
         browser.close()
 
+    # Streamlit's ApiClient POSTs /jobs from the Python server, not the
+    # browser; page.on("request") never sees it. The real path is the
+    # visible calculation asserted in _upload_and_run.
     sanitised = [{"method": item["method"], "path": item["url"].split("://", 1)[-1].split("/", 1)[-1]} for item in request_log]
     (shots / "requests.json").write_text(json.dumps(sanitised, ensure_ascii=False, indent=2), encoding="utf-8")
-    assert any(item["method"] == "POST" and "jobs" in item.get("path", "") for item in sanitised)
 
 
 def _upload_and_run(page, path: Path, tag: str) -> None:
@@ -191,12 +196,13 @@ def _upload_and_run(page, path: Path, tag: str) -> None:
         file_input.set_input_files(str(path))
         page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=60000)
     area = page.get_by_placeholder("ex.: 73,5")
-    if area.count():
-        area.first.fill("73,5")
+    assert area.count() >= 1, "subject area field missing; body=" + page.inner_text("body")[:1500]
+    area.first.fill("73,5")
     execute = page.get_by_role("button", name="Executar avaliação")
-    if execute.count():
-        execute.first.click()
-    for _ in range(20):
+    assert execute.count() >= 1, "execute button missing; body=" + page.inner_text("body")[:800]
+    execute.first.click()
+    body = ""
+    for _ in range(40):
         body = page.inner_text("body")
         if "735" in body and ("Valor da avaliação" in body or "Cálculo disponível" in body):
             break
@@ -205,3 +211,5 @@ def _upload_and_run(page, path: Path, tag: str) -> None:
             refresh.first.click()
         page.wait_for_timeout(1500)
     page.screenshot(path=str(SCRATCH / "p02-a01" / f"result-{tag}.png"))
+    assert "Valor da avaliação" in body or "Cálculo disponível" in body, body[:2000]
+    assert "735.000" in body or "735000" in body or "735.000,00" in body, body[:1500]

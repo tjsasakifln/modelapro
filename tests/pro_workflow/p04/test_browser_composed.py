@@ -20,7 +20,6 @@ EXPECTED_POINT = 735000.0
 
 def _port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
             return True
@@ -57,14 +56,13 @@ def test_composed_browser_upload_preview_subject_result_pdf(tmp_path):
         log.write_text(f"NOT_RUN:playwright import failed: {exc}\n", encoding="utf-8")
         raise AssertionError(f"NOT_RUN:playwright import failed: {exc}") from exc
 
-    api_port = 18040
-    ui_port = 18041
-    for candidate in range(18040, 18100, 2):
+    api_port = ui_port = None
+    for candidate in range(18300, 18380, 2):
         if _port_free(candidate) and _port_free(candidate + 1):
             api_port, ui_port = candidate, candidate + 1
             break
-    else:
-        raise AssertionError("NOT_RUN:no free loopback ports in 18040-18100")
+    if api_port is None:
+        raise AssertionError("NOT_RUN:no free loopback ports in 18300-18380")
 
     csv_path = tmp_path / "mercado.csv"
     csv_path.write_bytes(_ptbr_csv())
@@ -104,10 +102,14 @@ def test_composed_browser_upload_preview_subject_result_pdf(tmp_path):
         stderr=subprocess.STDOUT,
     )
     try:
-        if not _wait_http(f"http://127.0.0.1:{api_port}/health", 25):
-            raise AssertionError("NOT_RUN:API did not become healthy")
+        if not _wait_http(f"http://127.0.0.1:{api_port}/health", 40):
+            api_log.flush()
+            tail = Path(api_log.name).read_text(encoding="utf-8")[-1500:]
+            raise AssertionError("NOT_RUN:API did not become healthy\n" + tail)
         if not _wait_http(f"http://127.0.0.1:{ui_port}", 40):
-            raise AssertionError("NOT_RUN:Streamlit did not become ready")
+            ui_log.flush()
+            tail = Path(ui_log.name).read_text(encoding="utf-8")[-1500:]
+            raise AssertionError("NOT_RUN:Streamlit did not become ready\n" + tail)
 
         with sync_playwright() as playwright:
             try:
@@ -160,24 +162,44 @@ def test_composed_browser_upload_preview_subject_result_pdf(tmp_path):
             assert "735.000" in body or "735000" in body or "735.000,00" in body, body[:1500]
 
             download_btn = page.get_by_role("button", name="Baixar report.pdf")
-            if download_btn.count() < 1:
-                refresh = page.get_by_role("button", name="Atualizar estado")
-                if refresh.count() >= 1:
-                    refresh.first.click()
-                    page.wait_for_timeout(2500)
+            pdf_failed = False
+            for _ in range(45):
+                body = page.inner_text("body")
+                if (
+                    "Baixar cálculo (o PDF falhou)" in body
+                    or "Documento PDF indisponível" in body
+                ):
+                    pdf_failed = True
+                    break
                 download_btn = page.get_by_role("button", name="Baixar report.pdf")
-            if download_btn.count() >= 1:
-                download_btn.first.click()
+                if download_btn.count() >= 1:
+                    break
+                refresh = page.get_by_role("button", name="Atualizar estado")
+                if refresh.count() >= 1 and refresh.first.is_enabled():
+                    refresh.first.click()
                 page.wait_for_timeout(2000)
-                transfer = page.get_by_role("button", name="Transferência de report.pdf")
+            assert not pdf_failed, "PDF generation failed; body=" + body[:2000]
+            assert download_btn.count() >= 1, "PDF download control missing; body=" + body[:2000]
+            transfer = page.get_by_role("button", name="Transferência de report.pdf")
+            for _ in range(12):
                 if transfer.count() >= 1:
-                    with page.expect_download(timeout=30000) as pending:
-                        transfer.first.click()
-                    pending.value.save_as(str(pdf_path))
-                    assert pdf_path.exists() and pdf_path.read_bytes()[:4] == b"%PDF"
-                    from tests.c17_integration.helpers import assert_pdf_conclusion_point
+                    break
+                baixar = page.get_by_role("button", name="Baixar report.pdf")
+                if baixar.count() >= 1:
+                    baixar.first.click()
+                page.wait_for_timeout(1500)
+            if transfer.count() < 1:
+                transfer = page.get_by_role("link", name="Transferência de report.pdf")
+            assert transfer.count() >= 1, (
+                "Transferência de report.pdf missing; body=" + page.inner_text("body")[:2000]
+            )
+            with page.expect_download(timeout=30000) as pending:
+                transfer.first.click()
+            pending.value.save_as(str(pdf_path))
+            assert pdf_path.exists() and pdf_path.read_bytes()[:4] == b"%PDF"
+            from tests.c17_integration.helpers import assert_pdf_conclusion_point
 
-                    assert_pdf_conclusion_point(pdf_path.read_bytes(), EXPECTED_POINT)
+            assert_pdf_conclusion_point(pdf_path.read_bytes(), EXPECTED_POINT)
             context.close()
             browser.close()
     finally:

@@ -28,6 +28,7 @@ CORE_TARGETS = [
     "tests/pro_workflow/p04/test_mutations.py",
     "tests/pro_workflow/p04/test_metrics_and_pilot.py",
     "tests/pro_workflow/p04/test_runner_and_ci.py",
+    "tests/pro_workflow/p04/test_browser_composed.py",
 ]
 CANDIDATE_TARGETS = [
     "tests/pro_workflow/p04/test_candidate_extensions.py",

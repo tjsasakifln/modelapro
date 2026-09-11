@@ -18,12 +18,12 @@ HEAD deste texto é gravado no comentário da PR **depois** do commit.
 - P04-A02: metrics distinguish machine time, robot actions, and unrun human time.
 - P04-A03: P01 #19, P02 #18, P03 #21 incorporated `--no-ff` after SEALED comments. No writes to main/#17/producer branches.
 - P04-A04: HTTP/worker/PDF/mutation/restore/batch (104 passed × 2 on `200816f`). Playwright+Chromium installed locally; composed browser path passed in `tests/pro_workflow/p04` (29 passed including browser). Screenshot: combined-browser.png.
-- P04-A05: C18 triggers fire. First increment GHA success. GHA on `113cccb` install-eval **success**, wide suite **failure** (C16 UI labels, C17 dossier `ok`, P02 Playwright). This follow-up commit addresses those. Wheel `wheel_eval_ok` 735000 from `site-packages`.
+- P04-A05: C18 triggers fire. First increment GHA success. GHA `02981b1` runs 34654609759/34654606636: C16/P04/install-eval **success**; wide suite **2 failed / 694 passed** (`test_e2e_ui` PDF button before artifact ready; P02 Playwright asserted browser POST `/jobs` which Streamlit never emits). Local Chromium re-run of the three Playwright tests after the wait/assertion fix: 3 passed. Wheel `wheel_eval_ok` 735000 from `site-packages`.
 
 ## What remains
 
 - Human pilot 5–10 authorized real cases: **not run**.
-- GHA wide suite on the Playwright/C17-fix HEAD: pending after push. STATUS=`PARTIAL_EVIDENCE` until that run is green.
+- GHA wide suite on the Playwright PDF-wait HEAD: pending after this push. STATUS=`PARTIAL_EVIDENCE` until that run is green. Human-looking GHA SHA is recorded in the PR comment after the commit.
 - Absolute readiness / full NBR / Windows PDF: **not claimed**.
 - This status does **not** authorize merge or laudo.
 
@@ -42,7 +42,7 @@ Empty `PYTHONPATH` throughout.
 
 CI trigger (first increment SHA `079b05d`): GHA runs `34650664816` (pull_request) and `34650605102` (push) **success**.
 
-Playwright: `NOT_RUN:playwright import failed: ModuleNotFoundError`. HTTP/PDF remains the bar.
+Playwright local (empty PYTHONPATH): `test_e2e_ui` + P02 A01 + `test_browser_composed` 3 passed in 68.98s after PDF-wait / server-side `/jobs` fix.
 
 ## Composition matrix
 

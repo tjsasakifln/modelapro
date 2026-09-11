@@ -60,6 +60,14 @@
       "example_in": "reproduce_from_bundle after identity OLS",
       "example_out": {"point": 735000.0, "integrity": {"ok": true}, "ok": false, "limitations": ["t_crit or std_error missing; intervals not reconstructed"]},
       "accept": "wheel_eval_ok with modules loaded from site-packages"
+    },
+    {
+      "producer": "P02",
+      "consumer": "P04",
+      "change": "Playwright A01 asserts the visible calculation (735.000) instead of a browser POST /jobs. Streamlit's ApiClient submits from the server process. C16 E2E polls until Baixar report.pdf after save_snapshot sets result_available mid-job.",
+      "example_in": "upload CSV, fill area 73,5, Executar avaliação",
+      "example_out": "Valor da avaliação 735.000,00 then Baixar report.pdf / Transferência de report.pdf",
+      "accept": "tests/acceptance/test_e2e_ui.py and tests/pro_workflow/p02/test_a01_playwright.py pass on real Chromium"
     }
   ],
   "tests": {
@@ -95,7 +103,7 @@
     "P03": {"pr": 21, "sealed": true, "head": "4cb69374799444b9c06ffff8f72cc59caafe597f", "incorporated": true}
   },
   "limitations": [
-    "Playwright/Chromium NOT_RUN in this environment (import failed). HTTP/worker/PDF is the behavioral bar. Missing MCP is not no-browser.",
+    "Playwright/Chromium now installed; composed + C16 E2E + P02 A01 pass locally. GHA wide suite on 02981b1 still red (this push is the PDF-wait fix). Missing MCP is not no-browser.",
     "Human pilot STATUS=NOT_RUN; no market or human-hour claims",
     "No full normative certification, no Windows PDF, no performance sweep",
     "Delivered winner may retrain on the full sample; inner holdout isolation is what S04 checks",
