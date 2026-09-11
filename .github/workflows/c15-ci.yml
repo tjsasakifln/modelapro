@@ -2,9 +2,17 @@ name: C15 packaging CI
 
 on:
   push:
-    branches: [mp-20260911/c15-instalacao_ci_local, mp-20260911/integracao-final, main]
+    branches:
+      - mp-20260911/c15-instalacao_ci_local
+      - mp-20260911/integracao-final
+      - mp-pro-20260911/p04-referencia-consolidacao
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - mp-20260911/integracao-final
+      - mp-pro-20260911/p04-referencia-consolidacao
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -40,7 +48,10 @@ jobs:
           frontend/__init__.py
           frontend/components/__init__.py
           scripts/c15_local
+          scripts/pro_workflow
           tests/c15_packaging
+          tests/pro_workflow/p04
+          tests/fixtures/pro_workflow
 
   c15-tests-linux:
     name: C15 tests (Linux)
@@ -262,6 +273,38 @@ jobs:
           path: artifacts/
           if-no-files-found: error
 
+  p04-harness:
+    name: P04 independent corpus and runner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Native PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install
+        run: python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Diagnose BASE / run P04 core twice
+        env:
+          P04_FINDINGS_DIR: artifacts/p04/findings
+        run: |
+          mkdir -p artifacts/p04
+          python scripts/pro_workflow/run.py --mode diagnose-base --output artifacts/p04 | tee artifacts/p04/console.log
+          python scripts/pro_workflow/measure.py --phase before --sha "$(git rev-parse HEAD)" --output artifacts/p04/metrics-before.json --run-json artifacts/p04/run.json
+      - name: Upload P04 evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p04-harness
+          path: artifacts/p04/
+          if-no-files-found: error
+
   acceptance:
     name: Required jobs aggregator
     runs-on: ubuntu-latest
@@ -273,10 +316,14 @@ jobs:
       - install-eval-linux
       - wide-suite-linux
       - c16-harness
+      - p04-harness
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Require every mandatory job succeeded
-        run: python scripts/c15_local/aggregate_required.py --results-json '${{ toJSON(needs) }}'
+        run: >
+          python scripts/c15_local/aggregate_required.py
+          --required-jobs lint,c15-tests-linux,build-sdist-wheel,install-eval-linux,wide-suite-linux,c16-harness,p04-harness
+          --results-json '${{ toJSON(needs) }}'

@@ -1,0 +1,52 @@
+{
+  "campaign_id": "MP-PRO-20260911/P04",
+  "generated_at": "2026-09-11T21:34:28.715738+00:00",
+  "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "rows": {
+    "P01": {
+      "id": "P01",
+      "prefix": "[MP-PRO-20260911/P01]",
+      "branch": "mp-pro-20260911/p01-nucleo-reuso",
+      "pr": null,
+      "url": null,
+      "head": null,
+      "base": null,
+      "state": null,
+      "draft": null,
+      "sealed": false,
+      "sealed_head": null,
+      "contracts": [],
+      "evidence": []
+    },
+    "P02": {
+      "id": "P02",
+      "prefix": "[MP-PRO-20260911/P02]",
+      "branch": "mp-pro-20260911/p02-rotina-interface",
+      "pr": null,
+      "url": null,
+      "head": null,
+      "base": null,
+      "state": null,
+      "draft": null,
+      "sealed": false,
+      "sealed_head": null,
+      "contracts": [],
+      "evidence": []
+    },
+    "P03": {
+      "id": "P03",
+      "prefix": "[MP-PRO-20260911/P03]",
+      "branch": "mp-pro-20260911/p03-relatorio-tecnico",
+      "pr": null,
+      "url": null,
+      "head": null,
+      "base": null,
+      "state": null,
+      "draft": null,
+      "sealed": false,
+      "sealed_head": null,
+      "contracts": [],
+      "evidence": []
+    }
+  }
+}

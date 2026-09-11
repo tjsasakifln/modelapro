@@ -42,3 +42,49 @@ def test_github_needs_nested_result_is_normalized():
         == 1
     )
     assert main(["--results-json", '{"lint": {"result": "success"}}']) == 0
+
+
+def test_missing_required_job_is_red_even_if_others_succeeded():
+    from c15_local.aggregate_required import evaluate
+
+    assert (
+        evaluate(
+            {"lint": "success", "wide-suite-linux": "success"},
+            required=["lint", "wide-suite-linux", "p04-harness"],
+        )
+        == 1
+    )
+
+
+def test_unrun_empty_status_with_inventory_is_red():
+    from c15_local.aggregate_required import evaluate
+
+    assert evaluate({"lint": "success", "p04-harness": ""}, required=["lint", "p04-harness"]) == 1
+
+
+def test_inventory_all_success_is_green():
+    from c15_local.aggregate_required import evaluate
+
+    assert (
+        evaluate(
+            {"lint": "success", "p04-harness": "success"},
+            required=["lint", "p04-harness"],
+        )
+        == 0
+    )
+
+
+def test_cli_required_jobs_flag():
+    from c15_local.aggregate_required import main
+
+    assert (
+        main(
+            [
+                "--results-json",
+                '{"lint": {"result": "success"}}',
+                "--required-jobs",
+                "lint,p04-harness",
+            ]
+        )
+        == 1
+    )
