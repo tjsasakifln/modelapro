@@ -5,7 +5,7 @@
   "required_callsite": "backend/worker.py after modules.result_contract.freeze_result_snapshot; write the returned manifest into the C11 job artifact registry (external to the frozen snapshot). Do not hash the manifest back into the snapshot.",
   "contract_version": "MP/1",
   "dependency_pr": null,
-  "head_sha": null,
+  "head_sha": "ac2e60893a049529833f057a0a53aded0fee628e",
   "acceptance_case": "tests/c12_evidence/test_a01_complete_package.py plus scripts/c12_reproduce/reproduce.py --bundle <dir> exit 0 on a complete synthetic package",
   "additional_consumers": [
     {

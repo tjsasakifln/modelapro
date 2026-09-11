@@ -3,7 +3,7 @@
   "lote": "MP-20260911",
   "result": "INTEGRATION_PENDING",
   "local_component": "READY_COMPONENT",
-  "head_sha": "PENDING_COMMIT",
+  "head_sha": "ac2e60893a049529833f057a0a53aded0fee628e",
   "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "contract_version": "MP/1",
   "bundle_version": "C12/1",
