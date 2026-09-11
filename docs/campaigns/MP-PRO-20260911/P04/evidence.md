@@ -16,15 +16,15 @@ HEAD deste texto é gravado no comentário da PR **depois** do commit.
 
 - P04-A01: independent numeric reference on BASE_SHA (43 passed × 2).
 - P04-A02: metrics distinguish machine time, robot actions, and unrun human time.
-- P04-A03: P01 #19, P02 #18, P03 #21 incorporated `--no-ff` after SEALED comments. No writes to main/#17/producer branches.
+- P04-A03: previous incorporation of P01 `18a2dc0` / P02 `a0b4b4a` / P03 `4cb6937` **invalidated** (REOPENED). Current SEALED merged `--no-ff`: P01 `ec691bd`, P03 `ec7b8db`, P02 `b8e846c`. No writes to main/#17/producer branches.
 - P04-A04: HTTP/worker/PDF/mutation/restore/batch (104 passed × 2 on `200816f`). Playwright+Chromium installed locally; composed browser path passed in `tests/pro_workflow/p04` (29 passed including browser). Screenshot: combined-browser.png.
-- P04-A05: C18 triggers fire. GHA on `32bd871f84fc8e0ed4dcb589022ef452bed368e5` runs [34656286986](https://github.com/tjsasakifln/modelapro/actions/runs/34656286986) (pull_request) and [34656279956](https://github.com/tjsasakifln/modelapro/actions/runs/34656279956) (push) **success** — lint, C15, sdist, install-eval, C16, P04 harness, wide suite **696 passed / 1 skipped**, aggregator. Prior `02981b1` wide suite was 2 failed / 694 passed (PDF wait / P02 browser POST). Wheel `wheel_eval_ok` 735000 from `site-packages`.
+- P04-A05: C18 triggers fire. GHA green on `32bd871`/`b0391bd` does **not** count for COMBINED: those SHAs did not contain current SEALED HEADs. Local combined suite on `c055272` (after ec691bd/ec7b8db/b8e846c): **113 passed**. Wheel `wheel_eval_ok` ~735000 from `site-packages`. Remote GHA on this composition is the remaining A05 gate.
 
 ## What remains
 
 - Human pilot 5–10 authorized real cases: **not run**.
 - Absolute readiness / full NBR / Windows PDF: **not claimed**.
-- STATUS=`COMBINED_INCREMENT_VERIFIED` on the GHA-green suite SHA `32bd871`. This status does **not** authorize merge or laudo.
+- STATUS=`PARTIAL_EVIDENCE` until GHA is green on the current-SEALED composition. Prior COMBINED on `b0391bd` is invalidated. This status does **not** authorize merge or laudo.
 
 ## Commands and exit codes
 
@@ -51,9 +51,9 @@ See `composition_matrix.json`.
 
 | ID | PR | HEAD | SEALED | incorporated |
 | --- | --- | --- | --- | --- |
-| P01 | #19 | `18a2dc0a6b5b315d3e3a5707fa186f6cc0820ad1` | yes | `--no-ff` |
-| P02 | #18 | `a0b4b4a8767372ce83d7a42b00d80aa488767194` | yes | `--no-ff` |
-| P03 | #21 | `4cb69374799444b9c06ffff8f72cc59caafe597f` | yes | `--no-ff` |
+| P01 | #19 | `ec691bd8d1cf05f2da31105f59a94bedfa80757f` | yes (prior `18a2dc0` REOPENED) | `--no-ff` |
+| P02 | #18 | `b8e846c73e8d1ae5d9b3e83f377033e31ab6b618` | yes (prior `a0b4b4a` REOPENED) | `--no-ff` |
+| P03 | #21 | `ec7b8dba2b4a0ff575a1933251f03801ffeea0a5` | yes (prior `4cb6937` REOPENED) | `--no-ff` |
 
 ## Metrics
 

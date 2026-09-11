@@ -197,9 +197,16 @@ def _upload_and_run(page, path: Path, tag: str) -> None:
         page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=60000)
     area = page.get_by_placeholder("ex.: 73,5")
     assert area.count() >= 1, "subject area field missing; body=" + page.inner_text("body")[:1500]
+    area.first.click()
     area.first.fill("73,5")
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(500)
     execute = page.get_by_role("button", name="Executar avaliação")
-    assert execute.count() >= 1, "execute button missing; body=" + page.inner_text("body")[:800]
+    try:
+        execute.first.wait_for(state="visible", timeout=20000)
+    except Exception:
+        execute = page.get_by_role("button", name="Executar avaliação")
+    assert execute.count() >= 1, "execute button missing; body=" + page.inner_text("body")[:1500]
     execute.first.click()
     body = ""
     for _ in range(40):
