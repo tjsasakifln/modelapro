@@ -1,24 +1,12 @@
 """
-Regression tests for the high-severity audit findings fixed in this change:
+Transversal regression tests owned by C16.
 
-1. websocket_notifier.send_notification must be able to serialize a
-   'completed' payload containing datetime, numpy scalar types and
-   non-finite floats (the real shape produced by worker.py/statsmodels)
-   instead of raising and being swallowed by process_file's generic except.
-2. (worker.py offloading find_best_model to a thread) - not directly
-   unit-testable without a running event loop + long search; covered by
-   code inspection / asyncio.to_thread usage.
-3. OptimalCombinationFinder must pre-filter transformations that are
-   domain-valid for the training column but domain-invalid for the
-   avaliando's specific raw value (e.g. idade=0 with ln chosen), instead of
-   silently tanking that candidate's ranking via a swallowed exception in
-   add_precision_and_extrapolation.
-4. The exhaustive / combinations_tested / message fields must be
-   propagated by find_best_model's message and be renderable in the PDF
-   report (generate_pdf_report accepts and does not choke on them).
+Oracles are independent (math.sqrt, RFC 8259 JSON, PDF magic). They do
+not copy the audited Transformer's `<= 0` sqrt rejection.
 """
 import asyncio
 import json
+import math
 from datetime import datetime
 
 import numpy as np
@@ -28,6 +16,7 @@ import pytest
 from modules.websocket_notifier import _json_safe
 from modules.optimal_combination import OptimalCombinationFinder
 from modules.results_generator import ResultsGenerator
+from modules.transformations import Transformer
 
 
 class TestWebsocketJsonSafety:
@@ -58,9 +47,6 @@ class TestWebsocketJsonSafety:
         assert round_tripped["nested"]["arr"] == [1.0, 2.0, 3.0]
 
     def test_send_notification_delivers_realistic_completed_payload(self):
-        # No pytest-asyncio in this project's dependencies; drive the
-        # coroutine directly with asyncio.run rather than adding a new
-        # test-only dependency.
         from modules.websocket_notifier import WebSocketNotifier
 
         class FakeWebSocket:
@@ -94,14 +80,22 @@ class TestWebsocketJsonSafety:
             notifier.active_connections = []
 
 
-class TestAvaliandoDomainPreFilter:
-    def test_transformation_invalid_for_avaliando_value_is_excluded_from_search(self):
-        """
-        idade is strictly positive in the training sample (so ln/sqrt are
-        domain-valid options there), but the avaliando's idade is 0 - domain
-        invalid for ln/sqrt/inv_sqrt. Those options must be pre-filtered out
-        of the search space entirely, not silently fail per-candidate later.
-        """
+class TestSqrtZeroIsDefined:
+    """C16-A02 / F12: sqrt(0) is 0. The inherited assertion that required
+    rejecting sqrt at value <= 0 copied a defective domain rule and is
+    corrected here to mathematical truth.
+    """
+
+    def test_apply_transformation_sqrt_of_zero_is_zero(self):
+        series = pd.Series([0.0, 1.0, 4.0])
+        transformed, success = Transformer.apply_transformation(series, "sqrt")
+        expected = [math.sqrt(0.0), math.sqrt(1.0), math.sqrt(4.0)]
+        assert success is True
+        np.testing.assert_allclose(
+            np.asarray(transformed, dtype=float), expected, rtol=0, atol=0
+        )
+
+    def test_search_space_keeps_sqrt_when_avaliando_is_zero(self):
         np.random.seed(1)
         n = 30
         idade = np.random.uniform(1, 50, n)
@@ -109,37 +103,46 @@ class TestAvaliandoDomainPreFilter:
         df = pd.DataFrame({"idade": idade, "y": y})
 
         finder = OptimalCombinationFinder()
-        transformed_df, vars_options = finder._build_variable_options(
+        _transformed_df, vars_options = finder._build_variable_options(
+            df, ["idade"], avaliando_raw={"idade": 0.0}
+        )
+
+        options = vars_options["idade"]
+        assert "idade" in options
+        assert any(opt.startswith("sqrt(") for opt in options), (
+            "sqrt(0) == 0 is defined; sqrt must remain in the search space "
+            "when the avaliando value is 0"
+        )
+        assert not any(opt.startswith("ln(") for opt in options), (
+            "ln(0) is undefined; ln must stay excluded"
+        )
+        assert not any(opt.startswith("inv_sqrt(") for opt in options)
+        assert not any(opt.startswith("inverse(") for opt in options)
+        assert not any(opt.startswith("inv_sqr(") for opt in options)
+
+
+class TestAvaliandoDomainPreFilter:
+    def test_ln_and_inverse_invalid_for_zero_avaliando_are_excluded(self):
+        np.random.seed(1)
+        n = 30
+        idade = np.random.uniform(1, 50, n)
+        y = 100 - 2 * idade + np.random.normal(0, 1, n)
+        df = pd.DataFrame({"idade": idade, "y": y})
+
+        finder = OptimalCombinationFinder()
+        _transformed_df, vars_options = finder._build_variable_options(
             df, ["idade"], avaliando_raw={"idade": 0.0}
         )
 
         for opt in vars_options["idade"]:
             assert not opt.startswith("ln("), "ln(idade) must be excluded: ln(0) is undefined"
-            assert not opt.startswith("sqrt("), "sqrt(idade) must be excluded: Transformer rejects sqrt at value <= 0, and 0 is not > 0"
-            assert not opt.startswith("inv_sqrt("), "inv_sqrt(idade) must be excluded: inv_sqrt(0) is undefined"
-            assert not opt.startswith("inverse("), "inverse(idade) must be excluded: 1/0 is undefined"
-            assert not opt.startswith("inv_sqr("), "inv_sqr(idade) must be excluded: 1/0**2 is undefined"
+            assert not opt.startswith("inv_sqrt("), "inv_sqrt(0) is undefined"
+            assert not opt.startswith("inverse("), "inverse(0) is undefined"
+            assert not opt.startswith("inv_sqr("), "inv_sqr(0) is undefined"
 
-        # Linear must still be offered.
         assert "idade" in vars_options["idade"]
 
     def test_full_search_does_not_crash_and_does_not_bottom_rank_on_zero_avaliando(self):
-        """
-        saldo is a variable that takes both negative and positive (but
-        never zero) values in the training sample, so ln/sqrt/inv_sqrt are
-        never domain-valid options for it at all (they fail the training
-        column's own domain check) while inverse/inv_sqr ARE domain-valid
-        training-column options (only "not equal to zero" is required).
-        The avaliando's saldo is exactly 0: within the sample's [min, max]
-        range (so item 4 should legitimately reach the top grau, no
-        extrapolation at all) yet domain-invalid specifically for
-        inverse/inv_sqr (1/0 is undefined). Pre-fix, a candidate that
-        happened to pick inverse(saldo) or inv_sqr(saldo) would silently
-        fail in add_precision_and_extrapolation and get item 4 stuck at the
-        provisional 0 - while a candidate using saldo linearly would not.
-        Post-fix, inverse/inv_sqr must never be offered as options for
-        saldo at all, so every candidate's item 4 is computed consistently.
-        """
         np.random.seed(2)
         n = 30
         saldo = np.concatenate([
@@ -158,18 +161,9 @@ class TestAvaliandoDomainPreFilter:
         assert result.best_model is not None
         vr = result.best_model.validation_result
         assert vr is not None
-        # No swallowed-exception warning should have been recorded: the
-        # domain-invalid options were pre-filtered out of the search space,
-        # so add_precision_and_extrapolation's except branch should never
-        # have been hit for the winning candidate.
         assert not any(
             "Não foi possível calcular grau de precisão" in w for w in vr.warnings
         )
-        # item 4 must have been FINALIZED, and since saldo=0 falls squarely
-        # within [sample_min, sample_max] (no extrapolation at all), it
-        # should reach the top grau (3) - not the provisional/failure 0
-        # that a swallowed inverse(saldo)/inv_sqr(saldo) exception would
-        # have left it at.
         item4 = next(i for i in vr.item_scores if i.item == 4)
         assert item4.grau_achieved == 3
         assert vr.grau_fundamentacao is not None

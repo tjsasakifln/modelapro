@@ -1,0 +1,58 @@
+{
+  "producer": "C16",
+  "consumer": "C17",
+  "exported_interface": "scripts/c16_acceptance/run_harness.py",
+  "required_callsite": "python scripts/c16_acceptance/run_harness.py --sha <composite> --output <summary.json>",
+  "contract_version": "MP/1",
+  "dependency_pr": null,
+  "head_sha": "875f70408d3d65cda24f2082f565e6fee9511f66",
+  "acceptance_case": "Harness prints disjoint aprovados/reprovados/nao_executados; pytest targets tests/test_audit_fixes.py tests/test_full_flow.py tests/acceptance/; mapping at tests/fixtures/independent/mapping.json",
+  "notes": [
+    "READY_COMPONENT means corpus/harness, not PASS_E2E.",
+    "Do not treat contract-sim tests as E2E evidence.",
+    "UNMET_DEPENDENCY and NOT_RUN messages are não executados, not approvals.",
+    "skip/xfail in this suite is a C16-A04 violation."
+  ],
+  "peer_handoffs_needed": [
+    {
+      "producer": "C01",
+      "exported_interface": "modules.data_loader.ingest_market",
+      "acceptance_case": "C16-F01 observed_target n; C16-F02 locale parse; C16-F16 empty candidate_cols"
+    },
+    {
+      "producer": "C02",
+      "exported_interface": "modules.preprocessing.fit_dataset, transform_subject",
+      "acceptance_case": "C16-F03 unseen category Industrial is unsupported"
+    },
+    {
+      "producer": "C06",
+      "exported_interface": "modules.transformations.Transformer.apply_transformation",
+      "acceptance_case": "C16-F12 sqrt(0)==0 two-tuple compatible"
+    },
+    {
+      "producer": "C10",
+      "exported_interface": "POST /jobs, GET /jobs/{id}/result, freeze_result_snapshot",
+      "acceptance_case": "E2E HTTP result recovery without WS"
+    },
+    {
+      "producer": "C11",
+      "exported_interface": "JobStore, LocalTaskRunner, GET result independent of WS",
+      "acceptance_case": "C16-F13 F14 cancel/restart/isolation"
+    },
+    {
+      "producer": "C12",
+      "exported_interface": "modules.evidence_bundle.build_evidence_bundle",
+      "acceptance_case": "C16-F08 table>200 integral annex"
+    },
+    {
+      "producer": "C14",
+      "exported_interface": "modules.valuation_batch.evaluate_batch",
+      "acceptance_case": "E2E project/lote"
+    },
+    {
+      "producer": "C15",
+      "exported_interface": "scripts/c15_local or docs/campaigns/MP-20260911/C15",
+      "acceptance_case": "C16-F15 consume clean install, do not re-pack"
+    }
+  ]
+}
