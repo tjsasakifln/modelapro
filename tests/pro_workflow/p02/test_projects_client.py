@@ -75,15 +75,41 @@ class ProjectStub(BaseHTTPRequestHandler):
                 },
             })
             return
-        if self.path == "/projects/proj-1/revisions":
+        if self.path.endswith("/revisions"):
+            # BASE_SHA: this path is POST-only → GET is 405 unless a list is published.
+            if scenario.get("revision_list") is not None:
+                self._json(200, {"revisions": scenario["revision_list"]})
+                return
             if scenario.get("revisions_missing"):
                 self._json(404, {"error": "no list route"})
                 return
-            self._json(200, {"revisions": scenario.get("revision_list") or []})
+            self._json(405, {"detail": "Method Not Allowed"})
             return
-        if self.path == "/jobs/job-1":
+        if self.path.startswith("/jobs/") and self.path.endswith("/result"):
+            job_id = self.path.split("/")[2]
+            snapshots = scenario.get("snapshots") or {}
+            if job_id in snapshots:
+                self._json(200, snapshots[job_id])
+                return
+            if job_id == "job-1":
+                self._json(200, scenario.get("snapshot") or SNAPSHOT_CLASSIFIED)
+                return
+            if job_id == "batch-1":
+                self._json(200, {
+                    "batch": True,
+                    "items": [
+                        {"subject_id": "ok", "status": "succeeded", "value": {"point": 10}},
+                        {"subject_id": "no", "status": "unsupported"},
+                        {"subject_id": "wait", "status": "pending"},
+                    ],
+                })
+                return
+            self._json(404, {"error": self.path})
+            return
+        if self.path.startswith("/jobs/") and "/artifacts/" not in self.path and self.path.count("/") == 2:
+            job_id = self.path.rsplit("/", 1)[-1]
             self._json(200, {
-                "job_id": "job-1",
+                "job_id": job_id,
                 "state": scenario.get("job_state", "succeeded"),
                 "result_available": True,
                 "artifact_states": scenario.get("artifact_states") or {
@@ -92,23 +118,7 @@ class ProjectStub(BaseHTTPRequestHandler):
                 },
             })
             return
-        if self.path == "/jobs/job-1/result":
-            self._json(200, scenario.get("snapshot") or SNAPSHOT_CLASSIFIED)
-            return
-        if self.path == "/jobs/batch-1":
-            self._json(200, {"job_id": "batch-1", "state": "succeeded", "result_available": True})
-            return
-        if self.path == "/jobs/batch-1/result":
-            self._json(200, {
-                "batch": True,
-                "items": [
-                    {"subject_id": "ok", "status": "succeeded", "value": {"point": 10}},
-                    {"subject_id": "no", "status": "unsupported"},
-                    {"subject_id": "wait", "status": "pending"},
-                ],
-            })
-            return
-        if self.path.startswith("/jobs/job-1/artifacts/"):
+        if self.path.startswith("/jobs/") and "/artifacts/" in self.path:
             name = self.path.rsplit("/", 1)[-1]
             if name.endswith(".pdf"):
                 self._json(404, {"error": "failed"})
@@ -221,3 +231,96 @@ def test_batch_payload_uses_real_route_and_item_states():
         assert statuses["wait"] == "pendente"
     finally:
         server.shutdown()
+
+
+def test_get_revisions_405_is_handoff_not_error():
+    from frontend.components.workflow import list_route_unavailable
+
+    assert list_route_unavailable(405) is True
+    assert list_route_unavailable(404) is True
+    assert list_route_unavailable(501) is True
+    assert list_route_unavailable(200) is False
+    assert list_route_unavailable(500) is False
+
+    frozen = dict(SNAPSHOT_CLASSIFIED)
+    frozen["job_id"] = "job-1"
+    server, url = _start({
+        "projects": [{"project_id": "proj-1", "latest_revision_id": "rev-1"}],
+        "snapshot": frozen,
+    })
+    try:
+        client = JobClient(base_url=url, timeout=2)
+        revs = client.list_revisions("proj-1")
+        assert revs["list_route_available"] is False
+        assert revs["http_status"] == 405
+        assert revs["integration"] == "INTEGRATION_PENDING"
+        assert revs["handoff"]["path"] == "/projects/proj-1/revisions"
+        assert revs["revisions"][0]["revision_id"] == "rev-1"
+        assert revs["revisions"][0]["job_id"] == "job-1"
+    finally:
+        server.shutdown()
+
+
+def test_reopen_selected_revision_recovers_that_jobs_result_not_screen_text():
+    old_snap = dict(SNAPSHOT_CLASSIFIED)
+    old_snap["job_id"] = "job-old"
+    old_snap["value"] = dict(old_snap["value"])
+    old_snap["value"]["point"] = 111111.0
+    new_snap = dict(SNAPSHOT_CLASSIFIED)
+    new_snap["job_id"] = "job-1"
+    server, url = _start({
+        "revision_list": [
+            {"revision_id": "rev-old", "job_id": "job-old", "snapshot_ref": {"job_id": "job-old"}},
+            {"revision_id": "rev-1", "job_id": "job-1", "snapshot_ref": {"job_id": "job-1"}},
+        ],
+        "snapshots": {"job-old": old_snap, "job-1": new_snap},
+        "revision": {
+            "revision_id": "rev-1",
+            "job_id": "job-1",
+            "snapshot_ref": {"job_id": "job-1"},
+        },
+    })
+    try:
+        client = JobClient(base_url=url, timeout=2)
+        listed = client.list_revisions("proj-1")
+        assert listed["list_route_available"] is True
+        outcome = client.reopen_revision("proj-1", "rev-old", listed)
+        assert outcome["recovered"] is True
+        assert outcome["from_screen_text"] is False
+        assert outcome["via"] == "GET /jobs/job-old/result"
+        assert outcome["job_id"] == "job-old"
+        assert outcome["snapshot"]["value"]["point"] == old_snap["value"]["point"]
+        assert client.last_snapshot["value"]["point"] == 111111.0
+        latest = client.reopen_revision("proj-1", "rev-1", listed)
+        assert latest["snapshot"]["value"]["point"] == new_snap["value"]["point"]
+        assert latest["snapshot"]["value"]["point"] != old_snap["value"]["point"]
+    finally:
+        server.shutdown()
+
+
+def test_reopen_latest_after_405_uses_get_project_and_job_result():
+    frozen = dict(SNAPSHOT_CLASSIFIED)
+    frozen["job_id"] = "job-1"
+    server, url = _start({"snapshot": frozen})
+    try:
+        client = JobClient(base_url=url, timeout=2)
+        revs = client.list_revisions("proj-1")
+        assert revs["http_status"] == 405
+        outcome = client.reopen_revision("proj-1", "rev-1", revs)
+        assert outcome["recovered"] is True
+        assert outcome["from_screen_text"] is False
+        assert "GET /jobs/job-1/result" in outcome["via"]
+        assert outcome["snapshot"]["value"]["point"] == frozen["value"]["point"]
+    finally:
+        server.shutdown()
+
+
+def test_app_wires_revision_button_to_reopen_revision():
+    from pathlib import Path
+
+    app_src = (Path(__file__).resolve().parents[3] / "frontend" / "app.py").read_text(encoding="utf-8")
+    layout_src = (Path(__file__).resolve().parents[3] / "frontend" / "components" / "layout.py").read_text(encoding="utf-8")
+    assert 'pressed["open_revision_id"]' in layout_src
+    assert "Reabrir esta revisão" in layout_src
+    assert 'project_actions.get("open_revision_id")' in app_src
+    assert "client.reopen_revision(" in app_src
