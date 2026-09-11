@@ -1,0 +1,138 @@
+{
+  "campaign_id": "C10",
+  "contract_version": "MP/1",
+  "producer": "C10",
+  "notes": "C10 publishes the runtime contract and HTTP/worker composition. Peer bodies stay with their owners. Extra RequestSpec keys declared_documentary and search_policy.target_degree are optional additive fields.",
+  "handoffs": [
+    {
+      "producer": "C01",
+      "consumer": "C10",
+      "exported_interface": "modules.data_loader.ingest_market",
+      "required_callsite": "backend.worker.compose_valuation_job / compose_preview",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "ingest_market(file_bytes, filename, request_spec) returns InputBundle; roles/target already on request_spec; no silent name collision resolution."
+    },
+    {
+      "producer": "C02",
+      "consumer": "C10",
+      "exported_interface": "modules.preprocessing.fit_dataset, modules.preprocessing.transform_subject",
+      "required_callsite": "backend.worker.compose_valuation_job",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "categorical subject raw_values and sample_ledger survive; encoder_state is declarative."
+    },
+    {
+      "producer": "C03",
+      "consumer": "C10",
+      "exported_interface": "modules.nbr14653_validation.assess_normative",
+      "required_callsite": "backend.worker.compose_valuation_job",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "C10 maps fundamentacao/precisao/documentary onto the snapshot without recomputing grades; issuance stays draft."
+    },
+    {
+      "producer": "C04",
+      "consumer": "C10",
+      "exported_interface": "modules.model_builder.fit_candidate, modules.model_builder.evaluate_fitted",
+      "required_callsite": "backend.worker.compose_valuation_job",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "CandidateAssessment.value has the exact ResultSnapshot value shape; point is not rebuilt from arbitration."
+    },
+    {
+      "producer": "C05",
+      "consumer": "C10",
+      "exported_interface": "modules.optimal_combination.search_models",
+      "required_callsite": "backend.worker.compose_valuation_job",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "progress_callback is sync and light; cancel_requested() is bool; search_audit records possible/generated/evaluated/rejected."
+    },
+    {
+      "producer": "C07",
+      "consumer": "C10",
+      "exported_interface": "modules.model_evaluation.evaluate_procedure",
+      "required_callsite": "backend.worker.compose_valuation_job when evaluation_policy.method is not none",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "fit_select_predictor(train_row_ids, seed) wraps fit_dataset+search_models; reserved-set error is not used to filter."
+    },
+    {
+      "producer": "C08",
+      "consumer": "C10",
+      "exported_interface": "modules.results_generator.render_report",
+      "required_callsite": "backend.worker.compose_valuation_job after freeze_result_snapshot",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "render_report(snapshot, report_context) -> bytes. Failure must not unwind the snapshot. report_context carries used/excluded row ids and request dates."
+    },
+    {
+      "producer": "C11",
+      "consumer": "C10",
+      "exported_interface": "modules.job_store.JobStore, modules.project_store.ProjectStore, modules.local_task_runner.LocalTaskRunner",
+      "required_callsite": "backend.api create_job/get_job/cancel/artifacts/projects/batch",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "create(idempotency_key=, project_id=, request_spec=, input_sha256=, code_sha=) returns {job_id,state}; update_transition(job_id, expected, new, patch=); save_snapshot/get_snapshot; save_artifact/get_artifact; recover_abandoned; LocalTaskRunner(job_store).submit(job_id, callable) / cancel(job_id); callable may accept cancel_requested=."
+    },
+    {
+      "producer": "C12",
+      "consumer": "C10",
+      "exported_interface": "modules.evidence_bundle.build_evidence_bundle",
+      "required_callsite": "backend.worker.compose_valuation_job",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "Failure is isolated; artifact hash stays off the frozen snapshot."
+    },
+    {
+      "producer": "C13",
+      "consumer": "C10",
+      "exported_interface": "modules.decision_support.recommend_next_actions",
+      "required_callsite": "backend.worker.compose_valuation_job before freeze_result_snapshot",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "Receives a validated draft snapshot; C10 aggregates next_actions then freezes."
+    },
+    {
+      "producer": "C14",
+      "consumer": "C10",
+      "exported_interface": "modules.valuation_batch.evaluate_batch",
+      "required_callsite": "backend.api.project_batch",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "POST /projects/{id}/batch submits one evaluate_batch call via LocalTaskRunner; not an unbounded gather loop. frozen_project is the C10 mapping."
+    },
+    {
+      "producer": "C10",
+      "consumer": "C09",
+      "exported_interface": "POST /jobs 202 {job_id,status_url}; GET /jobs/{id}; GET /jobs/{id}/result; POST /preview; GET artifacts; /upload adapter now 202 (not 200-on-error)",
+      "required_callsite": "frontend/app.py currently posts /upload and waits on WebSocket for PDF/base64",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "UI must treat 202 as accepted, poll GET for snapshot, and not require report_pdf_base64 on the WebSocket. calculation_state vs artifact_states must both be shown."
+    },
+    {
+      "producer": "C10",
+      "consumer": "C15",
+      "exported_interface": "env MP_CORS_ORIGINS, MP_CORS_ALLOW_CREDENTIALS, MP_MAX_UPLOAD_BYTES, MP_CODE_SHA",
+      "required_callsite": "backend.api._cors_origins / _max_upload_bytes / worker.current_code_sha",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "Document defaults: CORS localhost:8501/8000; max upload 20MiB; no SaaS login. Do not set allow_origins=* with credentials."
+    }
+  ]
+}
