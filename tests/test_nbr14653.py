@@ -230,8 +230,9 @@ class TestFinalizePrecisionAndExtrapolation:
         assert item4.grau_achieved == 3
 
     def test_extrapolation_admitida_uma_variavel(self):
-        # value=25, sample [0,19] -> outside [min,max] but inside extended
-        # [0.5*min, 2*max] = [0, 38] -> Grau II (admitted for 1 variable).
+        # ABNT NBR 14653-2:2011 Tabela 1 item 4: faixa ampliada (a) is not
+        # sufficient. Without predict_original, (b) |Δvalue| vs frontier is
+        # missing → absence is not approval (legacy int score = 0).
         res = self._base_validation_result()
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=20.0,
@@ -241,12 +242,40 @@ class TestFinalizePrecisionAndExtrapolation:
             degree=1,
         )
         item4 = next(i for i in res.item_scores if i.item == 4)
+        assert item4.grau_achieved == 0
+        assert res.details.get("item4", {}).get("evidence_status") == "pending"
+
+    def test_extrapolation_admitida_uma_variavel_com_valor_na_fronteira(self):
+        # Same measure window as the former measure-only test, but (b) is
+        # evaluated in the original unit. y = 233.333... + x yields |Δ|=15%
+        # exactly at x=25 vs frontier 19 → Grau II.
+        # 50*|b| / |c+19b| = 0.15 with b=1 ⇒ c = 35/0.15.
+        c = 35.0 / 0.15
+
+        def predict_original(subject):
+            return c + float(subject["x"])
+
+        res = self._base_validation_result()
+        res = NBRValidator.finalize_precision_and_extrapolation(
+            res, amplitude_pct=20.0,
+            extrapolation_details=[
+                {"variable": "x", "avaliando_value": 25, "sample_min": 0, "sample_max": 19}
+            ],
+            degree=1,
+            predict_original=predict_original,
+            subject_raw={"x": 25},
+        )
+        item4 = next(i for i in res.item_scores if i.item == 4)
         assert item4.grau_achieved == 2
+        delta = res.details["item4"]["calculation"]["boundary_delta_pct"]
+        y_av = c + 25.0
+        y_fr = c + 19.0
+        assert delta == pytest.approx(abs(y_av - y_fr) / abs(y_fr) * 100.0)
 
     def test_extrapolation_admitida_duas_variaveis_grau_i(self):
-        # Two variables extrapolated (each within its own extended interval)
-        # -> Grau II's "no máximo 1 variável" rule is violated, so it drops
-        # to Grau I (still admitted, no upper limit on variable count there).
+        # Two extrapolated axes: Grau II is impossible. Grau I requires
+        # (a) plus |Δ|≤20% de per si AND simultaneously. Without
+        # predict_original this must not be approved from faixa alone.
         res = self._base_validation_result()
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=20.0,
@@ -257,7 +286,8 @@ class TestFinalizePrecisionAndExtrapolation:
             degree=1,
         )
         item4 = next(i for i in res.item_scores if i.item == 4)
-        assert item4.grau_achieved == 1
+        assert item4.grau_achieved == 0
+        assert res.details.get("item4", {}).get("evidence_status") == "pending"
 
     def test_extrapolation_out_of_extended_interval(self):
         # value=50 way beyond ext_max=38 -> Grau 0, even for Grau I.

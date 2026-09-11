@@ -1,0 +1,44 @@
+{
+  "producer": "C03",
+  "contract_version": "MP/1",
+  "exported_interface": {
+    "module": "modules.nbr14653_validation",
+    "callable": "assess_normative",
+    "input": "context mapping (n, k, intercept, axes, subject_raw, predict_original, pvalues, f_pvalue, amplitude_pct, documentary, statistical, intervals)",
+    "output": "NormativeAssessment mapping (edition, rule_sources, verification_status, fundamentacao, precisao, documentary, issues)"
+  },
+  "consumers": [
+    {
+      "consumer": "C04",
+      "required_callsite": "modules.model_builder.evaluate_fitted / add_precision_and_extrapolation",
+      "request": "Pass predict_original(subject_raw) using the same fitted pipeline in original units; pass effective n, k and intercept (do not infer k as shape[1]-1). Without the callback, item 4 stays pending/0 when any axis is outside [min, max]. In-sample still scores Grau III.",
+      "acceptance_case": "C03-A01: area sample [50,100], subject 150, y=10000*area → boundary Δ=50%, item 4 not approved. After C04 wires the callback, the same numbers must appear on CandidateAssessment.normative.",
+      "dependency_pr": null,
+      "head_sha": null
+    },
+    {
+      "consumer": "C05",
+      "required_callsite": "modules.optimal_combination.search_models ranking",
+      "request": "Use assess_normative / CandidateAssessment.normative in ranking. Do not treat item-4 measure-only as a pass. Do not treat grau as issuance.",
+      "acceptance_case": "A candidate whose only item-4 support is faixa 0.5min–2max must not outrank one that satisfies (a)+(b) or is in-sample.",
+      "dependency_pr": null,
+      "head_sha": null
+    },
+    {
+      "consumer": "C10",
+      "required_callsite": "modules.result_contract / modules.results snapshot mapping",
+      "request": "Additive snapshot fields only. Map fundamentacao, precisao.status (not_computed|classified|unclassified|error), documentary evidence_status, statistical warnings, and issues. Do not recalculate classifications. Do not set issuance to ready_for_professional_review from grau. C03 does not edit modules/results.py.",
+      "acceptance_case": "precisao.status remains one of the four enum values; documentary declared without provenance is not verified; grau_nao_e_emissao issue is preserved.",
+      "dependency_pr": null,
+      "head_sha": null
+    },
+    {
+      "consumer": "C08",
+      "required_callsite": "modules.results_generator.render_report",
+      "request": "Render pending/not_applicable/error distinctly from classified grau. Keep IC mean, prediction interval, campo de arbítrio and admissíveis labeled separately.",
+      "acceptance_case": "A01 item 4 grade 0 / pending value-check is visible; precisão unclassified is not printed as Grau 0.",
+      "dependency_pr": null,
+      "head_sha": null
+    }
+  ]
+}
