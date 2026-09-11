@@ -1,6 +1,7 @@
 # C05 evidence — busca transparente, ranking e eficiência mensurável
 
 Base: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`  
+HEAD: `98532e685d57e566a7593351eb46c1b8743de093`  
 Contrato: MP/1  
 Seed padrão dos testes: 0
 

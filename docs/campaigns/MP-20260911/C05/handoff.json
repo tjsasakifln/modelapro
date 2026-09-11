@@ -61,7 +61,7 @@
     }
   ],
   "dependency_pr": null,
-  "head_sha": null,
+  "head_sha": "98532e685d57e566a7593351eb46c1b8743de093",
   "notes": [
     "C04 fit_candidate/evaluate_fitted and C06 inverse_target_prediction are used when importable; otherwise the existing ModelBuilder OLS path is used for the adapter and local search.",
     "Do not edit modules/model_builder.py or modules/results.py from C05."

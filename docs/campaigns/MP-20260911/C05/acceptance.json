@@ -1,6 +1,6 @@
 {
   "campaign_id": "C05",
-  "head_sha": null,
+  "head_sha": "98532e685d57e566a7593351eb46c1b8743de093",
   "contract_version": "MP/1",
   "status": "INTEGRATION_PENDING",
   "criteria": [
