@@ -1456,12 +1456,20 @@ def _make_predict_original(candidate_fit: CandidateFit, request_spec: Any) -> Ca
     def predict_original(subject_raw: Any) -> Dict[str, Any]:
         raw = dict(subject_raw or {})
         transform_subject = _load_transform_subject()
-        if transform_subject is not None:
+        encoder = candidate_fit.encoder_state or {}
+        c02_ready = isinstance(encoder, Mapping) and bool(encoder.get("base_variables"))
+        design = None
+        if transform_subject is not None and c02_ready:
             try:
-                design = transform_subject(raw, candidate_fit.feature_schema, candidate_fit.encoder_state)
+                design = transform_subject(raw, candidate_fit.feature_schema, encoder)
             except Exception as exc:
-                return {"point": None, "issues": [make_issue("c02_transform_subject_failed", str(exc), severity="error")]}
-        else:
+                design = {
+                    "X": None,
+                    "raw_values": raw,
+                    "supported": True,
+                    "issues": [make_issue("c02_transform_subject_failed", str(exc), severity="warning")],
+                }
+        if design is None:
             design = {"X": None, "raw_values": raw, "supported": True, "issues": []}
         X_row, issues, supported, _ = _build_subject_row(candidate_fit, design if _get(design, "raw_values") is not None else {"X": _get(design, "X"), "raw_values": raw, "supported": True})
         if X_row is None or candidate_fit.model_object is None or not supported:

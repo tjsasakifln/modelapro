@@ -250,6 +250,7 @@ def resolve_authorized_base_variables(
                 "no_authorized_variables",
                 "error",
                 "candidate_cols=[] authorizes no variables (it does not mean all). "
+                "Nenhuma variável autorizada. A lista vazia não seleciona todas. "
                 "Use null for automatic selection by role.",
             )
         )

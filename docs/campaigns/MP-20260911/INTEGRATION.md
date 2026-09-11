@@ -103,11 +103,16 @@ Auditoria original vs C16 (mesmo problema, IDs diferentes):
 
 Preenchido após o commit de integração e a execução no mesmo SHA (ver `ACCEPTANCE_MATRIX.json`).
 
-- `TECHNICAL_E2E`: ver matriz (PASS só com fluxo A–J no SHA anunciado).
+- `TECHNICAL_E2E`: **PASS** no fluxo C17 A–J / `tests/c17_integration` (Linux, sem simuladores C10).
 - `NORMATIVE_VERIFICATION`: `PARTIAL` — regras calculadas pela C03 com edição/fonte; cláusulas em `docs/campaigns/MP-20260911/C03/unverified_rules.md` permanecem pendentes. Não é “norma inteira certificada”.
-- `DELIVERY`: PR consolidada; merge/deploy **não** autorizados.
+- `DELIVERY`: **DRAFT_WITH_BLOCKERS** — harness C16 no SHA `b960892` teve 44 aprovados / 14 reprovados / 1 não executado (Playwright). Falhas C16/legado listadas em `ACCEPTANCE_MATRIX.json` (`legacy_failures_separated`); não são skip/xfail.
 - `MAIN_MERGED`: NO
 - `DEPLOYED`: NO
+
+Contagens **não misturadas**:
+- C17 integração: 28 aprovados / 0 reprovados / 0 skip (no SHA anunciado na PR, reexecutar após este glue).
+- Campanha+originais em `b960892` (antes do glue C04/C14/C10): 499 / 28 / 1 skip.
+- C16 harness em `b960892`: 44 / 14 / 1 não executado / 0 violação A04.
 
 ## Próximo ato humano
 

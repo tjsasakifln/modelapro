@@ -830,6 +830,9 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
                 "evaluation_policy must declare method, partitions, groups and seed",
             )],
         )
+    evaluation_policy = dict(evaluation_policy)
+    evaluation_policy.setdefault("partitions", None)
+    evaluation_policy.setdefault("groups", None)
     missing_eval = [k for k in EVALUATION_POLICY_REQUIRED_KEYS if k not in evaluation_policy]
     if missing_eval:
         raise RequestSpecError(

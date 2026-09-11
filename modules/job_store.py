@@ -663,6 +663,7 @@ class JobStore:
 
     def create(
         self,
+        payload: Optional[Mapping[str, Any]] = None,
         *,
         project_id: Optional[str] = None,
         revision_id: Optional[str] = None,
@@ -675,7 +676,6 @@ class JobStore:
         artifact_states: Optional[Mapping[str, Any]] = None,
         issues: Optional[Sequence[Mapping[str, Any]]] = None,
         stage: Optional[str] = None,
-        payload: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Persist a queued job identity before any work starts.
 

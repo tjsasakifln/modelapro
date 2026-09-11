@@ -1445,9 +1445,16 @@ def _y_and_state(
         apply_t = None
         fit_t = None
     if callable(fit_t) and callable(apply_t):
-        state = fit_t(y, y_name, None)
-        y_t = apply_t(y, state)
-        return y_t, state, y_original
+        c06_name = "log" if y_name in {"ln", "log", "logarithm"} else (
+            "identity" if y_name in {LINEAR_OPTION, Y_IDENTITY, "none"} else y_name
+        )
+        if c06_name in {"identity", "log"}:
+            try:
+                state = fit_t(y, c06_name, None)
+                y_t = apply_t(y, state)
+                return y_t, state, y_original
+            except Exception:
+                pass
     # Labeled fixture may supply inverse only; apply numpy transforms for tests.
     if y_name == "ln":
         arr = np.asarray(y, dtype=float)

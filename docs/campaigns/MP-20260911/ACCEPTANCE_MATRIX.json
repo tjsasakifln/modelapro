@@ -4,7 +4,7 @@
   "base_main": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
   "TECHNICAL_E2E": "PASS",
   "NORMATIVE_VERIFICATION": "PARTIAL",
-  "DELIVERY": "CONSOLIDATED_PR_READY",
+  "DELIVERY": "DRAFT_WITH_BLOCKERS",
   "MAIN_MERGED": "NO",
   "DEPLOYED": "NO",
   "os_executed": ["linux"],
@@ -77,6 +77,19 @@
     "I10": "PARTIAL_MAPPING_DOCUMENTED",
     "I11": "DECLARED_TRAIN_RMSE_IS_NOT_GENERALIZATION"
   },
+  "suite_buckets_sha_b960892": {
+    "campaign_plus_original": {"passed": 499, "failed": 28, "skipped": 1, "note": "before C04/C05/C14/C10/C11 glue commit"},
+    "c16_harness": {"aprovados": 44, "reprovados": 14, "nao_executados": 1, "violacoes_a04": 0, "total": 59},
+    "c17_integration": {"passed": 28, "failed": 0, "skipped": 0}
+  },
+  "legacy_failures_separated": [
+    "tests/test_audit_fixes.py WS fan-out: C11 drops unscoped completed payload by design (GET /result)",
+    "tests/test_full_flow.py / DataLoader len==observed: C01 keeps pending-target rows",
+    "tests/test_nbr14653.py / test_verification.py: pre-MP/1 OptimalCombinationFinder + one-hot in loader",
+    "tests/c14_batch/test_a01_domain_independence.py two cases: C03 present yields pending grades vs C14 builtin fixtures",
+    "C16 UI Playwright: NOT_RUN no module",
+    "C16 two identical POST /jobs: idempotency reuses job_id"
+  ],
   "acceptance_command": "python scripts/c17_acceptance/run.py --output DIR",
   "notes": [
     "issuance.status is never ready_for_professional_review solely from a table grade",

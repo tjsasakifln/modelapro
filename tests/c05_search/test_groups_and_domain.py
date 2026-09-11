@@ -64,7 +64,7 @@ def test_domain_invalid_transform_for_subject_is_not_in_space():
     for entry in result["search_audit"]["history"]:
         for v in entry.get("variables") or []:
             assert not v.startswith("ln(")
-            assert not v.startswith("sqrt(")
+            # sqrt(0) is defined; C16-F12 forbids dropping sqrt only because the subject is 0.
             assert not v.startswith("inv_sqrt(")
             assert not v.startswith("inverse(")
             assert not v.startswith("inv_sqr(")

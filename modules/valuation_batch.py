@@ -679,6 +679,16 @@ def _apply_x_transform(value: Optional[float], transform_name: str) -> Tuple[Opt
     )
 
 
+def _invert_target(prediction: Any, state: Any, residual_context: Any = None) -> Dict[str, Any]:
+    """Use C06 inverse only when the frozen state is a complete C06 mapping."""
+    st = _as_mapping(state, "target_transform_state")
+    inverse_meta = st.get("inverse") if isinstance(st.get("inverse"), Mapping) else {}
+    c06 = _try_import("modules.target_transform", "inverse_target_prediction")
+    if callable(c06) and inverse_meta.get("invocation"):
+        return c06(prediction, st, residual_context)
+    return builtin_inverse_target_prediction(prediction, st, residual_context)
+
+
 def builtin_inverse_target_prediction(
     prediction: Any,
     state: Any,
@@ -925,8 +935,7 @@ def builtin_evaluate_fitted(
     y_state = fit.get("target_transform_state") or model_state.get("target_transform_state") or candidate_spec.get("y_transformation")
     if isinstance(y_state, str):
         y_state = {"name": y_state}
-    inverse_fn = _try_import("modules.target_transform", "inverse_target_prediction") or builtin_inverse_target_prediction
-    inverted = inverse_fn(transformed_value, y_state, residual_context={"se_mean": se_mean, "df": df})
+    inverted = _invert_target(transformed_value, y_state, residual_context={"se_mean": se_mean, "df": df})
     if isinstance(inverted, Mapping) and "value" in inverted:
         value = dict(empty_value())
         value.update(_as_mapping(inverted.get("value")))
@@ -1276,8 +1285,7 @@ def resolve_adapters(overrides: Optional[Mapping[str, Callable[..., Any]]] = Non
         "transform_subject": _peer_transform_subject,
         "evaluate_fitted": _peer_evaluate_fitted,
         "assess_normative": _try_import("modules.nbr14653_validation", "assess_normative") or builtin_assess_normative,
-        "inverse_target_prediction": _try_import("modules.target_transform", "inverse_target_prediction")
-        or builtin_inverse_target_prediction,
+        "inverse_target_prediction": _invert_target,
     }
     if overrides:
         for key, fn in overrides.items():
