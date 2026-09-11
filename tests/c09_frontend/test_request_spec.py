@@ -32,6 +32,59 @@ def _spec_from_preview(*, candidate_cols, target_unit="", reference_date=None, i
     )
 
 
+def test_submit_job_unwraps_c09_raw_values_envelope(monkeypatch):
+    from frontend.components.forms import JobClient
+
+    sent = {}
+
+    class _Resp:
+        status_code = 202
+
+        def json(self):
+            return {"job_id": "job_test", "state": "queued"}
+
+    def _call(self, method, path, **kwargs):
+        sent["data"] = kwargs.get("data")
+        return _Resp()
+
+    monkeypatch.setattr(JobClient, "_call", _call)
+    client = JobClient(base_url="http://127.0.0.1:9")
+    client.submit_job(
+        b"id;area;preco\n",
+        "m.csv",
+        {"schema_version": "MP/1", "target_col": "preco"},
+        subject={"raw_values": {"area": "73,5", "bairro": "Centro"}, "supported": True, "issues": []},
+    )
+    import json as _json
+    body = _json.loads(sent["data"]["subject_json"])
+    assert body == {"area": "73,5", "bairro": "Centro"}
+    assert "raw_values" not in body
+
+
+def test_lookup_subject_value_reads_c09_envelope():
+    from modules.variable_schema import lookup_subject_value
+
+    encoder = {"base_variables": [{"original_name": "area", "internal_name": "area"}]}
+    nested = {"raw_values": {"area": "73,5"}, "supported": True, "issues": []}
+    assert lookup_subject_value(nested, "area", encoder) == "73,5"
+    assert lookup_subject_value({"area": "73,5"}, "area", encoder) == "73,5"
+
+
+def test_suggest_roles_defaults_preco_to_target_and_id_to_identifier():
+    roles = suggest_roles(
+        {
+            "id": {"original_name": "id", "kind": "text"},
+            "area": {"original_name": "area", "kind": "numeric"},
+            "preco": {"original_name": "preco", "kind": "numeric"},
+            "bairro": {"original_name": "bairro", "kind": "categorical"},
+        }
+    )
+    assert roles["preco"] == "target"
+    assert roles["id"] == "identifier"
+    assert roles["area"] == "predictor"
+    assert roles["bairro"] == "predictor"
+
+
 def test_preview_to_form_model_accepts_c01_entries_column_map():
     preview = {
         "column_map": {

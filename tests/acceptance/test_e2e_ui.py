@@ -1,4 +1,4 @@
-"""E2E UI: open the real local Streamlit page, upload, select, start.
+"""E2E UI: real Streamlit + API on loopback, download PDF, check analytic point.
 
 Classified as E2E. If the launcher cannot bind the hardcoded API port
 (frontend/app.py uses 127.0.0.1:8000), the failure message starts with
@@ -7,13 +7,17 @@ NOT_RUN so the harness can bucket it as não executado — never a mocked 200.
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from _helpers import ROOT, fixture_path
+from _helpers import ROOT
+
+UNIQUE_AREA = 73.5
+EXPECTED_POINT = 735000.0  # 10000 × 73.5; not on the 50,52,… sample grid
 
 
 def _port_open(host: str, port: int) -> bool:
@@ -37,6 +41,16 @@ def _wait_http(url: str, timeout: float = 30.0) -> bool:
     return False
 
 
+def _copy_evidence(src: Path, name: str) -> None:
+    dest_root = os.environ.get("C17_UI_EVIDENCE")
+    if not dest_root:
+        return
+    dest = Path(dest_root)
+    dest.mkdir(parents=True, exist_ok=True)
+    if src.exists():
+        shutil.copy2(src, dest / name)
+
+
 class TestE2EUiStreamlit:
     def test_upload_select_start_and_visible_result(self, tmp_path):
         try:
@@ -52,15 +66,36 @@ class TestE2EUiStreamlit:
                 "frontend/app.py hardcodes API_URL=http://127.0.0.1:8000"
             )
 
+        from tests.c17_integration.helpers import (
+            analytic_linear_csv,
+            analytic_linear_sample_areas,
+            assert_pdf_conclusion_point,
+        )
+
+        assert UNIQUE_AREA not in analytic_linear_sample_areas(n=24)
+        csv_path = tmp_path / "mercado.csv"
+        csv_path.write_bytes(analytic_linear_csv(n=24, tag="UI"))
+
+        screenshot = Path(os.environ.get("C16_UI_SCREENSHOT", str(tmp_path / "c16_ui.png")))
+        trace_zip = tmp_path / "pw_trace.zip"
+        har_path = tmp_path / "ui.har"
+        pdf_path = tmp_path / "report.pdf"
+
         env = os.environ.copy()
         env["API_PORT"] = str(api_port)
+        env["MODELA_SKIP_DOTENV"] = "1"
+        env["MODELA_STORE_ROOT"] = str(tmp_path / "ui-store")
+        env.pop("PYTHONPATH", None)
+
+        api_log = (tmp_path / "api.log").open("w", encoding="utf-8")
+        ui_log = (tmp_path / "ui.log").open("w", encoding="utf-8")
         api = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "backend.api:app",
              "--host", "127.0.0.1", "--port", str(api_port)],
             cwd=str(ROOT),
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=api_log,
+            stderr=subprocess.STDOUT,
         )
         ui = subprocess.Popen(
             [sys.executable, "-m", "streamlit", "run", str(ROOT / "frontend" / "app.py"),
@@ -68,17 +103,16 @@ class TestE2EUiStreamlit:
              "--browser.gatherUsageStats", "false"],
             cwd=str(ROOT / "frontend"),
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=ui_log,
+            stderr=subprocess.STDOUT,
         )
-        screenshot = Path(os.environ.get("C16_UI_SCREENSHOT", str(tmp_path / "c16_ui.png")))
+        page_errors: list[str] = []
         try:
             if not _wait_http(f"http://127.0.0.1:{api_port}/health", 25):
                 raise AssertionError("NOT_RUN:ui_launcher API did not become healthy")
             if not _wait_http(f"http://127.0.0.1:{ui_port}", 40):
                 raise AssertionError("NOT_RUN:ui_launcher Streamlit did not become ready")
 
-            csv_path = str(fixture_path("market_minimal.csv"))
             try:
                 playwright_cm = sync_playwright()
             except Exception as exc:
@@ -88,46 +122,94 @@ class TestE2EUiStreamlit:
                     browser = p.chromium.launch(headless=True)
                 except Exception as exc:
                     raise AssertionError(f"NOT_RUN:playwright chromium: {exc}") from exc
-                page = browser.new_page()
+                context = browser.new_context(
+                    accept_downloads=True,
+                    record_har_path=str(har_path),
+                )
+                context.tracing.start(screenshots=True, snapshots=True, sources=True)
+                page = context.new_page()
+                page.on("pageerror", lambda err: page_errors.append(str(err)))
                 page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_selector("input[type=file]", state="attached", timeout=30000)
-                file_input = page.locator("input[type=file]")
-                assert file_input.count() >= 1, "upload widget not found"
-                file_input.first.set_input_files(csv_path)
+                page.locator("input[type=file]").first.set_input_files(str(csv_path))
                 page.wait_for_selector("text=Variável-alvo", timeout=45000)
-                start = page.locator("button").filter(has_text="Executar avaliação")
-                if start.count() == 0:
-                    start = page.get_by_text("Executar", exact=False)
-                page.screenshot(path=str(screenshot), full_page=True)
-                assert start.count() >= 1, (
-                    "start button not found after upload; body="
-                    + page.inner_text("body")[:800]
+                page.wait_for_selector("text=Informar o avaliando", timeout=15000)
+
+                area = page.get_by_placeholder("ex.: 73,5")
+                assert area.count() >= 1, (
+                    "subject area field not found; body=" + page.inner_text("body")[:1200]
                 )
-                start.first.click(force=True)
+                area.first.click()
+                area.first.press("Control+A")
+                page.keyboard.type("73,5", delay=80)
+                page.keyboard.press("Tab")
+                page.wait_for_timeout(400)
+
+                start = page.locator("button[type='submit']").filter(has_text="Executar")
+                if start.count() < 1:
+                    start = page.get_by_role("button", name="Executar avaliação")
+                assert start.count() >= 1, "form submit not found; body=" + page.inner_text("body")[:800]
+                start.first.click()
+
                 body = ""
-                for _ in range(20):
+                retried = False
+                for _ in range(40):
                     body = page.inner_text("body")
-                    if any(
-                        token in body
-                        for token in ("Cálculo concluído", "Identificador do trabalho", "Estado: Falha")
-                    ):
+                    if "Cálculo concluído" in body and ("735.000,00" in body or "735000" in body):
                         break
+                    if (
+                        not retried
+                        and "Estado: Falha" in body
+                        and "Característica 'area' ausente" not in body
+                    ):
+                        again = page.locator("button[type='submit']").filter(has_text="Executar")
+                        if again.count() >= 1 and again.first.is_enabled():
+                            again.first.click()
+                            retried = True
                     refresh = page.get_by_role("button", name="Atualizar estado")
                     if refresh.count() >= 1 and refresh.first.is_enabled():
                         refresh.first.click()
                     page.wait_for_timeout(2000)
                 page.screenshot(path=str(screenshot), full_page=True)
+                Path("/tmp/grok-goal-4e0bf2a8f829/implementer/ui_body.txt").write_text(body, encoding="utf-8")
+                shutil.copy2(tmp_path / "api.log", "/tmp/grok-goal-4e0bf2a8f829/implementer/ui_api.log")
+                assert "Cálculo concluído" in body, (
+                    "UI did not reach a completed calculation; body=" + body[:2000]
+                )
+                assert "735.000,00" in body or "735000" in body, body[:1200]
+
+                download_btn = page.get_by_role("button", name="Baixar report.pdf")
+                if download_btn.count() < 1:
+                    refresh = page.get_by_role("button", name="Atualizar estado")
+                    if refresh.count() >= 1:
+                        refresh.first.click()
+                        page.wait_for_timeout(2000)
+                    download_btn = page.get_by_role("button", name="Baixar report.pdf")
+                assert download_btn.count() >= 1, "PDF download control missing; body=" + body[:800]
+                download_btn.first.click()
+                transfer = page.get_by_role("button", name="Transferência de report.pdf")
+                transfer.wait_for(state="visible", timeout=30000)
+                with page.expect_download(timeout=30000) as pending:
+                    transfer.click()
+                download = pending.value
+                download.save_as(str(pdf_path))
+                context.tracing.stop(path=str(trace_zip))
+                context.close()
                 browser.close()
 
-            assert screenshot.exists() and screenshot.stat().st_size > 1000
-            assert any(
-                token in body
-                for token in ("Cálculo concluído", "Identificador do trabalho", "Estado: Falha")
-            ), f"UI did not show a job terminal state after start; body={body[:800]!r}"
+            assert not page_errors, page_errors
+            assert pdf_path.exists() and pdf_path.stat().st_size > 1000
+            assert pdf_path.read_bytes()[:4] == b"%PDF"
+            assert_pdf_conclusion_point(pdf_path.read_bytes(), EXPECTED_POINT)
+            _copy_evidence(screenshot, "c16_ui.png")
+            _copy_evidence(trace_zip, "pw_trace.zip")
+            _copy_evidence(har_path, "ui.har")
+            _copy_evidence(pdf_path, "report.pdf")
         finally:
-            for proc in (ui, api):
+            for proc, log in ((ui, ui_log), (api, api_log)):
                 proc.terminate()
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+                log.close()

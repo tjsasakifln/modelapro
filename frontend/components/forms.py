@@ -67,6 +67,13 @@ class DispatchBlocked(Exception):
 # Heurística legada — só sugere papel padrão; nunca restringe a escolha.
 # ---------------------------------------------------------------------------
 
+def _looks_like_price(col_name: str, original: str = "") -> bool:
+    """Default target guess only. Never hides other columns from the selectbox."""
+    tokens = [t for t in re.split(r"[^a-z0-9]+", str(col_name).lower()) if t]
+    tokens.extend(t for t in re.split(r"[^a-z0-9]+", str(original).lower()) if t)
+    return bool({"preco", "preço", "price", "valor"} & set(tokens))
+
+
 def _looks_like_identification(col_name: str, series: pd.Series) -> bool:
     """
     Simple heuristic used ONLY to pre-select the default state of the
@@ -210,6 +217,12 @@ def suggest_roles(
             continue
         if _is_bairro(name, original):
             roles[name] = "predictor"
+            continue
+        if target_col is None and "target" not in roles.values() and _looks_like_price(name, original):
+            roles[name] = "target"
+            continue
+        if str(name).lower() == "id" or str(original).lower() == "id":
+            roles[name] = "identifier"
             continue
         sample = meta.get("sample") or meta.get("sample_raw") or []
         if sample:
@@ -764,7 +777,10 @@ class JobClient:
         files = {"file": (filename, file_bytes, content_type)}
         data = {"request_json": request_spec_json(request_spec)}
         if subject is not None:
-            data["subject_json"] = json.dumps(subject, ensure_ascii=False, allow_nan=False)
+            payload = subject
+            if isinstance(subject, Mapping) and isinstance(subject.get("raw_values"), Mapping):
+                payload = subject.get("raw_values")
+            data["subject_json"] = json.dumps(payload, ensure_ascii=False, allow_nan=False)
         response = self._call("POST", "/jobs", files=files, data=data)
         payload = _json_or_text(response)
         if response.status_code not in (200, 202) or not isinstance(payload, dict) or not payload.get("job_id"):
@@ -1040,6 +1056,7 @@ def upload_form(
             "preview": None,
             "connection_error": connection_error,
             "preview_error": preview_error,
+            "execute": False,
         }
 
     if preview_error:
@@ -1055,6 +1072,7 @@ def upload_form(
             "preview": None,
             "connection_error": None,
             "preview_error": preview_error,
+            "execute": False,
         }
 
     if preview is None:
@@ -1072,6 +1090,7 @@ def upload_form(
             "preview": None,
             "connection_error": None,
             "preview_error": preview_error,
+            "execute": False,
         }
 
     model = preview_to_form_model(preview)
@@ -1252,79 +1271,94 @@ def upload_form(
     st.subheader("3. Informar o avaliando")
     st.caption(
         "Use as variáveis-base do esquema (categorias, números já interpretados, "
-        "ausências e unidades). Não preencha colunas dummy."
+        "ausências e unidades). Não preencha colunas dummy. "
+        "O botão de executar abaixo envia estes valores junto com o disparo."
     )
-    feature_schema = model["feature_schema"] or _feature_schema_from_column_map(model["column_map"], target_col, roles, units)
+    feature_schema = _feature_schema_from_column_map(model["column_map"], target_col, roles, units)
+    preview_cols = ((model.get("feature_schema") or {}).get("columns") or {})
+    for name, meta in (feature_schema.get("columns") or {}).items():
+        prev = preview_cols.get(name) or {}
+        for key in ("kind", "categories", "unit", "group_id", "reference_category"):
+            if prev.get(key) and not meta.get(key):
+                meta[key] = prev[key]
     raw_values: dict = {}
     resolutions: dict = {}
     schema_columns = (feature_schema.get("columns") or {})
     dummies = dummy_column_names(feature_schema)
+    execute_clicked = False
 
-    for internal, meta in schema_columns.items():
-        meta = meta or {}
-        if meta.get("role") == "target" or internal in dummies:
-            continue
-        original = meta.get("original_name") or internal
-        kind = str(meta.get("kind") or "").lower()
-        unit = meta.get("unit")
-        unit_note = f" (unidade: {unit})" if unit else " (unidade não informada no esquema)"
-        categories = meta.get("categories") or []
-        if kind in {"categorical", "category"}:
-            options = ["(ausente)"] + list(categories) + ["(categoria não suportada)"]
-            chosen = st.selectbox(
-                f"{original}{unit_note}",
-                options=options,
-                key=f"c09_subj_{internal}",
-            )
-            if chosen == "(ausente)":
-                raw_values[internal] = None
-            elif chosen == "(categoria não suportada)":
-                custom = st.text_input(
-                    f"Categoria informada para «{original}» (não está no esquema)",
-                    key=f"c09_subj_custom_{internal}",
+    with st.form("c09_avaliando_executar", clear_on_submit=False):
+        for internal, meta in schema_columns.items():
+            meta = meta or {}
+            if meta.get("role") in {"target", "identifier", "excluded", "source", "date"} or internal in dummies:
+                continue
+            original = meta.get("original_name") or internal
+            kind = str(meta.get("kind") or "").lower()
+            unit = meta.get("unit")
+            unit_note = f" (unidade: {unit})" if unit else " (unidade não informada no esquema)"
+            categories = meta.get("categories") or []
+            if kind in {"categorical", "category"}:
+                options = list(categories) + ["(ausente)", "(categoria não suportada)"]
+                chosen = st.selectbox(
+                    f"{original}{unit_note}",
+                    options=options,
+                    key=f"c09_subj_{internal}",
                 )
-                raw_values[internal] = custom or "__unsupported__"
-                resolution = st.radio(
-                    f"Resolução para categoria não suportada de «{original}»",
-                    options=["pendente", "map_to_supported", "exclude", "abort"],
-                    key=f"c09_res_{internal}",
-                    help="Coluna/categoria fora de suporte exige decisão explícita.",
-                )
-                mapped = None
-                if resolution == "map_to_supported" and categories:
-                    mapped = st.selectbox(
-                        f"Mapear «{original}» para",
-                        options=list(categories),
-                        key=f"c09_map_{internal}",
+                if chosen == "(ausente)":
+                    raw_values[internal] = None
+                elif chosen == "(categoria não suportada)":
+                    custom = st.text_input(
+                        f"Categoria informada para «{original}» (não está no esquema)",
+                        key=f"c09_subj_custom_{internal}",
                     )
-                if resolution != "pendente":
-                    resolutions[internal] = {"action": resolution, "mapped_value": mapped}
+                    raw_values[internal] = custom or "__unsupported__"
+                    resolution = st.radio(
+                        f"Resolução para categoria não suportada de «{original}»",
+                        options=["pendente", "map_to_supported", "exclude", "abort"],
+                        key=f"c09_res_{internal}",
+                        help="Coluna/categoria fora de suporte exige decisão explícita.",
+                    )
+                    mapped = None
+                    if resolution == "map_to_supported" and categories:
+                        mapped = st.selectbox(
+                            f"Mapear «{original}» para",
+                            options=list(categories),
+                            key=f"c09_map_{internal}",
+                        )
+                    if resolution != "pendente":
+                        resolutions[internal] = {"action": resolution, "mapped_value": mapped}
+                else:
+                    raw_values[internal] = chosen
             else:
-                raw_values[internal] = chosen
-        else:
-            entered = st.text_input(
-                f"{original}{unit_note}",
-                value="",
-                key=f"c09_subj_{internal}",
-                help="Número pode permanecer no formato original; a interpretação é da API/C02, não desta tela.",
-            )
-            raw_values[internal] = entered if entered != "" else None
+                entered = st.text_input(
+                    f"{original}{unit_note}",
+                    value="",
+                    key=f"c09_subj_{internal}",
+                    placeholder="ex.: 73,5",
+                    help="Número pode permanecer no formato original; a interpretação é da API/C02, não desta tela.",
+                )
+                raw_values[internal] = entered if entered != "" else None
 
-    extra_unsupported = st.text_input(
-        "Coluna adicional não listada no esquema (deixe vazio se não houver)",
-        value="",
-        help="Se preenchida, exige resolução explícita. Não gera dummy.",
-    )
-    if extra_unsupported:
-        extra_value = st.text_input("Valor da coluna adicional", value="")
-        raw_values[extra_unsupported] = extra_value
-        extra_res = st.radio(
-            "Resolução para coluna não suportada",
-            options=["pendente", "exclude", "abort"],
-            key="c09_res_extra_col",
+        extra_unsupported = st.text_input(
+            "Coluna adicional não listada no esquema (deixe vazio se não houver)",
+            value="",
+            help="Se preenchida, exige resolução explícita. Não gera dummy.",
         )
-        if extra_res != "pendente":
-            resolutions[extra_unsupported] = {"action": extra_res}
+        if extra_unsupported:
+            extra_value = st.text_input("Valor da coluna adicional", value="")
+            raw_values[extra_unsupported] = extra_value
+            extra_res = st.radio(
+                "Resolução para coluna não suportada",
+                options=["pendente", "exclude", "abort"],
+                key="c09_res_extra_col",
+            )
+            if extra_res != "pendente":
+                resolutions[extra_unsupported] = {"action": extra_res}
+
+        execute_clicked = st.form_submit_button(
+            "Executar avaliação",
+            help="Envia o avaliando preenchido neste passo. Não dispara com campos ainda não confirmados.",
+        )
 
     subject = build_subject_payload(feature_schema, raw_values, resolutions=resolutions)
     for iss in subject.get("issues") or []:
@@ -1352,6 +1386,7 @@ def upload_form(
         "preview_error": preview_error,
         "degree": degree,
         "feature_schema": feature_schema,
+        "execute": bool(execute_clicked),
     }
 
 

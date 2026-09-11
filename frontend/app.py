@@ -205,6 +205,8 @@ def main() -> None:
         job_view["job_id"] = client.job_id
 
     actions = render_job_panel(job_view)
+    if form.get("execute"):
+        actions["execute"] = True
 
     if actions.get("refresh") and client.job_id:
         try:

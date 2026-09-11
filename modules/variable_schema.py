@@ -730,9 +730,14 @@ def _base_lookup_keys(base_name: str, encoder_state: Mapping[str, Any]) -> List[
 def lookup_subject_value(subject_raw: Mapping[str, Any], base_name: str, encoder_state: Mapping[str, Any]) -> Any:
     if not isinstance(subject_raw, Mapping):
         return None
-    for key in _base_lookup_keys(base_name, encoder_state):
-        if key in subject_raw:
-            return subject_raw[key]
+    layers: list[Mapping[str, Any]] = [subject_raw]
+    nested = subject_raw.get("raw_values")
+    if isinstance(nested, Mapping):
+        layers.append(nested)
+    for layer in layers:
+        for key in _base_lookup_keys(base_name, encoder_state):
+            if key in layer:
+                return layer[key]
     return None
 
 

@@ -556,20 +556,17 @@ def render_job_panel(view: Mapping[str, Any]) -> dict:
     for issue in view.get("issues") or []:
         st.warning(_issue_text(issue))
 
-    cols = st.columns(3)
+    cols = st.columns(2)
     pressed = {"execute": False, "cancel": False, "refresh": False}
+    st.caption(
+        "O disparo está no passo 3, junto do avaliando, para enviar os valores preenchidos."
+    )
     with cols[0]:
-        pressed["execute"] = st.button(
-            "Executar avaliação",
-            disabled=not view.get("can_rerun"),
-            help="Recusado enquanto houver execução ativa — não cria trabalho duplicado.",
-        )
-    with cols[1]:
         pressed["cancel"] = st.button(
             "Cancelar execução",
             disabled=not view.get("can_cancel"),
         )
-    with cols[2]:
+    with cols[1]:
         pressed["refresh"] = st.button("Atualizar estado")
     return pressed
 
