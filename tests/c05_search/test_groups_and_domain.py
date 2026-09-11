@@ -59,7 +59,10 @@ def test_domain_invalid_transform_for_subject_is_not_in_space():
     df = pd.DataFrame({"idade": idade, "y": y})
     prepared = make_prepared(df, "y")
     subject = {"raw_values": {"idade": 0.0}, "X": None, "issues": [], "supported": True}
-    spec = request_spec("y", search_policy={"mode": "exact", "budget": 200})
+    spec = request_spec(
+        "y",
+        search_policy={"mode": "exact", "budget": 200, "model_scope": "subject_specific"},
+    )
     result = search_models(prepared, subject, spec)
     for entry in result["search_audit"]["history"]:
         for v in entry.get("variables") or []:

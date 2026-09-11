@@ -442,18 +442,41 @@ def build_evidence_bundle(
             notes="No subject design row / raw values were packaged; prediction cannot be reconstructed from memory.",
         )
 
-    residual_context = _first_mapping(
+    provided_residual_context = _first_mapping(
         arts.get("residual_context"),
         _as_mapping(snap.get("model")).get("residual_context"),
     )
+    residual_state = _first_mapping(
+        arts.get("residual_state"),
+        _as_mapping(snap.get("model")).get("residual_state"),
+    )
+    residual_context = dict(provided_residual_context) if provided_residual_context else _residual_context_for_reproduction(residual_state)
+    if residual_state:
+        write_json(resolve_inside(out, "model/residual_state.json"), residual_state)
+        _register(files_meta, out, "model/residual_state.json", "application/json", BUNDLE_VERSION, "residual_state")
+        ledger.set("residual_state", COMPLETENESS_PRESENT, declared=True, source="artifacts.residual_state")
+    else:
+        declared_residual = bool(_as_mapping(snap.get("model")).get("coefficients"))
+        ledger.set(
+            "residual_state",
+            COMPLETENESS_MISSING,
+            declared=declared_residual,
+            absence_kind="lost_by_integration" if declared_residual else "not_provided",
+            notes=(
+                "Residual/design state was used in-process but not packaged."
+                if declared_residual
+                else "No residual state was provided; not fabricated."
+            ),
+        )
     if residual_context:
         write_json(resolve_inside(out, "model/residual_context.json"), residual_context)
         _register(files_meta, out, "model/residual_context.json", "application/json", SCHEMA_VERSION_MP, "residual_context")
-        ledger.set("residual_context", COMPLETENESS_PRESENT, declared=True, source="artifacts.residual_context")
+        ledger.set("residual_context", COMPLETENESS_PRESENT, declared=True, source="artifacts.residual_context or residual_state")
     else:
         ledger.set(
             "residual_context",
             COMPLETENESS_MISSING,
+            absence_kind="not_provided" if not residual_state else "lost_by_integration",
             notes="No residual context; interval reconstruction is unsupported (limitation, not a fabricated IC).",
         )
 
@@ -1684,6 +1707,36 @@ def apply_inverse_y(value: float, name: Any) -> float:
         return 1.0 / float(value)
     refuse_code_execution(f"y inverse {name!r} is not implemented")
     raise AssertionError("unreachable")
+
+
+def _residual_context_for_reproduction(residual_state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Map MP-PRO residual_state onto the C12 residual_context field names."""
+    state = _as_mapping(residual_state)
+    if not state:
+        return {}
+    if state.get("interval_method") and (state.get("std_error") or state.get("residual_std_error") or state.get("t_crit")):
+        return dict(state)
+    std = state.get("residual_std") or state.get("std_error") or state.get("residual_std_error")
+    t_crit = state.get("t_crit_80") or state.get("t_crit")
+    xtx = state.get("xtx_inv")
+    if std is None and xtx is None:
+        return {}
+    out = {
+        "interval_method": state.get("interval_method") or "ols_mean_and_prediction",
+        "interval_scale": state.get("interval_scale") or "transformed",
+        "std_error": std,
+        "residual_std_error": std,
+        "t_crit": t_crit,
+        "xtx_inv": xtx,
+        "xtx_inv_kind": state.get("xtx_inv_kind"),
+        "scale_convention": state.get("scale_convention"),
+        "df_resid": state.get("df_resid"),
+        "feature_order": state.get("feature_order"),
+        "schema_version": state.get("schema_version"),
+        "status": state.get("status"),
+        "limitations": list(state.get("limitations") or []),
+    }
+    return {k: v for k, v in out.items() if v is not None}
 
 
 def _reconstruct_intervals(

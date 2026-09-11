@@ -154,18 +154,37 @@ def search_models(
             cancelled=False,
         )
         audit["coverage"]["exact_optimum_guaranteed"] = False
+        audit["selection_scope"] = (
+            (request_spec.get("search_policy") or {}).get("model_scope")
+            or request_spec.get("model_scope")
+            or "population_model"
+        )
+        audit["selection_conditioned_on_subject"] = audit["selection_scope"] == "subject_specific"
         return _search_result(None, [], audit, issues, t0, rss0)
 
     subject_raw = None
     if subject_design:
         subject_raw = subject_design.get("raw_values") or subject_design.get("subject_raw")
 
+    declared_scope = search_policy.get("model_scope") or request_spec.get("model_scope")
+    if declared_scope not in {"population_model", "subject_specific"}:
+        declared_scope = "population_model"
+    selection_conditioned = declared_scope == "subject_specific"
+    subject_for_units = subject_raw if selection_conditioned else None
+
     units, unit_issues = search_units_from_prepared(
-        prepared_dataset, authorized, subject_raw=subject_raw
+        prepared_dataset, authorized, subject_raw=subject_for_units
     )
     issues.extend(unit_issues)
 
-    if subject_raw is not None:
+    dropped_transforms_due_to_subject: Dict[str, Any] = {}
+    for issue in unit_issues:
+        if issue.get("code") == "domain_exclusion":
+            dropped_transforms_due_to_subject = dict(
+                (issue.get("evidence") or {}).get("dropped_transforms") or {}
+            )
+
+    if selection_conditioned and subject_raw is not None:
         missing_bases = [
             u.base_variable
             for u in units
@@ -196,6 +215,9 @@ def search_models(
             cache_components=cache_components,
             cancelled=False,
         )
+        audit["selection_scope"] = declared_scope
+        audit["selection_conditioned_on_subject"] = bool(selection_conditioned)
+        audit["dropped_transforms_due_to_subject"] = dropped_transforms_due_to_subject
         return _search_result(None, [], audit, issues, t0, rss0)
 
     n_rows = _n_rows(prepared_dataset)
@@ -479,6 +501,9 @@ def search_models(
         "seed": seed,
         "code_version": CODE_VERSION,
         "hooks": hooks.get("labeled"),
+        "selection_scope": declared_scope,
+        "selection_conditioned_on_subject": bool(selection_conditioned),
+        "dropped_transforms_due_to_subject": dropped_transforms_due_to_subject,
     }
     if not exact_optimum:
         audit["coverage"]["optimum_disclaimer"] = (
@@ -583,7 +608,11 @@ def classify_admissibility(
         reasons.append("original_scale_error_unavailable")
 
     framing_ok = numeric
-    min_grade = evaluation_policy.get("min_fundamentacao_grade")
+    min_grade = evaluation_policy.get("minimum_fundamentacao_grade")
+    if min_grade is None:
+        min_grade = evaluation_policy.get("min_fundamentacao_grade")
+    if min_grade is None:
+        min_grade = evaluation_policy.get("target_degree")
     grau = metrics.get("grau_fundamentacao")
     if min_grade is not None:
         try:
@@ -630,6 +659,7 @@ def build_search_cache_key(
     search_policy.pop("peer_hooks", None)
     evaluation_policy.pop("extra_objective", None)
     search_policy.pop("progress_callback", None)
+    scope = search_policy.get("model_scope") or request_spec.get("model_scope") or "population_model"
     components = {
         "dataset_sha256": prepared_dataset.get("dataset_sha256"),
         "sample_fingerprint": _sample_fingerprint(prepared_dataset),
@@ -646,8 +676,9 @@ def build_search_cache_key(
         "schema_version": SCHEMA_VERSION,
         "y_transformations": y_transformations_from_policy(search_policy),
         "subject": None,
+        "model_scope": scope,
     }
-    if subject_design is not None:
+    if scope == "subject_specific" and subject_design is not None:
         components["subject"] = subject_design.get("raw_values") or subject_design.get("subject_raw")
     blob = json.dumps(components, sort_keys=True, default=str)
     digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -1728,7 +1759,14 @@ def _fit_and_score(
         )
     else:
         builder = ModelBuilder()
-        degree = int(evaluation_policy.get("min_fundamentacao_grade") or evaluation_policy.get("target_degree") or 1)
+        raw_degree = (
+            evaluation_policy.get("minimum_fundamentacao_grade")
+            if evaluation_policy.get("minimum_fundamentacao_grade") is not None
+            else evaluation_policy.get("min_fundamentacao_grade")
+            if evaluation_policy.get("min_fundamentacao_grade") is not None
+            else evaluation_policy.get("target_degree")
+        )
+        degree = int(raw_degree) if raw_degree is not None else 1
         remove_outliers = bool(evaluation_policy.get("remove_outliers", False))
         y_series = y_fit if isinstance(y_fit, pd.Series) else pd.Series(np.asarray(y_fit), index=X_design.index)
         if len(y_series) != len(X_design):

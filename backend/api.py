@@ -408,6 +408,15 @@ def submission_key(file_bytes: bytes, request_spec: Mapping[str, Any], subject: 
     h.update(dumps_strict(request_spec_for_peers(request_spec)).encode("utf-8"))
     h.update(b"\0")
     h.update(dumps_strict(subject if subject is not None else {}).encode("utf-8"))
+    h.update(b"\0")
+    h.update(str(current_code_sha() or "").encode("utf-8"))
+    try:
+        from modules.pro_workflow.residual_state import CALCULATION_VERSION
+
+        h.update(b"\0")
+        h.update(str(CALCULATION_VERSION).encode("utf-8"))
+    except Exception:
+        pass
     return h.hexdigest()
 
 
@@ -469,6 +478,7 @@ def request_spec_from_upload_form(
             "objective": "target_degree",
             "seed": None,
             "target_degree": degree,
+            "minimum_fundamentacao_grade": degree,
         },
         "evaluation_policy": {
             "method": "none",

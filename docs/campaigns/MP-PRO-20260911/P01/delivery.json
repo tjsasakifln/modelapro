@@ -1,0 +1,120 @@
+{
+  "id": "MP-PRO-20260911/P01",
+  "lote": "MP-PRO-20260911",
+  "campaign": "P01",
+  "title": "Consistência técnica, projetos reutilizáveis e dossiê reproduzível",
+  "branch": "mp-pro-20260911/p01-nucleo-reuso",
+  "BASE_SHA": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "reference_pr": 17,
+  "reference_base": "mp-20260911/integracao-final",
+  "classification": "IMPLEMENTED_VERIFIED",
+  "features": [
+    "Versioned residual/design state on freeze (coefficients, feature_order, intercept, residual_std, df, normalized_cov_params as xtx_inv, target transform, encoder, used_row_ids)",
+    "Restore/batch reuse that interval path without refitting or re-selecting",
+    "Incomplete/malformed residual state yields explicit limitation; no fabricated covariance; ±15% is not admissible_interval",
+    "Log target keeps estimand; does not invent monetary mean_ci80",
+    "Grade aliases normalized at RequestSpec/API/legacy-adapter boundary into search_policy.minimum_fundamentacao_grade; conflicts are GRADE_ALIAS_CONFLICT",
+    "population_model search no longer filters the space by the subject; subject_specific keeps reproducible constraints",
+    "C03 pending/null grade is not met and does not score as admissible via fallback",
+    "Dossier packages residual_state, bases, policies; absence_kind distinguishes not_provided vs lost_by_integration",
+    "Additive downloadable artifact evidence_bundle.zip on GET /jobs/{id}/artifacts/{name}",
+    "provenance.workflow_context MP-PRO/1 and report_context series aligned to used_row_ids",
+    "model.formula when coefficients allow; submission_key includes code_sha and calculation_version"
+  ],
+  "files_changed": [
+    "backend/api.py",
+    "backend/worker.py",
+    "modules/result_contract.py",
+    "modules/valuation_batch.py",
+    "modules/optimal_combination.py",
+    "modules/evidence_bundle.py",
+    "modules/provenance.py",
+    "modules/pro_workflow/__init__.py",
+    "modules/pro_workflow/residual_state.py",
+    "modules/pro_workflow/grade_policy.py",
+    "modules/pro_workflow/workflow_context.py",
+    "modules/pro_workflow/report_context.py",
+    "tests/pro_workflow/p01/",
+    "tests/c05_search/test_groups_and_domain.py",
+    "tests/c05_search/test_a05_cancel_progress_profile.py",
+    "docs/campaigns/MP-PRO-20260911/P01/"
+  ],
+  "contracts_consumed": [
+    "MP/1 RequestSpec / ResultSnapshot",
+    "C04 fit_candidate / evaluate_fitted live path",
+    "C06 inverse_target_prediction",
+    "C03 assess_normative / classify_fundamentacao",
+    "C12 build_evidence_bundle / reproduce_from_bundle",
+    "C14 evaluate_batch / restore_candidate_fit",
+    "C10 HTTP /jobs /projects /artifacts",
+    "C11 JobStore / ProjectStore immutable revisions"
+  ],
+  "contracts_produced": [
+    {
+      "name": "model_state.residual_state",
+      "schema_version": "MP-PRO/1",
+      "xtx_inv_kind": "normalized_cov_params",
+      "scale_convention": "statsmodels.scale"
+    },
+    {
+      "name": "provenance.workflow_context",
+      "schema_version": "MP-PRO/1",
+      "fields": [
+        "subject_raw",
+        "requested_minimum_grade",
+        "grade_requirement_status",
+        "selection_scope",
+        "selection_conditioned_on_subject",
+        "limitation_codes"
+      ]
+    },
+    {
+      "name": "report_context series",
+      "fields": [
+        "fitted_values",
+        "residuals",
+        "observed_values",
+        "series_row_ids",
+        "series_scale",
+        "series_unit"
+      ]
+    },
+    {
+      "name": "GET /jobs/{id}/artifacts/evidence_bundle.zip",
+      "additive": true,
+      "consumer": "P02",
+      "note": "Safe allow-list name. P02 download UI is out of P01 scope."
+    }
+  ],
+  "tests": {
+    "p01": "python3 -m pytest tests/pro_workflow/p01 -q",
+    "p01_pass_count": 15,
+    "p01_exit": 0,
+    "domain_regression": "python3 -m pytest tests/c05_search tests/c12_evidence tests/c14_batch tests/c10_pipeline tests/c03_normative/test_a04_classifiers.py tests/c03_normative/test_a05_precisao_documentary.py -q"
+  },
+  "integration_dependencies": [
+    {
+      "producer": "P01",
+      "consumer": "P02",
+      "change": "Optional provenance.workflow_context and GET evidence_bundle.zip",
+      "example_in": "search_policy.minimum_fundamentacao_grade",
+      "example_out": "provenance.workflow_context.grade_requirement_status in {not_requested,met,not_met,pending,error}",
+      "acceptance": "Absent workflow_context on old snapshots is valid; consumers must not reclassify."
+    },
+    {
+      "producer": "P01",
+      "consumer": "P03",
+      "change": "report_context fitted/residual/observed series + model.formula + series_scale/unit",
+      "example_in": "used_row_ids from the fit",
+      "example_out": "series_row_ids == used_row_ids; log residuals not labeled as BRL",
+      "acceptance": "Missing series → chart unavailable, not invented. Renderer remains P03."
+    }
+  ],
+  "limitations": [
+    "Not a certified professional appraisal system and not full NBR coverage.",
+    "Windows PDF not in this campaign.",
+    "HTTP batch of a freeze built from the P01 unit fixture encoder (base_variables as string list) is not a C02 encoder; A02 HTTP proves revision GET + residual apply.",
+    "Arbitration ±15% still exists as arbitration_interval; it is no longer copied into admissible_interval when statistical intervals are missing.",
+    "Old incomplete frozen projects reconstruct with limitation, never a rewritten saved revision."
+  ]
+}

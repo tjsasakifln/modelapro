@@ -103,7 +103,7 @@ def test_two_identical_runs_same_winner():
 def test_cache_key_includes_subject_when_selection_depends_on_it():
     df = _frame(n_vars=2, n=18)
     prepared = make_prepared(df, "y")
-    spec = request_spec("y")
+    spec = request_spec("y", search_policy={"model_scope": "subject_specific"})
     d1, c1 = build_search_cache_key(prepared, None, spec)
     subject = {"raw_values": {"x0": 3.0, "x1": 4.0}, "X": None, "issues": [], "supported": True}
     d2, c2 = build_search_cache_key(prepared, subject, spec)
