@@ -6,6 +6,7 @@
 - Lote: MP-20260911
 - Branch: `mp-20260911/c13-acoes_para_concluir`
 - Base de referência: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`
+- HEAD: `33a6ef72bfce99e3bb06dd81d24b798ba482f587`
 - Contrato: MP/1
 - Função publicada: `modules.decision_support.recommend_next_actions(snapshot, feature_schema=None)`
 

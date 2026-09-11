@@ -49,7 +49,7 @@
   },
   "contract_version": "MP/1",
   "dependency_pr": null,
-  "head_sha": "PENDING_COMMIT",
+  "head_sha": "33a6ef72bfce99e3bb06dd81d24b798ba482f587",
   "acceptance_case": {
     "id": "C13-A01",
     "input": "k=4, n=26, regra verificada 6(k+1) no item de quantidade de dados",
