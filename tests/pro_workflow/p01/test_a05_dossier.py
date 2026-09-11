@@ -221,6 +221,66 @@ def test_p01_a05_artifact_zip_route_serves_zip_bytes(isolated_p01_runtime, tmp_p
     assert resp.content == zip_bytes
 
 
+def test_p01_a05_compose_zip_residual_has_subject_x(isolated_p01_runtime, tmp_path):
+    """Job artifact zip is packed before freeze; it must still carry subject_x."""
+    import io
+    import zipfile
+
+    from fastapi.testclient import TestClient
+
+    from backend.api import app
+    from backend.worker import compose_valuation_job, resolve_peers
+    from tests.pro_workflow.p01.conftest import documented_csv_bytes, documented_request_spec
+
+    store = isolated_p01_runtime["job_store"]
+    job = store.create()
+    job_id = job["job_id"]
+    ctx = compose_valuation_job(
+        job_id=job_id,
+        file_bytes=documented_csv_bytes(),
+        filename="mercado.csv",
+        request_spec=documented_request_spec(),
+        subject_raw={"area": 100.0, "bairro": "Sul"},
+        project_id=None,
+        peers=resolve_peers(),
+        job_store=store,
+    )
+    zip_state = (ctx.get("artifact_states") or {}).get("evidence_bundle.zip") or {}
+    client = TestClient(app)
+    resp = client.get(f"/jobs/{job_id}/artifacts/evidence_bundle.zip")
+    assert resp.status_code == 200, resp.text + json.dumps(zip_state)
+    assert "application/zip" in (resp.headers.get("content-type") or "")
+    assert resp.content[:2] == b"PK"
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        names = zf.namelist()
+        residual_name = "model/residual_context.json"
+        if residual_name not in names:
+            residual_name = "model/residual_state.json"
+        assert residual_name in names, names
+        residual = json.loads(zf.read(residual_name).decode("utf-8"))
+        extract_dir = tmp_path / "from-zip"
+        zf.extractall(extract_dir)
+    assert residual.get("subject_x"), residual
+    assert isinstance(residual["subject_x"], list)
+    order = residual.get("feature_order") or []
+    if order:
+        assert len(residual["subject_x"]) == len(order)
+    cmd = [
+        sys.executable,
+        str(REPO / "scripts" / "c12_reproduce" / "reproduce.py"),
+        "--bundle",
+        str(extract_dir),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    (SCRATCH / "p01-a05-compose-zip-repro.json").write_text(proc.stdout or proc.stderr, encoding="utf-8")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    report = json.loads(proc.stdout)
+    assert report.get("point") is not None
+    assert report.get("mean_ci80") is not None
+    assert report.get("prediction_interval") is not None
+
+
 def test_p01_submission_key_material_and_calc_version(monkeypatch, tmp_path):
     from backend.api import submission_key
     from tests.pro_workflow.p01.conftest import documented_csv_bytes, documented_request_spec

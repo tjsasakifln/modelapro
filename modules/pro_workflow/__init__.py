@@ -17,6 +17,7 @@ from .residual_state import (
     XTX_INV_KIND_COVARIANCE,
     XTX_INV_KIND_NORMALIZED,
     apply_mean_prediction_intervals,
+    complete_residual_state_for_persist,
     declared_residual_status,
     extract_residual_state,
     json_safe_residual_state,

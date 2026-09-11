@@ -38,7 +38,7 @@ Dossiê grava `model/residual_state.json` além do `residual_context` C12. `abse
 
 ```text
 PYTHONPATH=. python3 -m pytest tests/pro_workflow/p01 -q
-# 17 passed, exit 0 (duas execuções, mesma contagem)
+# 18 passed, exit 0 (duas execuções, mesma contagem)
 
 PYTHONPATH=. python3 -m pytest tests/c05_search tests/c12_evidence tests/c14_batch tests/c10_pipeline -q
 # exit 0 no recorte atribuído exercitado

@@ -526,6 +526,16 @@ def subject_x_from_design(subject_design: Any, feature_order: Sequence[str]) -> 
     return vec
 
 
+def complete_residual_state_for_persist(winner_fit: Any, subject_design: Any = None) -> Dict[str, Any]:
+    """Freeze/dossier residual block, including subject_x when the design row exists."""
+    residual_state = json_safe_residual_state(extract_residual_state(winner_fit))
+    subject_x = subject_x_from_design(subject_design, residual_state.get("feature_order") or [])
+    if subject_x is not None:
+        residual_state["subject_x"] = subject_x
+        residual_state = json_safe_residual_state(residual_state)
+    return residual_state
+
+
 def apply_mean_prediction_intervals(
     x_row: Mapping[str, float],
     residual_state: Any,
