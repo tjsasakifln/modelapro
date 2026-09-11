@@ -204,6 +204,10 @@
     font-size: 7.5pt;
   }
   table.ledger-table { font-size: 7.5pt; }
+  .seq { width: 2.4em; white-space: nowrap; }
+  .lead-value { font-size: 13pt; font-weight: bold; color: #0b3d5c; }
+  .tech-trail { page-break-before: always; }
+  .muted { color: #555; font-size: 8.5pt; }
 </style>
 </head>
 <body>
@@ -229,45 +233,41 @@
 
   <div class="meta-block">
     <p><b>Solicitante:</b> {{ applicant }}</p>
-    <p><b>Finalidade:</b> {{ purpose }}</p>
+    <p><b>Objeto / finalidade:</b> {{ purpose }}</p>
     <p><b>Data-base (referência):</b>
       {% if reference_date %}{{ reference_date }}
       {% else %}<span class="pending">{{ reference_date_display }}</span>
       {% endif %}
     </p>
-    <p><b>Data de vistoria:</b>
-      {% if inspection_date %}{{ inspection_date }}
-      {% else %}<span class="pending">{{ inspection_date_display }}</span>
-      {% endif %}
-    </p>
     <p><b>Data de emissão desta minuta:</b> {{ generated_at }}</p>
-    <p><b>Fontes:</b>
+    {% if inspection_date %}
+    <p><b>Data de vistoria (informada no pedido, sem comprovar realização):</b> {{ inspection_date }}</p>
+    {% endif %}
+    <p><b>Unidade do valor-alvo:</b>
+      {% if unit_pending %}<span class="pending">{{ unit_display }} — não se presume BRL nem BRL/m²</span>
+      {% else %}{{ unit_display }}{% endif %}
+    </p>
+    <p><b>Estimando:</b> {{ target_estimand or "não informado" }}{% if target_col %} (coluna {{ target_col }}){% endif %}</p>
+    <p><b>Fontes dos dados:</b>
       {% if sources %}
         {% for src in sources %}
           {{ src.id }} {{ src.label }}{% if src.citation %} ({{ src.citation }}){% endif %}{% if not loop.last %}; {% endif %}
         {% endfor %}
       {% else %}
-        <span class="pending">Pendência: fontes não informadas no contexto do relatório</span>
+        Planilha de mercado utilizada nesta avaliação; identificadores técnicos na trilha ao final.
+        Não se inserem URL ou foto de mercado não pesquisadas.
       {% endif %}
     </p>
-    <p><b>Unidade do valor-alvo:</b>
-      {% if unit_pending %}<span class="pending">{{ unit_display }} — não se presume BRL nem BRL/m²</span>
-      {% else %}{{ unit_display }}{% if unit_is_brl_m2 %} (BRL/m²){% elif unit_is_brl %} (BRL){% endif %}
-      {% endif %}
-    </p>
-    <p><b>Coluna-alvo / estimando:</b> {{ target_col or "não informado" }}{% if target_estimand %} — {{ target_estimand }}{% endif %}</p>
-    {% if job_id %}<p><b>Job:</b> {{ job_id }}</p>{% endif %}
-    {% if project_id %}<p><b>Projeto:</b> {{ project_id }}</p>{% endif %}
   </div>
 
-  <h2>Valores congelados do ResultSnapshot (MP/1)</h2>
-  <p>
-    Os números abaixo são cópia do snapshot usado pela tela. Este relatório
-    <b>não recalcula regressão</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
-    A apresentação pode arredondar; o cálculo do valor não usa a fórmula arredondada.
+  <h2>Resultado para revisão</h2>
+  <p class="lead-value">Estimativa pontual: {{ point_display }}
+    <span class="muted">(armazenado: {{ point_raw }}; arredondamento de resumo com {{ display_rounding_decimals }} casas)</span>
   </p>
-  <div class="frozen-box" id="snapshot-frozen">{% for line in frozen_lines %}{{ line }}
-{% endfor %}</div>
+  <p class="muted">
+    Os números são cópia do resultado já calculado. Este relatório
+    <b>não recalcula regressão</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
+  </p>
 
   <h2>Identificação do resultado</h2>
   <table class="metrics-grid">
@@ -309,6 +309,23 @@
   </table>
   {% if used_count_mismatch or excluded_count_mismatch %}
   <p class="pending">Pendência: a contagem n não coincide com o comprimento da lista de row_ids no snapshot. O relatório não corrige isso silenciosamente.</p>
+  {% endif %}
+
+  <h2>Enquadramento e limitações prioritárias</h2>
+  <p>
+    Grau de fundamentação informado: <span class="badge">{{ grau_fundamentacao_label }}</span>
+    {% if grau_fundamentacao_points is not none %} — pontos: {{ grau_fundamentacao_points }}{% endif %}
+    &nbsp;&nbsp; Precisão: <span class="badge">{{ precisao_status_label }}</span>
+    / <span class="badge">{{ grau_precisao_label }}</span>
+  </p>
+  <p class="muted">O grau da tabela, quando informado, não equivale a prontidão de emissão nem a laudo aprovado.</p>
+  {% if precisao_note %}<p class="disclaimer">{{ precisao_note }}</p>{% endif %}
+  {% if priority_limitations %}
+  <ul>
+    {% for issue in priority_limitations %}
+    <li class="long-wrap"><b>{{ issue.origin_label }}</b> — {{ issue.message }}</li>
+    {% endfor %}
+  </ul>
   {% endif %}
 
   <h2>Avisos e limitações (todos os issues do snapshot)</h2>
@@ -391,17 +408,26 @@
   {% if search_approximate %}
   <div class="disclaimer issue-search">
     <b>Busca aproximada (não exaustiva).</b>
+    {% if search_summary %}{{ search_summary }}
+    {% else %}
     A enumeração do espaço avaliado não é garantia de ótimo global nem de avaliação completa do critério de ranking.
-    {% if search_mode %} Modo declarado: {{ search_mode }}.{% endif %}
-    {% if combinations_tested %} Combinações testadas: {{ combinations_tested }}.{% endif %}
+    {% endif %}
+    {% if search_mode %} Cobertura/método lidos do registro de busca: {{ search_mode }}.{% endif %}
+    {% if combinations_tested %} Especificações avaliadas: {{ combinations_tested }}.{% endif %}
+    {% if search_possible %} Espaço declarado: {{ search_possible }}.{% endif %}
     {% if search_coverage %} Cobertura: {{ search_coverage }}.{% endif %}
-    {% if search_budget %} Orçamento: {{ search_budget }}.{% endif %}
+    {% if search_budget %} Orçamento de avaliações: {{ search_budget }}.{% endif %}
     {% if search_objective %} Objetivo: {{ search_objective }}.{% endif %}
   </div>
-  {% elif search_exhaustive is sameas true %}
-  <p>Busca declarada como exaustiva no snapshot{% if combinations_tested %} ({{ combinations_tested }} combinações){% endif %}. Isso descreve a enumeração, não uma aprovação do valor.</p>
+  {% elif search_exhaustive is sameas true or search_coverage == "exhaustive" %}
+  <p>{% if search_summary %}{{ search_summary }}{% else %}
+    Busca declarada como exaustiva no snapshot{% if combinations_tested %} ({{ combinations_tested }} combinações){% endif %}. Isso descreve a enumeração, não uma aprovação do valor.
+    {% endif %}
+  </p>
+  {% elif search_coverage_known %}
+  <p>{% if search_summary %}{{ search_summary }}{% else %}A cobertura da busca foi registrada no snapshot.{% endif %}</p>
   {% else %}
-  <p class="pending">Pendência: o snapshot não declara se a busca foi exaustiva ou aproximada.</p>
+  <p class="no-data">A cobertura da busca não consta deste snapshot; a minuta não infere o modo pela quantidade de linhas nem afirma ótimo global.</p>
   {% endif %}
   {% if search_limitations %}
   <ul>
@@ -445,14 +471,49 @@
 
   <h2>Especificação estatística do modelo</h2>
   <p>
-    Número do modelo: <b>{{ model_id }}</b>.
-    Revisão: <b>{{ model_revision }}</b>.
-    {% if model_sha %} SHA do modelo: {{ model_sha }}.{% endif %}
-    {% if code_sha %} SHA de código: {{ code_sha }}.{% endif %}
-    {% if input_sha256 %} SHA da entrada: {{ input_sha256 }}.{% endif %}
+    Equação na escala de ajuste (<b>{{ fitting_scale }}</b>).
+    O valor do snapshot não foi recalculado a partir desta fórmula arredondada.
+    {% if formula_log_scale %}
+    Esta minuta não imprime exp(…) como média sem o método de retransformação informado.
+    {% endif %}
   </p>
-  <p>Fórmula (apresentação). O valor do snapshot não foi recalculado a partir desta fórmula arredondada:</p>
-  <div class="formula-box">{{ formula or "Pendência: fórmula não informada" }}</div>
+  {% if formula_present %}
+  <div class="formula-box">{{ formula_display or formula }}</div>
+  {% if formula_storage and formula_storage != formula_display %}
+  <p class="muted">Precisão de armazenamento: <span class="formula-box">{{ formula_storage }}</span></p>
+  {% endif %}
+  {% else %}
+  <p class="no-data">Fórmula e coeficientes canônicos não foram fornecidos neste snapshot; a equação não foi inventada.</p>
+  {% endif %}
+  {% for note in formula_notes %}
+  <p class="disclaimer">{{ note }}</p>
+  {% endfor %}
+  {% if variable_meanings %}
+  <h3>Significado das variáveis na especificação</h3>
+  <table>
+    <thead><tr><th>Variável</th><th>Papel</th><th>Significado</th></tr></thead>
+    <tbody>
+      {% for item in variable_meanings %}
+      <tr>
+        <td class="col-id">{{ item.variable }}</td>
+        <td>{{ item.role }}</td>
+        <td class="long-wrap">{{ item.meaning }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if transform_rows %}
+  <h3>Transformações das variáveis explicativas</h3>
+  <table>
+    <thead><tr><th>Variável</th><th>Transformação informada</th></tr></thead>
+    <tbody>
+      {% for row in transform_rows %}
+      <tr><td>{{ row.variable }}</td><td>{{ row.transform }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
   {% if coef_rows %}
   <table>
     <thead>
@@ -485,6 +546,7 @@
   {% endif %}
 
   <h3>Ajustamento (R²) — não é critério de avaliação superior</h3>
+  {% if metrics_present %}
   <table class="metrics-grid">
     <tr><td class="label">R²</td><td>{{ metrics.r2 }}</td></tr>
     <tr><td class="label">R² ajustado</td><td>{{ metrics.r2_adjusted }}</td></tr>
@@ -492,9 +554,21 @@
     <tr><td class="label">Durbin-Watson</td><td>{{ metrics.durbin_watson }}</td></tr>
   </table>
   <p class="disclaimer">
-    O R² descreve o ajustamento da especificação estatística aos dados efetivamente usados.
+    {{ metrics.note }}
     Um R² maior não significa, por si só, avaliação superior, maior grau normativo, nem laudo melhor.
+    Erro de ajustamento da amostra utilizada não é desempenho de validação externa.
   </p>
+  {% else %}
+  <p class="no-data">{{ metrics.note }}</p>
+  {% endif %}
+
+  {% if external_validation and external_validation.present %}
+  <h3>Validação externa (quando executada)</h3>
+  <p>Método informado: {{ external_validation.method }}. {{ external_validation.summary }}</p>
+  {% elif external_validation %}
+  <h3>Validação externa</h3>
+  <p class="no-data">{{ external_validation.summary }}</p>
+  {% endif %}
 
   {% if alternatives %}
   <h3>Alternativas registradas no snapshot</h3>
@@ -532,8 +606,11 @@
     <img class="chart-img" src="data:image/png;base64,{{ charts.residuals_hist }}" alt="Histograma dos resíduos">
   </div>
   {% endif %}
+  {% if chart_warning %}
+  <p class="disclaimer">Aviso de gráfico: {{ chart_warning.message }}. O cálculo do snapshot permanece inalterado; séries desalinhadas não foram plotadas.</p>
+  {% endif %}
   {% if not charts %}
-  <p class="no-data">Gráficos não fornecidos no contexto e sem séries de resíduos/ajustados — seção pendente.</p>
+  <p class="no-data">{{ chart_absence_reason or "Os gráficos de resíduos e ajustamento não constam desta minuta porque as séries alinhadas não foram fornecidas no contexto do relatório. O cálculo do snapshot permanece inalterado." }}</p>
   {% endif %}
 
   {% if has_subject %}
@@ -592,6 +669,7 @@
   <table class="ledger-table">
     <thead>
       <tr>
+        <th class="seq">nº</th>
         <th class="col-id">row_id</th>
         <th>Fonte</th>
         <th>Justificativa</th>
@@ -604,6 +682,7 @@
     <tbody>
       {% for row in used_rows %}
       <tr>
+        <td class="seq">{{ row.seq }}</td>
         <td class="col-id">{{ row.row_id }}</td>
         <td class="long-wrap">{{ row.source }}</td>
         <td class="long-wrap">{{ row.justification }}</td>
@@ -624,6 +703,7 @@
   <table class="ledger-table">
     <thead>
       <tr>
+        <th class="seq">nº</th>
         <th class="col-id">row_id</th>
         <th>Fonte</th>
         <th>Justificativa</th>
@@ -635,6 +715,7 @@
     <tbody>
       {% for row in excluded_rows %}
       <tr>
+        <td class="seq">{{ row.seq }}</td>
         <td class="col-id">{{ row.row_id }}</td>
         <td class="long-wrap">{{ row.source }}</td>
         <td class="long-wrap">{{ row.justification }}</td>
@@ -687,8 +768,33 @@
     {% endfor %}
   </div>
 
-  <h2>Proveniência (sem caminhos locais nem segredos)</h2>
+  <div class="tech-trail">
+  <h2>Trilha técnica (não substitui o resumo)</h2>
+  <p class="muted">
+    Identificadores técnicos, hashes e campos congelados MP/1 ficam nesta trilha.
+    O resumo anterior é a minuta para revisão; esta seção preserva a ligação com a evidência.
+  </p>
+  {% if model_id %}<p>Identificador do modelo: {{ model_id }}</p>{% endif %}
+  {% if model_revision %}<p>Revisão do modelo: {{ model_revision }}</p>{% endif %}
+  {% if job_id %}<p>Job: {{ job_id }}</p>{% endif %}
+  {% if project_id %}<p>Projeto: {{ project_id }}</p>{% endif %}
+  {% if model_sha %}<p>SHA do modelo: {{ model_sha }}</p>{% endif %}
+  {% if code_sha %}<p>SHA de código: {{ code_sha }}</p>{% endif %}
+  {% if input_sha256 %}<p>SHA da entrada: {{ input_sha256 }}</p>{% endif %}
+  {% if technical_sources %}
+  <p>Identificadores técnicos de fonte:
+    {% for src in technical_sources %}{{ src.id }}={{ src.citation }}{% if not loop.last %}; {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+  <p>
+    Os números abaixo são cópia do snapshot. Este relatório
+    <b>não recalcula regressão</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
+  </p>
+  <div class="frozen-box" id="snapshot-frozen">{% for line in frozen_lines %}{{ line }}
+{% endfor %}</div>
+  <h3>Proveniência (sem caminhos locais nem segredos)</h3>
   <div class="frozen-box">{{ provenance_safe }}</div>
+  </div>
 
   <footer class="report-footer">
     Minuta gerada para revisão profissional — {{ app_name }}.

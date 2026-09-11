@@ -1,0 +1,70 @@
+{
+  "id": "P03",
+  "lote": "MP-PRO-20260911",
+  "title": "Relatório técnico revisável e recomendações coerentes",
+  "BASE_SHA": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "branch": "mp-pro-20260911/p03-relatorio-tecnico",
+  "pr_base": "mp-20260911/integracao-final",
+  "pr_title_prefix": "[MP-PRO-20260911/P03]",
+  "local_class": "IMPLEMENTED_VERIFIED",
+  "integration_class": "PENDING_P01_TRANSPORT",
+  "professional_readiness": "minuta_tecnica_para_revisao — nao_e_laudo_automatico",
+  "implemented": [
+    "render_report/build_report_view leem search.audit.coverage (nao inferem modo por n de linhas nem so por search.mode)",
+    "formula composta deterministicamente de coeficientes canonicos + especificacao; escala de ajuste distinta da estimativa monetaria; nao imprime exp(...) como media",
+    "series fitted/residuals/observed/series_row_ids so plotadas se alinhadas em comprimento/ids/escala; deslocamento de uma linha gera aviso e preserva o calculo",
+    "anexo integral 210+ com cabecalho repetido, numeracao, valores/fontes/justificativas fornecidos, precisao de armazenamento",
+    "trilha tecnica para MP1_*, hashes, job_id; resumo em portugues de avaliacao",
+    "recommend_next_actions reconhece provenance.workflow_context.subject_raw; validacao nao solicitada e acao opcional; nao recomenda excluir dado para R2/grau",
+    "verificador de consistencia PDF vs snapshot (valor, unidade, grau, linha de anexo, equacao)"
+  ],
+  "files_changed": [
+    "modules/results_generator.py",
+    "modules/decision_support.py",
+    "modules/templates/report.html",
+    "modules/report_presenter/__init__.py",
+    "modules/report_presenter/formula.py",
+    "modules/report_presenter/search_coverage.py",
+    "modules/report_presenter/series.py",
+    "modules/report_presenter/verifier.py",
+    "tests/test_results_generator.py",
+    "tests/c08_report/",
+    "tests/c13_decisions/",
+    "tests/pro_workflow/p03/",
+    "docs/campaigns/MP-PRO-20260911/P03/"
+  ],
+  "contracts_consumed": {
+    "MP/1": "ResultSnapshot value/unit/dates/intervals/sample/issues/model/search/next_actions",
+    "search.audit": "coverage.enumeration, exact_optimum_guaranteed, evaluated, possible, mode, budget",
+    "report_context": "used_rows/excluded_rows, fitted_values, residuals, observed_values, series_row_ids, series_scale, series_unit",
+    "MP-PRO/1 optional": "provenance.workflow_context.subject_raw e evaluation_policy"
+  },
+  "contracts_produced": {
+    "render_report": "bytes PDF %PDF; ReportRenderError estruturado; nunca None/vazio como sucesso",
+    "build_report_view": "view-model puro",
+    "recommend_next_actions": "lista com code/priority/reason/next_step/evidence_refs/limitations",
+    "verify_report_consistency": "findings MUTATED_VALUE|MUTATED_UNIT|MUTATED_GRAU|OMITTED_ANNEX_LINE|INCOHERENT_EQUATION"
+  },
+  "tests": {
+    "command": "python3 -m pytest tests/c08_report tests/c13_decisions tests/test_results_generator.py tests/pro_workflow/p03 -q --tb=line",
+    "exit_code": 0,
+    "passed": 54,
+    "failed": 0,
+    "log": "scratch p03_pytest.txt"
+  },
+  "before_after": {
+    "evaluation": "compose_valuation_job BASE_SHA, mercado linear sintetico identificado, subject area=73.5, ponto 735000 BRL",
+    "before": "docs/campaigns/MP-PRO-20260911/P03/evidence/before.pdf",
+    "after": "docs/campaigns/MP-PRO-20260911/P03/evidence/after.pdf",
+    "snapshot": "docs/campaigns/MP-PRO-20260911/P03/evidence/base_sha_snapshot.json",
+    "remaining_editorial_corrections": 11,
+    "hours_saved_invented": false
+  },
+  "p01_handoff": "docs/campaigns/MP-PRO-20260911/P03/handoff.json",
+  "limitations": [
+    "P01 ainda nao transporta provenance.workflow_context, model.formula, series alinhadas nem fonte/justificativa por linha no report_context do BASE_SHA",
+    "next_actions congeladas pelo C10 na avaliacao BASE_SHA ainda refletem o recommend_next_actions antigo; o recálculo P03 ja deixa de emitir incompatible_alternative_comparison sem ponto",
+    "Windows PDF nao verificado",
+    "Nao e laudo automaticamente aprovado"
+  ]
+}

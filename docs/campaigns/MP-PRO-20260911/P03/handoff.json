@@ -1,0 +1,55 @@
+{
+  "from": "P03",
+  "to": "P01",
+  "lote": "MP-PRO-20260911",
+  "additive_only": true,
+  "note": "P03 consome extensoes opcionais com ausencia explicita. Nao ha segundo parser/classificador. Fixtures sinteticas de apresentacao nao contam como integracao.",
+  "needed": [
+    {
+      "field": "provenance.workflow_context",
+      "schema_version": "MP-PRO/1",
+      "shape": {
+        "schema_version": "MP-PRO/1",
+        "subject_raw": {"area": 73.5},
+        "requested_minimum_grade": null,
+        "grade_requirement_status": "not_requested",
+        "selection_scope": "subject_specific",
+        "selection_conditioned_on_subject": true,
+        "limitation_codes": [],
+        "evaluation_policy": {"method": "none", "partitions": null, "groups": null, "seed": 17}
+      },
+      "why": "Sem subject_raw neste caminho, recommend_next_actions ainda emite provide_subject_characteristic quando o item 1 documental esta pendente, mesmo que o avaliando tenha sido enviado ao job.",
+      "acceptance": "Se workflow_context.subject_raw contem as preditoras, nao ha provide_subject_characteristic indiscriminado; unidade ausente e documentacao pendente continuam explicitas."
+    },
+    {
+      "field": "model.formula",
+      "shape": "string derivada da especificacao + coeficientes canonicos, ou ausente",
+      "why": "P03 ja compoe a equacao se os coeficientes existem. Se P01 fornecer formula, ela e usada sem novo ajuste.",
+      "acceptance": "Com formula ou coeficientes, o PDF nao diz pendencia falsa de formula."
+    },
+    {
+      "field": "report_context series",
+      "shape": {
+        "fitted_values": [0.0],
+        "residuals": [0.0],
+        "observed_values": [0.0],
+        "series_row_ids": ["R000000"],
+        "series_scale": "original",
+        "series_unit": "BRL"
+      },
+      "why": "BASE_SHA build_report_context nao leva series. P03 nao inventa graficos.",
+      "acceptance": "Series alinhadas sao plotadas; deslocadas geram aviso e nao sao plotadas."
+    },
+    {
+      "field": "report_context.used_rows source/justification",
+      "shape": {
+        "row_id": "R000000",
+        "source": "planilha de mercado do pedido",
+        "justification": "incluido na amostra efetiva",
+        "values": {"id": "IM-00", "area": 50.0, "preco": 500000.0}
+      },
+      "why": "C10 hoje entrega values; fonte/justificativa ficam ausentes e a minuta declara a ausencia.",
+      "acceptance": "Anexo mostra IDs + valores + fonte/justificativa quando o produtor as fornecer."
+    }
+  ]
+}
