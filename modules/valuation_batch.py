@@ -35,7 +35,10 @@ from modules.pro_workflow.residual_state import (
     LIMITATION_INCOMPLETE,
     LIMITATION_MALFORMED,
     LIMITATION_NO_INTERVALS,
+    STATUS_INCOMPLETE,
+    STATUS_MALFORMED,
     apply_mean_prediction_intervals,
+    declared_residual_status,
     extract_residual_state,
     json_safe_residual_state,
     residual_state_is_complete,
@@ -960,8 +963,19 @@ def builtin_evaluate_fitted(
     k = int(model_state.get("k") or max(0, len(coefficients) - (1 if "const" in coefficients else 0)))
     df = n - k - (1 if "const" in coefficients else 0)
     residual_state = model_state.get("residual_state") or fit.get("residual_state")
-    if not residual_state_is_complete(residual_state):
+    declared = declared_residual_status(residual_state)
+    if declared in {STATUS_INCOMPLETE, STATUS_MALFORMED}:
+        residual_state = json_safe_residual_state(residual_state)
+    elif residual_state_is_complete(residual_state):
+        residual_state = json_safe_residual_state(residual_state)
+    elif fit.get("model_object") is not None and _is_inprocess_model(fit.get("model_object")):
         residual_state = json_safe_residual_state(extract_residual_state(fit))
+    else:
+        residual_state = json_safe_residual_state(
+            residual_state
+            if isinstance(residual_state, Mapping)
+            else {"schema_version": "MP-PRO/1", "status": STATUS_INCOMPLETE}
+        )
     interval_block = apply_mean_prediction_intervals(
         row_values, residual_state, point_transformed=point_t
     )

@@ -869,7 +869,12 @@ async def get_job_artifact(job_id: str, name: str):
             "artifact not found",
             [make_issue("ARTIFACT_NOT_FOUND", f"{safe} is not available", origin="c10.api")],
         )
-    media = "application/pdf" if safe.endswith(".pdf") else "application/json"
+    if safe.endswith(".pdf"):
+        media = "application/pdf"
+    elif safe.endswith(".zip"):
+        media = "application/zip"
+    else:
+        media = "application/json"
     return Response(content=data, media_type=media)
 
 

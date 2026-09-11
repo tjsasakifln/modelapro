@@ -186,20 +186,27 @@ def test_p01_a02_new_process_two_subjects_match_individual(tmp_path):
 
 def test_p01_a02_malformed_and_incomplete_do_not_fabricate_precision():
     _frame, _prep, _fit, frozen = _fit_identity()
+    order = list(frozen["model_state"]["feature_order"])
+    identity = [[1.0 if i == j else 0.0 for j in range(len(order))] for i in range(len(order))]
     malformed = copy.deepcopy(frozen)
-    malformed["model_state"]["xtx_inv"] = [[1.0, 0.0], [0.0, 1.0]]  # wrong order
-    malformed["model_state"]["residual_state"]["xtx_inv"] = [[1.0, 0.0], [0.0, 1.0]]
+    # Same order as the fit: a 3x3 identity is a usable matrix, not an order mismatch.
+    malformed["model_state"]["xtx_inv"] = identity
+    malformed["model_state"]["residual_state"]["xtx_inv"] = identity
     malformed["model_state"]["residual_state"]["status"] = "malformed"
-    malformed["model_state"]["residual_state"]["feature_order"] = ["const", "area", "bairro_Sul"]
+    malformed["model_state"]["residual_state"]["feature_order"] = order
     malformed["residual_state"] = malformed["model_state"]["residual_state"]
     design = _design(100.0, 1.0, "Sul")
-    got = builtin_evaluate_fitted(restore_candidate_fit(malformed), design, documented_request_spec())
+    restored = restore_candidate_fit(malformed)
+    rebuilt = extract_residual_state(restored)
+    assert rebuilt.get("status") == "malformed"
+    got = builtin_evaluate_fitted(restored, design, documented_request_spec())
     assert got["value"]["point"] is not None
     assert got["value"]["mean_ci80"] is None
     assert got["value"]["prediction_interval"] is None
     assert got["value"]["admissible_interval"] is None
-    codes = [i.get("code") for i in got["issues"]] + list((got.get("statistical") or {}).get("limitations") or [])
-    assert any("residual_state" in str(c) or "interval" in str(c) for c in codes)
+    assert (got.get("statistical") or {}).get("residual_state_status") == "malformed"
+    limitations = list((got.get("statistical") or {}).get("limitations") or [])
+    assert "residual_state_malformed" in limitations or "statistical_intervals_unavailable" in limitations
 
     incomplete = copy.deepcopy(frozen)
     incomplete["model_state"]["xtx_inv"] = None
@@ -219,34 +226,136 @@ def test_p01_a02_malformed_and_incomplete_do_not_fabricate_precision():
         assert got2["value"]["mean_ci80"] is None
 
 
-def test_p01_a02_http_revision_roundtrip(isolated_p01_runtime):
-    from fastapi.testclient import TestClient
-    from backend.api import app
+HTTP_PROC1 = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from fastapi.testclient import TestClient
+from backend.api import app, bind_runtime, reset_runtime
+from modules.job_store import JobStore
+from modules.local_task_runner import LocalTaskRunner
+from modules.project_store import ProjectStore
+from modules.result_contract import dumps_strict
+from modules.websocket_notifier import WebSocketNotifier
+
+repo, root, frozen_path, meta_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+reset_runtime()
+JobStore.reset_default()
+WebSocketNotifier().reset_connections()
+store = JobStore.configure_default(root, recover_abandoned=True)
+projects = ProjectStore(store.root)
+runner = LocalTaskRunner(store, max_workers=1, recover_abandoned=False)
+bind_runtime(job_store=store, project_store=projects, task_runner=runner, reset_submissions=True)
+frozen = json.loads(open(frozen_path, encoding="utf-8").read())
+client = TestClient(app)
+saved = client.post(
+    "/projects/p01-a02/revisions",
+    content=dumps_strict(frozen),
+    headers={"Content-Type": "application/json"},
+)
+assert saved.status_code == 201, saved.text
+open(meta_path, "w", encoding="utf-8").write(json.dumps({"revision_id": saved.json()["revision_id"]}))
+runner.shutdown(wait=True)
+reset_runtime()
+JobStore.reset_default()
+print("proc1-ok")
+"""
+
+HTTP_PROC2 = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from fastapi.testclient import TestClient
+from backend.api import app, bind_runtime, reset_runtime
+from modules.job_store import JobStore
+from modules.local_task_runner import LocalTaskRunner
+from modules.project_store import ProjectStore
+from modules.valuation_batch import builtin_evaluate_fitted, restore_candidate_fit
+from modules.websocket_notifier import WebSocketNotifier
+
+repo, root, meta_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+reset_runtime()
+JobStore.reset_default()
+WebSocketNotifier().reset_connections()
+store = JobStore.configure_default(root, recover_abandoned=True)
+projects = ProjectStore(store.root)
+runner = LocalTaskRunner(store, max_workers=1, recover_abandoned=False)
+bind_runtime(job_store=store, project_store=projects, task_runner=runner, reset_submissions=True)
+client = TestClient(app)
+loaded = client.get("/projects/p01-a02")
+assert loaded.status_code == 200, loaded.text
+frozen = loaded.json()["revision"]
+assert frozen["model_state"]["residual_std"] is not None
+assert frozen["model_state"]["xtx_inv"] is not None
+restored = restore_candidate_fit(frozen)
+subjects = [
+    {"subject_id": "s-centro", "X": {"const": 1.0, "area": 90.0, "bairro_Sul": 0.0}, "raw_values": {"area": 90.0, "bairro": "Centro"}},
+    {"subject_id": "s-sul", "X": {"const": 1.0, "area": 140.0, "bairro_Sul": 1.0}, "raw_values": {"area": 140.0, "bairro": "Sul"}},
+]
+items = []
+for sub in subjects:
+    got = builtin_evaluate_fitted(
+        restored,
+        {"subject_id": sub["subject_id"], "raw_values": sub["raw_values"], "X": sub["X"], "supported": True, "issues": []},
+        frozen["request_spec"],
+    )
+    items.append({
+        "subject_id": sub["subject_id"],
+        "point": (got.get("value") or {}).get("point"),
+        "mean_ci80": (got.get("value") or {}).get("mean_ci80"),
+        "prediction_interval": (got.get("value") or {}).get("prediction_interval"),
+        "admissible_interval": (got.get("value") or {}).get("admissible_interval"),
+    })
+open(out_path, "w", encoding="utf-8").write(json.dumps({"items": items, "revision_id": frozen.get("revision_id")}))
+runner.shutdown(wait=True)
+reset_runtime()
+print("proc2-ok")
+"""
+
+
+def test_p01_a02_http_revision_roundtrip_fresh_process(tmp_path):
     from modules.result_contract import dumps_strict
 
-    _frame, _prep, _fit, frozen = _fit_identity()
+    _frame, _prep, fit, frozen = _fit_identity()
     dumps_strict(frozen)
-    client = TestClient(app)
-    saved = client.post(
-        "/projects/p01-a02/revisions",
-        content=dumps_strict(frozen),
-        headers={"Content-Type": "application/json"},
+    live = [
+        builtin_evaluate_fitted(
+            restore_candidate_fit(frozen),
+            d,
+            documented_request_spec(),
+        )
+        for d in (_design(90.0, 0.0, "Centro"), _design(140.0, 1.0, "Sul"))
+    ]
+    repo = str(Path(__file__).resolve().parents[3])
+    root = tmp_path / "http-store"
+    root.mkdir()
+    frozen_path = tmp_path / "frozen.json"
+    meta_path = tmp_path / "meta.json"
+    out_path = tmp_path / "proc2.json"
+    frozen_path.write_text(dumps_strict(frozen), encoding="utf-8")
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    p1 = subprocess.run(
+        [sys.executable, "-c", HTTP_PROC1, repo, str(root), str(frozen_path), str(meta_path)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    assert saved.status_code == 201, saved.text
-    revision_id = saved.json()["revision_id"]
-    loaded = client.get("/projects/p01-a02")
-    assert loaded.status_code == 200, loaded.text
-    body = loaded.json()["revision"]
-    assert body["model_state"]["residual_std"] is not None
-    assert body["model_state"]["xtx_inv"] is not None
-    recovered = body
-    restored = restore_candidate_fit(recovered)
-    for design in (_design(90.0, 0.0, "Centro"), _design(140.0, 1.0, "Sul")):
-        got = builtin_evaluate_fitted(restored, design, documented_request_spec())
-        assert got["value"]["point"] is not None
-        assert got["value"]["mean_ci80"] is not None
-        assert got["value"]["prediction_interval"] is not None
-    assert revision_id
+    (SCRATCH / "p01-a02-proc1.log").write_text(p1.stdout + "\n" + p1.stderr, encoding="utf-8")
+    assert p1.returncode == 0, p1.stderr + p1.stdout
+    p2 = subprocess.run(
+        [sys.executable, "-c", HTTP_PROC2, repo, str(root), str(meta_path), str(out_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    (SCRATCH / "p01-a02-proc2.log").write_text(p2.stdout + "\n" + p2.stderr, encoding="utf-8")
+    assert p2.returncode == 0, p2.stderr + p2.stdout
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert len(payload["items"]) == 2
+    for item, ind in zip(payload["items"], live):
+        assert _close(item["point"], ind["value"]["point"])
+        assert _close(item["mean_ci80"]["lower"], ind["value"]["mean_ci80"]["lower"])
+        assert _close(item["mean_ci80"]["upper"], ind["value"]["mean_ci80"]["upper"])
+        assert _close(item["prediction_interval"]["lower"], ind["value"]["prediction_interval"]["lower"])
+        assert item["admissible_interval"] is not None or ind["value"]["admissible_interval"] is None
 
 
 def test_p01_a02_log_target_keeps_estimand_no_monetary_mean_ci():

@@ -42,6 +42,7 @@ from modules.pro_workflow.residual_state import (
     extract_residual_state,
     json_safe_residual_state,
     residual_state_is_complete,
+    subject_x_from_design,
 )
 from modules.pro_workflow.workflow_context import build_workflow_context
 from modules.results import adapt_validation_result
@@ -523,6 +524,10 @@ def build_frozen_project(
         _get(winner_fit, "encoder_state")
     ) or {}
     residual_state = json_safe_residual_state(extract_residual_state(winner_fit))
+    subject_x = subject_x_from_design(subject_design, residual_state.get("feature_order") or [])
+    if subject_x is not None:
+        residual_state["subject_x"] = subject_x
+        residual_state = json_safe_residual_state(residual_state)
     diagnostics = _as_dict(_get(winner_fit, "diagnostics")) or {}
     feature_order = list(
         residual_state.get("feature_order")

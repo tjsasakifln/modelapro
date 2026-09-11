@@ -17,9 +17,11 @@ from .residual_state import (
     XTX_INV_KIND_COVARIANCE,
     XTX_INV_KIND_NORMALIZED,
     apply_mean_prediction_intervals,
+    declared_residual_status,
     extract_residual_state,
     json_safe_residual_state,
     residual_state_is_complete,
+    subject_x_from_design,
 )
 from .workflow_context import build_workflow_context
 
