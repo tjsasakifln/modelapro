@@ -3,6 +3,8 @@
 Campaign: `C10`
 Branch: `mp-20260911/c10-api_pipeline_contrato`
 Base SHA: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`
+Implementation SHA: `8581d67ff951c516cc9f671209fb758833e1195b`
+PR: https://github.com/tjsasakifln/modelapro/pull/14
 Contract: `MP/1`
 
 Synthetic fixtures only. No client PDFs, tokens, or real market spreadsheets.
