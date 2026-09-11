@@ -4,6 +4,7 @@ Campanha: **C07**
 Lote: **MP-20260911**  
 Contrato: **MP/1**  
 Base de referência: `c92949e4db8c559c6b02ef58b7df90d6cf01e7ed`  
+Implementação: `b1a574592fa8c594d8a0c8e3e2b6a737914b24be`  
 Branch: `mp-20260911/c07-validacao_estabilidade`
 
 ## Achados F05 / F06 no HEAD de referência

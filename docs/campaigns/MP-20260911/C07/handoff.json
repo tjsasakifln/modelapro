@@ -3,7 +3,7 @@
   "consumers": ["C05", "C08", "C09", "C10", "C13"],
   "contract_version": "MP/1",
   "dependency_pr": null,
-  "head_sha": null,
+  "head_sha": "b1a574592fa8c594d8a0c8e3e2b6a737914b24be",
   "exported_interface": {
     "modules.model_evaluation.evaluate_procedure": {
       "signature": "evaluate_procedure(input_bundle, request_spec, fit_select_predictor, seed, *, progress_callback=None, cancel_requested=None, revisions=None) -> EvaluationResult",
