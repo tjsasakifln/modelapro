@@ -35,7 +35,7 @@
     {
       "command": "python3 -m pytest tests/c13_decisions/ -q",
       "exit_code": 0,
-      "detail": "12 passed; Python 3.12.3; pytest 9.1.1"
+      "detail": "15 passed; Python 3.12.3; pytest 9.1.1"
     },
     {
       "command": "python3 -c 'from modules.decision_support import recommend_next_actions; ...' (launch 1)",
@@ -65,6 +65,10 @@
     {
       "severity": "info",
       "finding": "Aliases de issue.code são documentados no handoff; um literal inédito só gera ação se o campo estrutural correspondente estiver preenchido."
+    },
+    {
+      "severity": "info",
+      "finding": "Revisão independente: A01 com lista completa da Tabela 1 (item 1 com 3(k+1) antes do item 2) e A05 com dois grupos de identidade. Ambos corrigidos; testes de regressão adicionados."
     }
   ]
 }

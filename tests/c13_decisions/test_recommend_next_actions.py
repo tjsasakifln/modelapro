@@ -569,3 +569,135 @@ def test_original_issues_are_referenced_not_dropped():
     imputed = next(a for a in actions if a["code"] == CODE_IMPUTED_PRICE)
     assert "r9" in str(imputed["evidence_refs"])
     assert "IMPUTED_TARGET" in str(imputed["evidence_refs"])
+
+
+def test_c13_a01_complete_tabela1_list_still_uses_item2_six_k_plus_1():
+    k, n = 4, 26
+    expected_deficit = 6 * (k + 1) - n
+    snapshot = {
+        "schema_version": "MP/1",
+        "reference_date": "2024-06-01",
+        "sample": {"used": n},
+        "model": {"k": k},
+        "issues": [
+            {
+                "code": "SAMPLE_INSUFFICIENT",
+                "severity": "warning",
+                "origin": "validation",
+                "message": "Suporte amostral insuficiente",
+                "affected_ids": ["item_2"],
+                "evidence": {},
+            }
+        ],
+        "validation": {
+            "fundamentacao": {
+                "items": [
+                    {"item": 1, "evidence_status": "verified", "rule": "3(k+1)"},
+                    {
+                        "item": 2,
+                        "evidence_status": "verified",
+                        "calculation": {"n": n, "k": k, "rule": "6(k+1)"},
+                    },
+                    {
+                        "item": 3,
+                        "evidence_status": "verified",
+                        "calculation": {"formula": "identificação documental"},
+                    },
+                ]
+            }
+        },
+    }
+    actions = recommend_next_actions(snapshot)
+    sample_actions = [a for a in actions if a["code"] == CODE_SAMPLE]
+    assert len(sample_actions) == 1
+    text = _blob(sample_actions[0])
+    assert str(expected_deficit) in text
+    assert "este item" in text.lower()
+    assert "grau global" in text.lower()
+
+
+def test_c13_a01_items_as_mapping_and_declared_rule_is_not_a_deficit():
+    k, n = 4, 26
+    expected_deficit = 6 * (k + 1) - n
+    mapped = {
+        "schema_version": "MP/1",
+        "reference_date": "2024-06-01",
+        "sample": {"used": n},
+        "model": {"k": k},
+        "validation": {
+            "fundamentacao": {
+                "items": {
+                    "1": {"evidence_status": "verified", "rule": "3(k+1)"},
+                    "2": {
+                        "evidence_status": "verified",
+                        "calculation": {"n": n, "k": k, "rule": "6(k+1)"},
+                    },
+                }
+            }
+        },
+    }
+    actions = recommend_next_actions(mapped)
+    sample = next(a for a in actions if a["code"] == CODE_SAMPLE)
+    assert str(expected_deficit) in sample["reason"]
+
+    declared = {
+        "schema_version": "MP/1",
+        "sample": {"used": n},
+        "model": {"k": k},
+        "validation": {
+            "fundamentacao": {
+                "items": [
+                    {
+                        "item": 2,
+                        "evidence_status": "declared",
+                        "calculation": {"n": n, "k": k, "rule": "6(k+1)"},
+                    }
+                ]
+            }
+        },
+    }
+    declared_actions = recommend_next_actions(declared)
+    sample_declared = [a for a in declared_actions if a["code"] == CODE_SAMPLE]
+    assert sample_declared == []
+    assert f"Déficit de {expected_deficit}" not in _all_text(declared_actions)
+
+
+def test_c13_a05_two_identity_groups_are_incompatible_not_one_sensitivity():
+    snapshot = _base_snapshot(
+        alternatives=[
+            {
+                "candidate_id": "a1",
+                "value": {"point": 100000.0},
+                "target": {"unit": "BRL", "estimand": "mean"},
+                "reference_date": "2024-06-01",
+            },
+            {
+                "candidate_id": "a2",
+                "value": {"point": 118000.0},
+                "target": {"unit": "BRL", "estimand": "mean"},
+                "reference_date": "2024-06-01",
+            },
+            {
+                "candidate_id": "b1",
+                "value": {"point": 8000.0},
+                "target": {"unit": "BRL/m2", "estimand": "mean"},
+                "reference_date": "2024-06-01",
+            },
+            {
+                "candidate_id": "b2",
+                "value": {"point": 9000.0},
+                "target": {"unit": "BRL/m2", "estimand": "mean"},
+                "reference_date": "2024-06-01",
+            },
+        ]
+    )
+    actions = recommend_next_actions(snapshot)
+    codes = [a["code"] for a in actions]
+    assert CODE_INCOMPATIBLE_ALT in codes
+    assert CODE_SENSITIVITY not in codes
+    incompat = next(a for a in actions if a["code"] == CODE_INCOMPATIBLE_ALT)
+    text = _blob(incompat)
+    assert "100000" not in text
+    assert "118000" not in text
+    assert "8000" not in text
+    assert "9000" not in text

@@ -24,7 +24,7 @@ Déficit amostral é `requirement - n` somente quando `n`, `k` e a regra verific
 
 ```
 python3 -m pytest tests/c13_decisions/ -q
-# 12 passed, exit 0
+# 15 passed, exit 0
 # Python 3.12.3 / pytest 9.1.1
 ```
 

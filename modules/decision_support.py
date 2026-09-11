@@ -339,14 +339,25 @@ def _iter_fundamentacao_items(snapshot: Mapping[str, Any]) -> Iterable[Mapping[s
     fund = _mapping(_validation(snapshot).get("fundamentacao"))
     items = fund.get("items")
     if isinstance(items, Mapping):
-        values: Iterable[Any] = items.values()
-    elif isinstance(items, list):
-        values = items
-    else:
-        values = ()
-    for item in values:
-        if isinstance(item, Mapping):
-            yield item
+        for key, item in items.items():
+            if not isinstance(item, Mapping):
+                continue
+            if item.get("item") is None:
+                enriched = dict(item)
+                try:
+                    enriched["item"] = int(key)
+                except (TypeError, ValueError):
+                    enriched["item"] = key
+                if not enriched.get("id"):
+                    enriched["id"] = key
+                yield enriched
+            else:
+                yield item
+        return
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, Mapping):
+                yield item
 
 
 def _status_in(value: Any, bucket: Mapping[str, Any] | frozenset) -> bool:
@@ -374,15 +385,69 @@ def _is_declared(node: Mapping[str, Any]) -> bool:
     return False
 
 
-def _requirement_from_rule(rule: Any, k: Optional[int]) -> Optional[int]:
-    if k is None or rule is None:
+def _rule_text(rule: Any) -> Optional[str]:
+    if rule is None:
         return None
     if isinstance(rule, Mapping):
-        rule = rule.get("expression") or rule.get("formula") or rule.get("text") or rule.get("rule")
-    match = _K_PLUS_1_RULE.search(str(rule))
-    if not match:
+        rule = (
+            rule.get("expression")
+            or rule.get("formula")
+            or rule.get("text")
+            or rule.get("rule")
+        )
+    if rule is None:
         return None
-    return int(match.group("coeff")) * (k + 1)
+    return str(rule)
+
+
+def _parse_k_plus_1_requirements(rule: Any, k: Optional[int]) -> List[Dict[str, Any]]:
+    if k is None:
+        return []
+    text = _rule_text(rule)
+    if not text:
+        return []
+    found: List[Dict[str, Any]] = []
+    seen = set()
+    for match in _K_PLUS_1_RULE.finditer(text):
+        coeff = int(match.group("coeff"))
+        requirement = coeff * (k + 1)
+        label = match.group(0).replace(" ", "")
+        key = (coeff, requirement)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append({"coeff": coeff, "requirement": requirement, "label": label})
+    return found
+
+
+def _choose_unmet_requirement(
+    parsed: Sequence[Mapping[str, Any]],
+    n: Optional[int],
+) -> Optional[Dict[str, Any]]:
+    if n is None or not parsed:
+        return None
+    unmet = [row for row in parsed if int(row["requirement"]) - n > 0]
+    if not unmet:
+        return None
+    return max(unmet, key=lambda row: int(row["coeff"]))
+
+
+def _fold_status(value: Any) -> str:
+    text = _norm_code(value)
+    return text.translate(str.maketrans("áàâãäéêíóôõúüç", "aaaaaeeiooouuc"))
+
+
+def _is_sample_quantity_item(item: Mapping[str, Any]) -> bool:
+    ident = item.get("item")
+    if ident in (2, "2", "item_2", "item2"):
+        return True
+    blob = " ".join(
+        str(item.get(key) or "") for key in ("id", "description", "name", "title")
+    ).lower()
+    return any(
+        token in blob
+        for token in ("quantidade", "amostra", "dados de mercado", "item_2", "item2")
+    )
 
 
 def _extract_n(snapshot: Mapping[str, Any], calc: Mapping[str, Any]) -> Optional[int]:
@@ -416,22 +481,65 @@ def _extract_k(snapshot: Mapping[str, Any], calc: Mapping[str, Any]) -> Optional
     return None
 
 
-def _first_verified_rule(
+def _candidate_from_node(
     snapshot: Mapping[str, Any],
-) -> Tuple[Optional[Any], Optional[Mapping[str, Any]], Mapping[str, Any]]:
+    node: Mapping[str, Any],
+    calc: Mapping[str, Any],
+    rule: Any,
+    *,
+    treat_as_sample: bool,
+    source_kind: str,
+) -> Optional[Dict[str, Any]]:
+    if not treat_as_sample:
+        return None
+    n = _extract_n(snapshot, calc)
+    k = _extract_k(snapshot, calc)
+    parsed = _parse_k_plus_1_requirements(rule, k)
+    if n is None or k is None or not parsed:
+        return None
+    chosen = _choose_unmet_requirement(parsed, n)
+    if chosen is None:
+        return None
+    return {
+        "node": node,
+        "calc": calc,
+        "rule_label": chosen["label"],
+        "n": n,
+        "k": k,
+        "requirement": int(chosen["requirement"]),
+        "deficit": int(chosen["requirement"]) - n,
+        "is_item2": _is_sample_quantity_item(node),
+        "source_kind": source_kind,
+    }
+
+
+def _collect_unmet_sample_candidates(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
     for item in _iter_fundamentacao_items(snapshot):
         if not _is_verified(item):
             continue
         calc = item.get("calculation") if isinstance(item.get("calculation"), Mapping) else {}
         rule = calc.get("rule") or calc.get("formula") or item.get("rule")
-        if rule is None:
-            continue
-        return rule, item, calc
+        ident = item.get("item")
+        treat = _is_sample_quantity_item(item) or ident in (None, 2, "2")
+        found = _candidate_from_node(
+            snapshot, item, calc, rule, treat_as_sample=treat, source_kind="item"
+        )
+        if found:
+            candidates.append(found)
     statistical = _mapping(_validation(snapshot).get("statistical"))
     if _is_verified(statistical):
         rule = statistical.get("rule") or statistical.get("sample_rule")
-        if rule is not None:
-            return rule, statistical, statistical
+        found = _candidate_from_node(
+            snapshot,
+            statistical,
+            statistical,
+            rule,
+            treat_as_sample=True,
+            source_kind="statistical",
+        )
+        if found:
+            candidates.append(found)
     for issue in _issues(snapshot):
         evidence = issue.get("evidence") if isinstance(issue.get("evidence"), Mapping) else {}
         if not evidence:
@@ -439,109 +547,135 @@ def _first_verified_rule(
         if not (_is_verified(evidence) or _is_verified(issue)):
             continue
         rule = evidence.get("rule") or evidence.get("formula")
-        if rule is not None:
-            return rule, issue, evidence
-    return None, None, {}
-
-
-def _sample_support_action(
-    snapshot: Mapping[str, Any],
-    extra_refs: Optional[Sequence[Any]] = None,
-) -> Dict[str, Any]:
-    rule, source, calc = _first_verified_rule(snapshot)
-    n = _extract_n(snapshot, calc)
-    k = _extract_k(snapshot, calc)
-    requirement = _requirement_from_rule(rule, k)
-    refs: List[Any] = list(extra_refs or [])
-    if source is not None and source.get("kind") != "issue" and "code" not in source:
-        refs.append(_item_ref(source, "validation.fundamentacao.items"))
-    elif source is not None and source.get("code"):
-        refs.append(_issue_ref(source))
-
-    can_count = (
-        n is not None
-        and k is not None
-        and rule is not None
-        and requirement is not None
-    )
-    if can_count:
-        deficit = requirement - n
-        if deficit > 0:
-            rule_label = str(rule).replace(" ", "")
-            reason = (
-                f"Déficit de {deficit} para este item "
-                f"(n={n}, k={k}, requisito {rule_label}={requirement}). "
-                "Este déficit refere-se somente a este item e não garante o grau global "
-                "de fundamentação."
-            )
-            next_step = (
-                "Ampliar a amostra com dados de mercado comparáveis e verificáveis "
-                "para este item. Não adicionar registros aleatórios. Dados futuros "
-                "podem alterar o ajuste, o suporte amostral e os demais itens."
-            )
-            limitations = [
-                "O déficit numérico vale apenas para este item com a n, k e regra "
-                "verificada atualmente disponíveis.",
-                "Não garante o grau global de fundamentação nem a prontidão de emissão.",
-                _LIMIT_NO_PERCENT,
-            ]
-            return _action(
-                CODE_IMPROVE_SAMPLE_SUPPORT,
-                P_SAMPLE,
-                reason,
-                next_step,
-                refs,
-                limitations,
-            )
-        # Regra verificada já atendida: não inventar ação de suporte.
-        return _action(
-            CODE_IMPROVE_SAMPLE_SUPPORT,
-            P_SAMPLE,
-            "Suporte amostral sinalizado, mas a regra verificada já está atendida para este item.",
-            "Conferir se o aviso original permanece pertinente após a regra verificada.",
-            refs,
-            ["A regra verificada não indica déficit para este item."],
+        found = _candidate_from_node(
+            snapshot, issue, evidence, rule, treat_as_sample=True, source_kind="issue"
         )
+        if found:
+            candidates.append(found)
+    return candidates
 
+
+def _pick_sample_candidate(candidates: Sequence[Mapping[str, Any]]) -> Optional[Mapping[str, Any]]:
+    if not candidates:
+        return None
+    item2 = [row for row in candidates if row.get("is_item2")]
+    pool: Sequence[Mapping[str, Any]] = item2 or candidates
+    return max(pool, key=lambda row: int(row["deficit"]))
+
+
+def _refs_for_sample_candidate(
+    candidate: Mapping[str, Any],
+    extra_refs: Optional[Sequence[Any]] = None,
+) -> List[Any]:
+    refs: List[Any] = list(extra_refs or [])
+    node = candidate.get("node")
+    if not isinstance(node, Mapping):
+        return refs
+    if candidate.get("source_kind") == "issue" or node.get("code"):
+        refs.append(_issue_ref(node))
+    elif candidate.get("source_kind") == "statistical":
+        refs.append(
+            {
+                "kind": "field",
+                "path": "validation.statistical",
+                "rule": candidate.get("rule_label"),
+            }
+        )
+    else:
+        refs.append(_item_ref(node, "validation.fundamentacao.items"))
+    return refs
+
+
+def _sample_support_from_numbers(
+    n: int,
+    k: int,
+    rule_label: str,
+    requirement: int,
+    deficit: int,
+    refs: Sequence[Any],
+) -> Dict[str, Any]:
     reason = (
-        "O suporte amostral está pendente, mas n, k e a regra quantitativa "
-        "verificada não estão todos disponíveis para calcular o déficit."
+        f"Déficit de {deficit} para este item "
+        f"(n={n}, k={k}, requisito {rule_label}={requirement}). "
+        "Este déficit refere-se somente a este item e não garante o grau global "
+        "de fundamentação."
     )
     next_step = (
-        "Conferir n efetivo, k do modelo e a regra quantitativa já verificada "
-        "antes de projetar quantidade a complementar. Não incluir observações sintéticas sem lastro de mercado."
+        "Ampliar a amostra com dados de mercado comparáveis e verificáveis "
+        "para este item. Não adicionar registros aleatórios. Dados futuros "
+        "podem alterar o ajuste, o suporte amostral e os demais itens."
     )
+    limitations = [
+        "O déficit numérico vale apenas para este item com a n, k e regra "
+        "verificada atualmente disponíveis.",
+        "Não garante o grau global de fundamentação nem a prontidão de emissão.",
+        _LIMIT_NO_PERCENT,
+    ]
     return _action(
         CODE_IMPROVE_SAMPLE_SUPPORT,
         P_SAMPLE,
         reason,
         next_step,
         refs,
+        limitations,
+    )
+
+
+def _sample_support_limitation(refs: Sequence[Any]) -> Dict[str, Any]:
+    return _action(
+        CODE_IMPROVE_SAMPLE_SUPPORT,
+        P_SAMPLE,
+        "O suporte amostral está pendente, mas n, k e a regra quantitativa "
+        "verificada não estão todos disponíveis para calcular o déficit.",
+        "Conferir n efetivo, k do modelo e a regra quantitativa já verificada "
+        "antes de projetar quantidade a complementar. Não incluir observações "
+        "sintéticas sem lastro de mercado.",
+        refs,
         [_LIMIT_NO_DEFICIT, _LIMIT_NO_PERCENT],
     )
 
 
+def _sample_support_action(
+    snapshot: Mapping[str, Any],
+    extra_refs: Optional[Sequence[Any]] = None,
+) -> Dict[str, Any]:
+    candidate = _pick_sample_candidate(_collect_unmet_sample_candidates(snapshot))
+    refs = _refs_for_sample_candidate(candidate, extra_refs) if candidate else list(extra_refs or [])
+    if candidate:
+        return _sample_support_from_numbers(
+            int(candidate["n"]),
+            int(candidate["k"]),
+            str(candidate["rule_label"]),
+            int(candidate["requirement"]),
+            int(candidate["deficit"]),
+            refs,
+        )
+    return _sample_support_limitation(refs)
+
+
 def _actions_from_sample_rule(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    rule, source, calc = _first_verified_rule(snapshot)
-    if rule is None:
+    candidate = _pick_sample_candidate(_collect_unmet_sample_candidates(snapshot))
+    if not candidate:
         return []
-    n = _extract_n(snapshot, calc)
-    k = _extract_k(snapshot, calc)
-    requirement = _requirement_from_rule(rule, k)
-    if n is None or k is None or requirement is None:
-        return []
-    if requirement - n <= 0:
-        return []
-    return [_sample_support_action(snapshot)]
+    return [
+        _sample_support_from_numbers(
+            int(candidate["n"]),
+            int(candidate["k"]),
+            str(candidate["rule_label"]),
+            int(candidate["requirement"]),
+            int(candidate["deficit"]),
+            _refs_for_sample_candidate(candidate),
+        )
+    ]
 
 
 def _actions_from_precision(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]:
     precisao = _mapping(_validation(snapshot).get("precisao"))
     if not precisao:
         return []
-    status = _norm_code(precisao.get("status"))
+    status = _fold_status(precisao.get("status"))
     refs = [{"kind": "field", "path": "validation.precisao", "status": precisao.get("status")}]
-    if status in {"not_computed", "error"}:
+    if status in {"not_computed", "error", "nao_calculado"}:
         tmpl = _TEMPLATE_BY_CODE[CODE_PRECISION_NOT_COMPUTED]
         return [
             _action(
@@ -865,6 +999,9 @@ def _actions_from_alternatives(snapshot: Mapping[str, Any]) -> List[Dict[str, An
                 ],
             )
         )
+        # O conjunto não é comparável: não emitir sensibilidade numérica
+        # (evita fundir grupos com unidade/data/estimand distintos).
+        return out
 
     grouped: Dict[Tuple[Any, Any, Any], List[float]] = defaultdict(list)
     grouped_refs: Dict[Tuple[Any, Any, Any], List[Any]] = defaultdict(list)
@@ -964,10 +1101,6 @@ def _consolidate(drafts: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     index: Dict[str, int] = {}
     for draft in drafts:
         code = str(draft["code"])
-        if code == CODE_IMPROVE_SAMPLE_SUPPORT:
-            # Ação "já atendida" só existe para consolidar aviso; se houver
-            # déficit real, a consolidação abaixo prefere o texto com número.
-            pass
         if code not in index:
             index[code] = len(ordered)
             ordered.append(
@@ -990,19 +1123,7 @@ def _consolidate(drafts: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
         if _reason_rank(draft) > _reason_rank(current):
             current["reason"] = draft["reason"]
             current["next_step"] = draft["next_step"]
-
-    # Não manter ação de suporte amostral se o texto indicar regra já atendida
-    # e não houver déficit — evita ruído quando só a regra verificada foi lida.
-    cleaned: List[Dict[str, Any]] = []
-    for row in ordered:
-        if (
-            row["code"] == CODE_IMPROVE_SAMPLE_SUPPORT
-            and "já está atendida" in row["reason"]
-            and not re.search(r"Déficit de \d+", row["reason"])
-        ):
-            continue
-        cleaned.append(row)
-    return cleaned
+    return ordered
 
 
 _TEMPLATE_BY_CODE: Dict[str, Dict[str, Any]] = {
