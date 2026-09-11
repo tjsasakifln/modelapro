@@ -1,0 +1,1 @@
+# C02 schema/encoder tests. Fixtures here are synthetic MP/1 InputBundles, not C01.
