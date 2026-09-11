@@ -171,8 +171,9 @@ class TestE2EUiStreamlit:
                         refresh.first.click()
                     page.wait_for_timeout(2000)
                 page.screenshot(path=str(screenshot), full_page=True)
-                Path("/tmp/grok-goal-4e0bf2a8f829/implementer/ui_body.txt").write_text(body, encoding="utf-8")
-                shutil.copy2(tmp_path / "api.log", "/tmp/grok-goal-4e0bf2a8f829/implementer/ui_api.log")
+                (tmp_path / "ui_body.txt").write_text(body, encoding="utf-8")
+                _copy_evidence(tmp_path / "ui_body.txt", "ui_body.txt")
+                _copy_evidence(tmp_path / "api.log", "ui_api.log")
                 assert "Cálculo concluído" in body, (
                     "UI did not reach a completed calculation; body=" + body[:2000]
                 )
