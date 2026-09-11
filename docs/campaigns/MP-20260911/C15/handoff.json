@@ -8,7 +8,7 @@
       "required_callsite": "backend/api.py CORSMiddleware allow_origins=[\"*\"] — replace with list(config.CORS_ORIGINS). API_HOST is already consumed by uvicorn.run.",
       "acceptance_case": "With default env, API binds 127.0.0.1 and CORS is the explicit localhost list, never '*'. Invalid CORS_ORIGINS='*' raises ValueError at config load.",
       "dependency_pr": null,
-      "head_sha": "f4655bf38cc74b745d189a0a01ee52159e27bdde"
+      "head_sha": "b8941e6b3300896767e2882b8bf9b1c373281255"
     },
     {
       "consumer": "C11",
@@ -16,7 +16,7 @@
       "required_callsite": "modules/job_store.py, modules/project_store.py, modules/local_task_runner.py — read these keys instead of inventing parallel env names.",
       "acceptance_case": "Empty DATA_DIR / MAX_CONCURRENT_JOBS=0 / LOCAL_AUTH_TOKEN=changeme raise ValueError. Redis server is not required.",
       "dependency_pr": null,
-      "head_sha": "f4655bf38cc74b745d189a0a01ee52159e27bdde"
+      "head_sha": "b8941e6b3300896767e2882b8bf9b1c373281255"
     },
     {
       "consumer": "C09",
@@ -24,7 +24,7 @@
       "required_callsite": "frontend/app.py imports (`from components.layout import ...`). Optional: also accept `from frontend.components` for non-Streamlit importers.",
       "acceptance_case": "After wheel install, `streamlit run` of the packaged app.py loads CSS from frontend/assets/styles.css without checkout sys.path.",
       "dependency_pr": null,
-      "head_sha": "f4655bf38cc74b745d189a0a01ee52159e27bdde"
+      "head_sha": "b8941e6b3300896767e2882b8bf9b1c373281255"
     },
     {
       "consumer": "C08",
@@ -32,7 +32,7 @@
       "required_callsite": "modules/results_generator.py generate_pdf_report WeasyPrint path — surface the native-library message instead of a generic import crash.",
       "acceptance_case": "Missing Pango/cairo/GTK returns an actionable OS-specific hint; success only when write_pdf returns %PDF bytes.",
       "dependency_pr": null,
-      "head_sha": "f4655bf38cc74b745d189a0a01ee52159e27bdde"
+      "head_sha": "b8941e6b3300896767e2882b8bf9b1c373281255"
     },
     {
       "consumer": "C03",
@@ -40,7 +40,7 @@
       "required_callsite": "tests/test_nbr14653.py subprocess grep MIN_R2 — not portable on Windows. C15 cannot edit that file.",
       "acceptance_case": "Replace grep with a pathlib scan of *.py so the assertion runs on Windows CI.",
       "dependency_pr": null,
-      "head_sha": "f4655bf38cc74b745d189a0a01ee52159e27bdde"
+      "head_sha": "b8941e6b3300896767e2882b8bf9b1c373281255"
     },
     {
       "consumer": "C17",
@@ -48,7 +48,7 @@
       "required_callsite": "README.md global install/run section (C17-owned).",
       "acceptance_case": "Global README points to `pip install -c constraints/linux-py3.txt -e .[dev]` and `modelapro` as the local start command.",
       "dependency_pr": null,
-      "head_sha": "f4655bf38cc74b745d189a0a01ee52159e27bdde"
+      "head_sha": "b8941e6b3300896767e2882b8bf9b1c373281255"
     }
   ]
 }

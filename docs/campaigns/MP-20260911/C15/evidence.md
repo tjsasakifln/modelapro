@@ -77,16 +77,28 @@ The skipped test in the default C15 suite is `test_clean_venv_install_imports_re
 
 ## A04 — tests / OS / CI
 
-| OS | What ran here | Status |
+Oracle: GitHub Actions run on PR #13, SHA `b8941e6b3300896767e2882b8bf9b1c373281255`.
+
+- PR workflow: https://github.com/tjsasakifln/modelapro/actions/runs/34597990388 — **conclusion=success**
+- Push workflow (same SHA): https://github.com/tjsasakifln/modelapro/actions/runs/34597974163 — **conclusion=success**
+
+| Job | OS | Conclusion |
 | --- | --- | --- |
-| Linux / Python 3.12.3 | C15 tests, install smoke ×2, health ×2, inherited 81 passed, flake8 | executed |
-| Windows | GitHub `windows-latest` job in `.github/workflows/c15-ci.yml` | see workflow run after PR (not claimed until the check-run exists) |
-| macOS | no runner | **untested** |
-| Python 3.11 | `requires-python >=3.11` | declared, not matrixed (cost) |
+| Lint owned C15 paths | ubuntu-latest / Python 3.12 | success |
+| C15 tests (Linux) | ubuntu-latest / Python 3.12 | success |
+| Build sdist and wheel | ubuntu-latest / Python 3.12 | success |
+| Clean venv install smoke (Linux) | ubuntu-latest / Python 3.12 | success (import + `/health` from installed wheel, `PYTHONPATH` unset) |
+| C15 tests (Windows) | windows-latest / Python 3.12 | success (33 passed, 1 skipped; Linux lock applied) |
+| Inherited suite baseline (recorded, not omitted) | ubuntu-latest / Python 3.12 | success (not omitted) |
 
-Inherited suite is a **separate** CI job (`inherited-baseline`, `continue-on-error: true`) so failures are recorded, not deleted. Locally it passed on this SHA’s tree.
+Windows WeasyPrint `--check-pdf` exited non-zero with `OSError: cannot load library 'libgobject-2.0-0'` and the GTK/Pango hint. The step is `continue-on-error`; **Windows PDF is not claimed**.
 
-CI run URL is filled after the PR check-run exists. A local pytest run is not a substitute.
+| OS | Status |
+| --- | --- |
+| Linux / Python 3.12 | executed (local + CI) |
+| Windows / Python 3.12 | executed (CI tests; PDF native missing as diagnosed) |
+| macOS | **untested** (no runner) |
+| Python 3.11 | declared `requires-python`, not matrixed (cost) |
 
 ## A05 — secrets and lock coherence
 
