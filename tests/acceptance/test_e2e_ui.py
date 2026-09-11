@@ -94,8 +94,8 @@ class TestE2EUiStreamlit:
                 file_input = page.locator("input[type=file]")
                 assert file_input.count() >= 1, "upload widget not found"
                 file_input.first.set_input_files(csv_path)
-                page.wait_for_timeout(4000)
-                start = page.locator("button").filter(has_text="Executar")
+                page.wait_for_selector("text=Variável-alvo", timeout=45000)
+                start = page.locator("button").filter(has_text="Executar avaliação")
                 if start.count() == 0:
                     start = page.get_by_text("Executar", exact=False)
                 page.screenshot(path=str(screenshot), full_page=True)
@@ -104,19 +104,26 @@ class TestE2EUiStreamlit:
                     + page.inner_text("body")[:800]
                 )
                 start.first.click(force=True)
-                page.wait_for_timeout(6000)
-                body = page.inner_text("body")
+                body = ""
+                for _ in range(20):
+                    body = page.inner_text("body")
+                    if any(
+                        token in body
+                        for token in ("Cálculo concluído", "Identificador do trabalho", "Estado: Falha")
+                    ):
+                        break
+                    refresh = page.get_by_role("button", name="Atualizar estado")
+                    if refresh.count() >= 1 and refresh.first.is_enabled():
+                        refresh.first.click()
+                    page.wait_for_timeout(2000)
                 page.screenshot(path=str(screenshot), full_page=True)
                 browser.close()
 
             assert screenshot.exists() and screenshot.stat().st_size > 1000
-            # Visible result change: either completion or a structured error —
-            # a blank spinner-only page is a product defect, not NOT_RUN.
-            lowered = body.lower()
             assert any(
-                token in lowered
-                for token in ("análise concluída", "r²", "r2", "erro", "status", "processando")
-            ), f"UI did not show a result or status after start; body={body[:500]!r}"
+                token in body
+                for token in ("Cálculo concluído", "Identificador do trabalho", "Estado: Falha")
+            ), f"UI did not show a job terminal state after start; body={body[:800]!r}"
         finally:
             for proc in (ui, api):
                 proc.terminate()
