@@ -1,0 +1,75 @@
+{
+  "campaign_id": "C07",
+  "head_sha": "b1a574592fa8c594d8a0c8e3e2b6a737914b24be",
+  "pr_url": "https://github.com/tjsasakifln/modelapro/pull/8",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "INTEGRATION_PENDING",
+  "local_component": "READY_COMPONENT",
+  "criteria": [
+    {
+      "id": "C07-A01",
+      "status": "pass",
+      "evidence": "tests/c07_validation/test_a01_leak_sentinel.py — evaluate_procedure real; sentinela detect_preprocessing_leak; versão correta passa"
+    },
+    {
+      "id": "C07-A02",
+      "status": "pass",
+      "evidence": "tests/c07_validation/test_a02_noise_and_signal.py — ruído e sinal sintéticos, 2 seeds, MAE/RMSE originais, referência train_mean, limitações no ruído"
+    },
+    {
+      "id": "C07-A03",
+      "status": "pass",
+      "evidence": "tests/c07_validation/test_a03_unseen_category.py — falha c07.unseen_category na cobertura; denominador n_reserved não encolhe; y_pred null"
+    },
+    {
+      "id": "C07-A04",
+      "status": "pass",
+      "evidence": "tests/c07_validation/test_a04_group_temporal.py — grupos duplicados e split temporal sem cruzamento; semente reproduz; sem metadado não inventa"
+    },
+    {
+      "id": "C07-A05",
+      "status": "pass",
+      "evidence": "tests/c07_validation/test_a05_provenance_budget.py — proveniência, escala original, sem grau normativo, orçamento lista o executado, nomes distintos de estabilidade"
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c07_validation/ -q",
+      "exit_code": 0,
+      "note": "16 passed; Python 3.12.3 pytest 9.1.1"
+    },
+    {
+      "command": "python3 {SCRATCH}/c07_launch_consumer.py (run 1, seed=42)",
+      "exit_code": 0,
+      "note": "LAUNCH_OK; mae/rmse original scale; disjoint train/reserved"
+    },
+    {
+      "command": "python3 {SCRATCH}/c07_launch_consumer.py (run 2, seed=42)",
+      "exit_code": 0,
+      "note": "LAUNCH_OK; same payload as run 1"
+    },
+    {
+      "command": "python3 benchmarks/c07_validation/run_cost.py",
+      "exit_code": 0,
+      "note": "wrote benchmarks/c07_validation/cost_limits.json"
+    }
+  ],
+  "unmet_dependencies": [
+    "C01 ingest_market / InputBundle runtime (tested via labeled synthetic bundle)",
+    "C02 fit_dataset / transform_subject (injected via labeled fit_select_predictor)",
+    "C04 fit_candidate / evaluate_fitted (injected via labeled predictor)",
+    "C05 search_models (injected via labeled selection inside the callback; must not consume EvaluationResult for ranking)",
+    "C10 freeze_result_snapshot mapping of EvaluationResult into ResultSnapshot.validation.statistical"
+  ],
+  "deferred_items": [
+    "Wiring evaluate_procedure into backend/worker.py (C10/C17)",
+    "UI surfaces for EvaluationResult/StabilityResult (C09)",
+    "PDF tables from predictions[] (C08)"
+  ],
+  "review_findings": [
+    "Author review: tests drive evaluate_procedure, not a reimplemented scorer. Contract fixtures are labeled and are not evidence of live C01–C05 integration.",
+    "Author review: EvaluationResult lives in C07 modules, not modules/results.py (C10).",
+    "No independent reviewer subagent report attached; adversarial checks are the A01–A05 sentinels plus launch consumer."
+  ]
+}
