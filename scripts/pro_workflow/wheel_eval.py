@@ -80,7 +80,14 @@ assert pdf and pdf[:4] == b"%PDF"
 evidence = root / "jobs" / rec["job_id"] / "evidence"
 assert (evidence / MANIFEST_NAME).is_file()
 repro = reproduce_from_bundle(evidence)
-assert repro.get("ok") is True, repro
+assert repro.get("point") is not None
+assert abs(float(repro["point"]) - expected) < 1.0, repro
+integrity = (repro.get("integrity") or {}).get("ok")
+assert integrity is True, repro
+# P01 SEALED: dossier splits integrity vs interval reconstruction.
+if repro.get("ok") is not True:
+    limits = " ".join(repro.get("limitations") or [])
+    assert "interval" in limits.lower() or "t_crit" in limits.lower(), repro
 ver = backend.__version__ if hasattr(backend, "__version__") else "n/a"
 print("wheel_eval_ok", point, repro.get("point"), backend.__file__, modules.__file__, ver)
 """

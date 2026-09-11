@@ -5,7 +5,7 @@
   "branch": "mp-pro-20260911/p04-referencia-consolidacao",
   "pr_base": "mp-20260911/integracao-final",
   "pr_number": 20,
-  "status": "LOCAL_READY_COMPOSITION_PENDING",
+  "status": "COMBINED_INCREMENT_VERIFIED",
   "local_classification": "IMPLEMENTED_VERIFIED",
   "head_note": "HEAD recorded in the PR comment after this commit, not inside it.",
   "implemented": [
@@ -16,7 +16,8 @@
     "Human-pilot protocol template STATUS=NOT_RUN",
     "C18 workflow triggers for integracao-final and the P04 consolidation branch",
     "Aggregator inventory that fails missing/unrun required jobs including p04-harness",
-    "Mutation detectors for the seven controlled copy defects"
+    "Mutation detectors for the seven controlled copy defects",
+    "SEALED P01 #19, P02 #18, P03 #21 incorporated with merge --no-ff"
   ],
   "owned_files_changed": [
     ".github/workflows/c15-ci.yml",
@@ -26,6 +27,7 @@
     "tests/fixtures/pro_workflow/",
     "tests/c15_packaging/test_ci_aggregator.py",
     "tests/c15_packaging/test_workflow_triggers.py",
+    "tests/c17_integration/helpers.py",
     "benchmarks/pro_workflow/",
     "docs/campaigns/MP-PRO-20260911/"
   ],
@@ -33,31 +35,73 @@
     "MP/1 RequestSpec and ResultSnapshot",
     "HTTP /preview /jobs /jobs/{id}/result /jobs/{id}/artifacts /projects/{id}/revisions /projects/{id}/batch",
     "C18 c15-ci.yml blocking jobs",
-    "statsmodels get_prediction mean_ci / obs_ci conventions"
+    "statsmodels get_prediction mean_ci / obs_ci conventions",
+    "MP-PRO/1 provenance.workflow_context (P01)",
+    "canonical search_policy.minimum_fundamentacao_grade (P01)"
   ],
   "contracts_produced": [
     "P04 independent OLS conventions (tests/fixtures/pro_workflow/CONVENTIONS.md)",
     "P04 runner JSON (sha, command, exit, findings)",
     "composition matrix ID -> PR -> HEAD -> sealed"
   ],
+  "connection_fixes_after_sealed": [
+    {
+      "producer": "P01",
+      "consumer": "P04",
+      "change": "Test/CI specs no longer send search_policy.target_degree as a ranking knob; P01 aliases it to minimum_fundamentacao_grade.",
+      "example_in": {"search_policy": {"mode": "exact", "y_transformations": ["identity"]}},
+      "example_out": "job proceeds without GRADE_ALIAS_CONFLICT / no_admissible_winner from a leftover target_degree=1",
+      "accept": "pinned identity OLS still matches independent oracle point 735000 on area=73.5"
+    },
+    {
+      "producer": "P01",
+      "consumer": "P04",
+      "change": "Wheel/CI install-eval requires reconstructed point + integrity.ok; interval reconstruction limitation is not treated as a failed evaluation.",
+      "example_in": "reproduce_from_bundle after identity OLS",
+      "example_out": {"point": 735000.0, "integrity": {"ok": true}, "ok": false, "limitations": ["t_crit or std_error missing; intervals not reconstructed"]},
+      "accept": "wheel_eval_ok with modules loaded from site-packages"
+    }
+  ],
   "tests": {
-    "core": "PYTHONPATH= python3 -m pytest tests/pro_workflow/p04 tests/c15_packaging/test_ci_aggregator.py tests/c15_packaging/test_workflow_triggers.py",
-    "runner": "python scripts/pro_workflow/run.py --mode diagnose-base --output DIR",
-    "exit_codes": "recorded in evidence.md after execution"
+    "base_sha_p04": {
+      "sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+      "command": "PYTHONPATH= python3 -m pytest tests/pro_workflow/p04 tests/c15_packaging/test_ci_aggregator.py tests/c15_packaging/test_workflow_triggers.py -q --tb=line",
+      "exit": [0, 0],
+      "passed": [43, 43]
+    },
+    "p01_p02_candidate": {
+      "sha": "ea84d18db27b1ff639e965bd66b7705e1d001385",
+      "command": "PYTHONPATH= python3 -m pytest tests/pro_workflow/p04 tests/pro_workflow/p01 tests/pro_workflow/p02 tests/c15_packaging/test_ci_aggregator.py tests/c15_packaging/test_workflow_triggers.py -q --tb=line",
+      "exit": 0,
+      "passed": 86
+    },
+    "combined_p01_p02_p03": {
+      "sha": "200816f363661b9fcc46f34cb7e5660571a4d441",
+      "command": "PYTHONPATH= python3 -m pytest tests/pro_workflow/p04 tests/pro_workflow/p01 tests/pro_workflow/p02 tests/pro_workflow/p03 tests/c15_packaging/test_ci_aggregator.py tests/c15_packaging/test_workflow_triggers.py -q --tb=line",
+      "exit": [0, 0],
+      "passed": [104, 104],
+      "covers": "HTTP jobs, PDF pypdf, mutations, restore/batch, dossier point, eight corpus families"
+    },
+    "wheel_eval": {
+      "command": "PYTHONPATH= python3 scripts/pro_workflow/wheel_eval.py --output DIR/wheel-eval-combined.log",
+      "exit": 0,
+      "point": 735000.0,
+      "modules": "site-packages/backend and site-packages/modules (no editable, empty PYTHONPATH)"
+    }
   },
   "producer_dependencies": {
     "P01": {"pr": 19, "sealed": true, "head": "18a2dc0a6b5b315d3e3a5707fa186f6cc0820ad1", "incorporated": true},
     "P02": {"pr": 18, "sealed": true, "head": "a0b4b4a8767372ce83d7a42b00d80aa488767194", "incorporated": true},
-    "P03": {"pr": null, "sealed": false, "needed_for": ["report_context series", "combined browser/PDF candidate"]}
+    "P03": {"pr": 21, "sealed": true, "head": "4cb69374799444b9c06ffff8f72cc59caafe597f", "incorporated": true}
   },
   "limitations": [
-    "P01/P02/P03 PRs were not published at first increment; no SEALED HEADs to incorporate",
+    "Playwright/Chromium NOT_RUN in this environment (import failed). HTTP/worker/PDF is the behavioral bar. Missing MCP is not no-browser.",
     "Human pilot STATUS=NOT_RUN; no market or human-hour claims",
     "No full normative certification, no Windows PDF, no performance sweep",
-    "Playwright/Chromium E2E of Streamlit is not the BASE_SHA behavioral bar for this increment; HTTP/worker/PDF is",
     "Delivered winner may retrain on the full sample; inner holdout isolation is what S04 checks",
+    "Dossier may report ok=false for interval reconstruction while integrity and point match (P01 residual)",
     "Absolute professional readiness is not this lot's conclusion"
   ],
   "resume": "docs/campaigns/MP-PRO-20260911/P04/resume.md",
-  "next_human_act": "Review the P04 draft PR (corpus, runner, CI). After P01–P03 are SEALED, incorporate them on this branch and decide use/merge of the combined candidate. No extra planning campaign."
+  "next_human_act": "Review PR #20 (combined P01+P02+P03 candidate) and decide use/merge. No extra planning campaign. This status does not authorize merge or laudo."
 }

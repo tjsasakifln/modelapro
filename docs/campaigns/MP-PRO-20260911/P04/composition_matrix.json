@@ -2,7 +2,7 @@
   "campaign_id": "MP-PRO-20260911/P04",
   "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
   "p04_first_increment": "079b05d29fdf409afeeba884ddade7bc1868016b",
-  "note": "P01 and P02 incorporated with git merge --no-ff after SEALED comments. P03 not published. Connection fix on P04: stop sending historical target_degree as a ranking knob because P01 aliases it to minimum_fundamentacao_grade.",
+  "note": "P01, P02 and P03 incorporated with git merge --no-ff after SEALED comments. Connection fix on P04: stop sending historical target_degree as a ranking knob because P01 aliases it to minimum_fundamentacao_grade.",
   "rows": {
     "P01": {
       "id": "P01",
@@ -40,12 +40,15 @@
       "id": "P03",
       "prefix": "[MP-PRO-20260911/P03]",
       "branch": "mp-pro-20260911/p03-relatorio-tecnico",
-      "pr": null,
-      "head": null,
-      "sealed": false,
-      "incorporated_on_p04": false,
-      "contracts": ["report_context series", "PDF frozen MP1_* lines"],
-      "evidence": []
+      "pr": 21,
+      "url": "https://github.com/tjsasakifln/modelapro/pull/21",
+      "head": "4cb69374799444b9c06ffff8f72cc59caafe597f",
+      "base": "mp-20260911/integracao-final",
+      "sealed": true,
+      "sealed_comment": "https://github.com/tjsasakifln/modelapro/pull/21#issuecomment-5640977795",
+      "incorporated_on_p04": true,
+      "contracts": ["report_context series", "PDF frozen MP1_* lines", "recommend_next_actions vs workflow_context"],
+      "evidence": ["docs/campaigns/MP-PRO-20260911/P03/"]
     }
   }
 }

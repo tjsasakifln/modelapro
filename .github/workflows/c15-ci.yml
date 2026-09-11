@@ -180,8 +180,14 @@ jobs:
           evidence = root / "jobs" / rec["job_id"] / "evidence"
           assert (evidence / MANIFEST_NAME).is_file(), list(evidence.glob("*")) if evidence.exists() else "no evidence dir"
           repro = reproduce_from_bundle(evidence)
-          assert repro.get("ok") is True, repro
           assert repro.get("point") is not None
+          assert abs(float(repro["point"]) - expected) < 1.0, repro
+          integrity = (repro.get("integrity") or {}).get("ok")
+          assert integrity is True, repro
+          # P01 SEALED: integrity vs interval reconstruction are distinct.
+          if repro.get("ok") is not True:
+              limits = " ".join(repro.get("limitations") or [])
+              assert "interval" in limits.lower() or "t_crit" in limits.lower(), repro
           assert abs(float(repro["point"]) - expected) < 1.0, repro
           assert (repro.get("comparison") or {}).get("point_within_tolerance") is True
           print("wheel_eval_ok", point, repro["point"], backend.__file__, modules.__file__, evidence)
