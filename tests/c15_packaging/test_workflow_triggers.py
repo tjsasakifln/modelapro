@@ -35,6 +35,110 @@ def test_aggregator_is_always_and_lists_p04_harness():
     assert "aggregate_required.py" in text
 
 
-def test_p04_harness_job_exists():
+def test_p04_harness_job_accepts_the_candidate_strictly():
+    """R20-A: the candidate is accepted with accept-candidate, never diagnosed."""
     text = _load()
-    assert "scripts/pro_workflow/run.py --mode diagnose-base" in text
+    assert "scripts/pro_workflow/run.py --mode accept-candidate" in text
+    assert "run.py --mode diagnose-base" not in text
+
+
+# --- R20-A structural guards -------------------------------------------------
+#
+# The gap was not a bad assertion, it was a shell default: GitHub's default
+# `bash -e {0}` has no pipefail, so `run.py | tee` returned tee's zero while
+# the runner had failed. These tests fail if that default ever comes back.
+
+import yaml  # noqa: E402
+
+LINUX_JOBS = (
+    "lint",
+    "c15-tests-linux",
+    "build-sdist-wheel",
+    "install-eval-linux",
+    "wide-suite-linux",
+    "c16-harness",
+    "p04-harness",
+    "acceptance",
+)
+
+
+def _jobs() -> dict:
+    return yaml.safe_load(_load())["jobs"]
+
+
+def _shell_of(job: dict) -> str:
+    return str(((job.get("defaults") or {}).get("run") or {}).get("shell") or "")
+
+
+def test_every_linux_job_declares_pipefail_by_default():
+    jobs = _jobs()
+    for name in LINUX_JOBS:
+        assert name in jobs, f"job {name} disappeared from the workflow"
+        shell = _shell_of(jobs[name])
+        assert "pipefail" in shell, f"job {name} has no pipefail default: {shell!r}"
+
+
+def test_no_linux_run_step_pipes_without_pipefail_in_effect():
+    """Every pipe must propagate failure, by job default or by set -o pipefail."""
+    jobs = _jobs()
+    offenders = []
+    for name, job in jobs.items():
+        if "windows" in str(job.get("runs-on", "")):
+            continue
+        job_pipefail = "pipefail" in _shell_of(job)
+        for step in job.get("steps") or []:
+            body = step.get("run")
+            if not body or "|" not in body:
+                continue
+            piped = [
+                line
+                for line in body.splitlines()
+                if "|" in line and not line.strip().startswith("#")
+            ]
+            if not piped:
+                continue
+            step_pipefail = "pipefail" in str(step.get("shell") or "") or "set -o pipefail" in body
+            if not (job_pipefail or step_pipefail):
+                offenders.append(f"{name}:{step.get('name')}")
+    assert not offenders, f"piped run steps with no pipefail: {offenders}"
+
+
+def test_windows_job_is_untouched_by_the_bash_defaults():
+    job = _jobs()["c15-tests-windows"]
+    assert "pipefail" not in _shell_of(job)
+    for step in job["steps"]:
+        if step.get("run"):
+            assert step.get("shell") == "pwsh", step
+
+
+def test_aggregator_opens_the_evidence_not_only_the_job_results():
+    """Job conclusions alone are structurally blind to R20-A."""
+    steps = _jobs()["acceptance"]["steps"]
+    uses = [s.get("uses", "") for s in steps]
+    assert any(u.startswith("actions/download-artifact@") for u in uses), uses
+    download = next(s for s in steps if str(s.get("uses", "")).startswith("actions/download-artifact@"))
+    assert download["with"].get("merge-multiple") is True
+    run_bodies = " ".join(s.get("run", "") for s in steps)
+    assert "--artifacts-dir" in run_bodies
+    assert "--expected-sha" in run_bodies
+    assert "--min-wide-tests" in run_bodies
+    assert "--p04-mode accept-candidate" in run_bodies
+
+
+def test_expected_sha_uses_the_pr_head_not_the_merge_commit():
+    """On pull_request, github.sha is the merge commit; artifacts carry the head."""
+    step = next(
+        s
+        for s in _jobs()["acceptance"]["steps"]
+        if "--expected-sha" in str(s.get("run", ""))
+    )
+    expr = str((step.get("env") or {}).get("CANDIDATE_SHA") or "")
+    assert "pull_request.head.sha" in expr, expr
+
+
+def test_no_mandatory_upload_may_vanish_silently():
+    for name, job in _jobs().items():
+        for step in job.get("steps") or []:
+            if str(step.get("uses", "")).startswith("actions/upload-artifact@"):
+                found = (step.get("with") or {}).get("if-no-files-found")
+                assert found == "error", f"{name}:{step.get('name')} -> {found!r}"
