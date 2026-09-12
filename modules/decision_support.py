@@ -41,6 +41,9 @@ CODE_IMPROVE_FIT_QUALITY = "improve_fit_quality"
 CODE_REVIEW_VALUE_SENSITIVITY = "review_value_sensitivity"
 CODE_INCOMPATIBLE_ALTERNATIVE_COMPARISON = "incompatible_alternative_comparison"
 CODE_CONSIDER_EXTERNAL_VALIDATION = "consider_external_validation"
+CODE_COMPLETE_QUALIFICATION = "complete_qualification_evidence"
+CODE_PERFORM_PROFESSIONAL_REVIEW = "perform_professional_review"
+CODE_VERIFY_DIGITAL_SIGNATURE = "verify_digital_signature"
 
 # Integridade (unidade/parse, preço imputado/ambíguo, artefato, data-base)
 # precede sugestão cosmética de ajuste (R²).
@@ -59,6 +62,9 @@ P_INCOMPATIBLE = 80
 P_SENSITIVITY = 85
 P_FIT_QUALITY = 90
 P_OPTIONAL_VALIDATION = 95
+P_QUALIFICATION = 25
+P_PROFESSIONAL_REVIEW = 35
+P_SIGNATURE = 45
 
 _LIMIT_NO_PERCENT = "Sem dados suficientes para estimar o ganho desta ação."
 _LIMIT_NO_DEFICIT = (
@@ -213,6 +219,7 @@ def recommend_next_actions(
     drafts.extend(_actions_from_item_pendencies(snapshot))
     drafts.extend(_actions_from_alternatives(snapshot))
     drafts.extend(_actions_from_unrequested_validation(snapshot))
+    drafts.extend(_actions_from_qualification(snapshot))
 
     merged = _consolidate(drafts)
     merged.sort(key=lambda row: (int(row["priority"]), str(row["code"])))
@@ -846,6 +853,67 @@ def _actions_from_unrequested_validation(snapshot: Mapping[str, Any]) -> List[Di
             tmpl["limitations"],
         )
     ]
+
+
+def _actions_from_qualification(snapshot: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Translate presentation blockers; never reclassify rules or grade."""
+    from modules.report_presenter.qualification import assess_document_state
+
+    state = assess_document_state(snapshot)
+    if state.get("is_final"):
+        return []
+    grouped: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
+    review_codes = {"PROFESSIONAL_REVIEW_NOT_EVIDENCED"}
+    signature_codes = {"SIGNED_STATE_WITHOUT_VALID_SIGNATURE"}
+    for blocker in state.get("blockers") or []:
+        code = str(blocker.get("code") or "")
+        if code == "REPORT_REQUIRED_CONTENT_MISSING":
+            # This function receives no report_context. The renderer evaluates
+            # these fields with its actual context and must not infer absence
+            # here merely because they live outside the frozen snapshot.
+            continue
+        if code in review_codes:
+            grouped[CODE_PERFORM_PROFESSIONAL_REVIEW].append(blocker)
+        elif code in signature_codes:
+            grouped[CODE_VERIFY_DIGITAL_SIGNATURE].append(blocker)
+        else:
+            grouped[CODE_COMPLETE_QUALIFICATION].append(blocker)
+    actions = []
+    if grouped[CODE_COMPLETE_QUALIFICATION]:
+        codes = [str(item.get("code")) for item in grouped[CODE_COMPLETE_QUALIFICATION]]
+        actions.append(
+            _action(
+                CODE_COMPLETE_QUALIFICATION,
+                P_QUALIFICATION,
+                "A emissão final está bloqueada por evidência de qualificação incompleta: " + ", ".join(codes),
+                "Complete o perfil e as regras na fonte canônica C01/C05; não altere grau no renderer.",
+                evidence_refs=[{"kind": "qualification_blocker", **dict(item)} for item in grouped[CODE_COMPLETE_QUALIFICATION]],
+                limitations=["A análise calculável continua disponível, mas não pode receber rótulo de laudo final."],
+            )
+        )
+    if grouped[CODE_PERFORM_PROFESSIONAL_REVIEW]:
+        actions.append(
+            _action(
+                CODE_PERFORM_PROFESSIONAL_REVIEW,
+                P_PROFESSIONAL_REVIEW,
+                "Não há revisão aprovadora vinculada a profissional, motivo e versão.",
+                "Registre o ato humano real com identificação profissional, decisão, motivo e fingerprint/revisão.",
+                evidence_refs=[{"kind": "qualification_blocker", **dict(item)} for item in grouped[CODE_PERFORM_PROFESSIONAL_REVIEW]],
+                limitations=["Revisão humana não converte regra técnica pendente em regra aprovada."],
+            )
+        )
+    if grouped[CODE_VERIFY_DIGITAL_SIGNATURE]:
+        actions.append(
+            _action(
+                CODE_VERIFY_DIGITAL_SIGNATURE,
+                P_SIGNATURE,
+                "O caso declara estado assinado sem verificação válida dos bytes recebidos.",
+                "Verifique a assinatura incorporada e vincule o resultado ao hash do PDF e à revisão.",
+                evidence_refs=[{"kind": "qualification_blocker", **dict(item)} for item in grouped[CODE_VERIFY_DIGITAL_SIGNATURE]],
+                limitations=["Imagem manuscrita e indisponibilidade de rede não equivalem a assinatura digital válida."],
+            )
+        )
+    return actions
 
 
 def _iter_artifact_states(snapshot: Mapping[str, Any]) -> Iterable[Tuple[str, Mapping[str, Any]]]:

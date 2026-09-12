@@ -1,0 +1,45 @@
+{
+  "schema_version": "MP-QUAL/1",
+  "synthetic": true,
+  "note": "Exemplo concreto sintético do produtor C01/C05; não é caso real nem fonte normativa.",
+  "profile": {
+    "id": "urban-comparative-market-professional",
+    "version": "1-test",
+    "source_set_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "purpose": "avaliacao_profissional_sintetica",
+    "value_basis": "market_value",
+    "method": "comparative_regression",
+    "asset_scope": "urban_real_estate",
+    "recipient_id": "neutral-test-recipient"
+  },
+  "result_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+  "calculation_status": "valid",
+  "grade_requirement_status": "met",
+  "case_release_status": "ready_for_professional_signoff",
+  "rule_results": [
+    {
+      "rule_id": "TEST-RULE-01",
+      "source_id": "synthetic-source-index",
+      "edition_or_version": "2026-test",
+      "clause": "fixture-clause-1",
+      "applicability": "applicable",
+      "status": "passed",
+      "observed": {"grade": 2},
+      "criterion_ref": "validation.fundamentacao.grade",
+      "evidence_refs": ["snapshot:validation.fundamentacao"],
+      "explanation": "Regra sintética apenas para testar o contrato de consumo."
+    }
+  ],
+  "review_events": [
+    {
+      "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+      "report_content_fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+      "professional_id": "professional-test-001",
+      "decision": "approved",
+      "motive": "Conferência controlada da fixture sintética.",
+      "version": "rev-test-001",
+      "stale": false
+    }
+  ],
+  "institution_acceptance": {"status": "not_recorded"}
+}

@@ -16,10 +16,11 @@ exec, or in-memory model objects are refused.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .provenance import (
     BUNDLE_VERSION,
@@ -27,10 +28,9 @@ from .provenance import (
     COMPLETENESS_MISSING,
     COMPLETENESS_PRESENT,
     COMPLETENESS_VERIFIED,
-    CompletenessLedger,
     SCHEMA_VERSION_MP,
+    CompletenessLedger,
     canonical_json,
-    decode_number,
     encode_number,
     is_formula_cell,
     iter_regular_files,
@@ -44,14 +44,12 @@ from .provenance import (
     resolve_inside,
     sanitize_internal_name,
     schema_id_from_mapping,
-    sha256_bytes,
     sha256_file,
     strip_dataset_from_log_payload,
     write_bytes_atomic,
     write_json,
-    write_text_utf8,
 )
-
+from .report_presenter.qualification import signable_snapshot_sha256
 
 MANIFEST_NAME = "MANIFEST.json"
 CSV_DELIMITER = ","
@@ -131,6 +129,12 @@ COMPONENT_ORDER = (
     "photos_documents",
     "report_artifact",
     "source_input_bytes",
+    "qualification_context",
+    "identifier_map",
+    "representation_map",
+    "review_history",
+    "signature_record",
+    "docx_artifact",
 )
 
 
@@ -163,6 +167,16 @@ def build_evidence_bundle(
     snap_path = resolve_inside(out, snap_rel)
     frozen_bytes = arts.get("snapshot_bytes")
     if isinstance(frozen_bytes, (bytes, bytearray)):
+        try:
+            supplied_snapshot = json.loads(bytes(frozen_bytes).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"artifacts.snapshot_bytes is not valid JSON: {exc}") from exc
+        if not isinstance(supplied_snapshot, Mapping) or canonical_json(
+            supplied_snapshot
+        ) != canonical_json(snap):
+            raise ValueError(
+                "artifacts.snapshot_bytes does not represent the supplied snapshot mapping"
+            )
         write_bytes_atomic(snap_path, bytes(frozen_bytes))
         ledger.set(
             "frozen_snapshot",
@@ -373,6 +387,9 @@ def build_evidence_bundle(
         ),
         "evaluation_policy": _first_mapping(
             request_spec.get("evaluation_policy"), arts.get("evaluation_policy"), snap.get("evaluation_policy")
+        ),
+        "value_policy": _first_mapping(
+            request_spec.get("value_policy"), arts.get("value_policy"), snap.get("value_policy")
         ),
     }
     for name, payload in policies.items():
@@ -599,6 +616,133 @@ def build_evidence_bundle(
             notes="No C08 PDF was supplied. A PDF summary would not replace the full used/excluded tables in any case.",
         )
 
+    report_docx = arts.get("report_docx")
+    if report_docx is not None:
+        _write_opaque_artifact(
+            out, files_meta, "report.docx", report_docx,
+            function="editable_report_same_snapshot",
+        )
+        ledger.set(
+            "docx_artifact", COMPLETENESS_PRESENT, declared=True,
+            source="artifacts.report_docx",
+        )
+    else:
+        ledger.set("docx_artifact", COMPLETENESS_MISSING, notes="No DOCX export was supplied.")
+
+    provenance = _as_mapping(snap.get("provenance"))
+    qualification = _as_mapping(provenance.get("qualification_context"))
+    if qualification:
+        write_json(resolve_inside(out, "qualification/context.json"), qualification)
+        _register(
+            files_meta, out, "qualification/context.json", "application/json",
+            qualification.get("schema_version") or "MP-QUAL/1", "qualification_context",
+        )
+        ledger.set(
+            "qualification_context", COMPLETENESS_PRESENT, declared=True,
+            source="snapshot.provenance.qualification_context",
+        )
+    else:
+        ledger.set(
+            "qualification_context", COMPLETENESS_MISSING,
+            notes="No MP-QUAL/1 qualification context was supplied; final issuance is not evidenced.",
+        )
+
+    identifier_map = _first_mapping(
+        arts.get("identifier_map"), ib.get("column_map"), prep.get("column_map")
+    )
+    if identifier_map:
+        write_json(resolve_inside(out, "data/identifier_map.json"), identifier_map)
+        _register(
+            files_meta, out, "data/identifier_map.json", "application/json",
+            BUNDLE_VERSION, "identifier_map",
+        )
+        ledger.set(
+            "identifier_map", COMPLETENESS_PRESENT, declared=True,
+            source="input_bundle.column_map",
+        )
+    else:
+        ledger.set(
+            "identifier_map", COMPLETENESS_MISSING,
+            notes="No original-to-internal identifier map was supplied.",
+        )
+
+    representation_map = {
+        "schema_version": "MP-EVIDENCE-MAP/1",
+        "representations": [
+            {"id": "source_bytes", "path": "data/source_input.bin", "role": "original_bytes"},
+            {"id": "original_base", "path": "data/original_base.csv", "role": "original_tabular_representation"},
+            {"id": "interpreted_base", "path": "data/interpreted_base.csv", "role": "parsed_representation"},
+            {"id": "used_sample", "path": "data/used_sample.csv", "role": "effective_model_sample"},
+            {"id": "excluded_rows", "path": "data/excluded_rows.csv", "role": "excluded_with_reasons"},
+        ],
+        "identifier_map": "data/identifier_map.json" if identifier_map else None,
+        "row_identity": "row_id",
+        "equivalence": (
+            "Representations are equivalent only through the declared identifier/column maps and ledger; "
+            "byte identity is neither assumed nor claimed."
+        ),
+    }
+    write_json(resolve_inside(out, "data/representation_map.json"), representation_map)
+    _register(
+        files_meta, out, "data/representation_map.json", "application/json",
+        "MP-EVIDENCE-MAP/1", "representation_map",
+    )
+    ledger.set(
+        "representation_map", COMPLETENESS_PRESENT, declared=True,
+        source="packaged evidence paths",
+    )
+
+    review_events = qualification.get("review_events") or arts.get("review_events") or []
+    if review_events:
+        write_json(resolve_inside(out, "review/history.json"), {"events": review_events})
+        _register(
+            files_meta, out, "review/history.json", "application/json",
+            "MP-QUAL/1", "review_history",
+        )
+        ledger.set(
+            "review_history", COMPLETENESS_PRESENT, declared=True,
+            source="qualification.review_events",
+        )
+    else:
+        ledger.set("review_history", COMPLETENESS_MISSING, notes="No review events were supplied.")
+
+    signature_record = _as_mapping(
+        arts.get("signature_record") or qualification.get("digital_signature")
+    )
+    if signature_record:
+        write_json(resolve_inside(out, "signature/verification.json"), signature_record)
+        _register(
+            files_meta, out, "signature/verification.json", "application/json",
+            signature_record.get("schema_version") or "MP-SIGN/1", "signature_record",
+        )
+        ledger.set(
+            "signature_record", COMPLETENESS_PRESENT, declared=True,
+            source="artifacts.signature_record",
+        )
+    else:
+        ledger.set(
+            "signature_record", COMPLETENESS_MISSING,
+            notes="No digital signature verification record was supplied; image signatures are not substituted.",
+        )
+
+    signed_report = arts.get("signed_report_pdf")
+    if signed_report is not None:
+        _write_opaque_artifact(
+            out, files_meta, "signed_report.pdf", signed_report,
+            function="signed_report_exact_bytes",
+        )
+
+    report_revisions = arts.get("report_revisions") or []
+    if report_revisions:
+        write_json(
+            resolve_inside(out, "review/document_revisions.json"),
+            {"revisions": report_revisions},
+        )
+        _register(
+            files_meta, out, "review/document_revisions.json", "application/json",
+            "MP-QUAL/1", "document_revision_history",
+        )
+
     # Sample-count cross-check evidence (not a second evaluation).
     sample_audit = {
         "snapshot_sample": _as_mapping(snap.get("sample")),
@@ -720,6 +864,9 @@ def build_evidence_bundle(
             "tolerance": reproduction_spec["tolerance"],
             "determinism": reproduction_spec["determinism"],
         },
+        "integrity_status": "assembled_unverified",
+        "completeness_status": "complete" if not completeness_doc["missing"] else "incomplete",
+        "numerical_reproduction_status": "ready" if reproduction_spec["promised"] else "not_ready",
         "completeness_summary": completeness_doc["counts"],
         "completeness_missing": completeness_doc["missing"],
         "share_selection": share_doc,
@@ -807,8 +954,56 @@ def verify_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
             f"incompatible versions schema={manifest.get('schema_version')!r} bundle={manifest.get('bundle_version')!r}"
         )
 
+    signature_path = root / "signature" / "verification.json"
+    signed_pdf_path = root / "artifacts" / "signed_report.pdf"
+    if signature_path.is_file() != signed_pdf_path.is_file():
+        errors.append("signature record and signed_report.pdf must be supplied together")
+    if signature_path.is_file() and signed_pdf_path.is_file():
+        signature = _read_json(signature_path) or {}
+        signed_pdf = signed_pdf_path.read_bytes()
+        snapshot = _read_json(root / "snapshot" / "result_snapshot.json") or {}
+        unsigned_path = root / "artifacts" / "report.pdf"
+        if hashlib.sha256(signed_pdf).hexdigest() != signature.get("signed_pdf_sha256"):
+            errors.append("signed PDF does not match signature record")
+        if not unsigned_path.is_file():
+            errors.append("unsigned report.pdf missing for signed revision binding")
+        else:
+            unsigned_pdf = unsigned_path.read_bytes()
+            if hashlib.sha256(unsigned_pdf).hexdigest() != signature.get("unsigned_pdf_sha256"):
+                errors.append("unsigned PDF does not match signature request")
+            if not signed_pdf.startswith(unsigned_pdf):
+                errors.append("signed PDF is not an incremental revision of report.pdf")
+        snapshot_digest = signable_snapshot_sha256(snapshot)
+        if snapshot_digest != signature.get("snapshot_sha256"):
+            errors.append("signed snapshot digest does not match packaged snapshot")
+        qctx = _as_mapping(_as_mapping(snapshot.get("provenance")).get("qualification_context"))
+        if signature.get("result_fingerprint") != qctx.get("result_fingerprint"):
+            errors.append("signed result fingerprint does not match qualification context")
+        local = _as_mapping(signature.get("local_verification"))
+        if not (
+            signature.get("status") == "valid"
+            and signature.get("backend") == "pyHanko"
+            and signature.get("incremental_base_verified") is True
+            and local.get("status") == "valid"
+            and int(local.get("signature_count") or 0) > 0
+        ):
+            errors.append("signature record is not a locally verified pyHanko result")
+
+    snapshot = _read_json(root / "snapshot" / "result_snapshot.json") or {}
+    qualification_file = _read_json(root / "qualification" / "context.json")
+    snapshot_qualification = _as_mapping(
+        _as_mapping(snapshot.get("provenance")).get("qualification_context")
+    )
+    if qualification_file is not None and canonical_json(qualification_file) != canonical_json(
+        snapshot_qualification
+    ):
+        errors.append("qualification/context.json contradicts the frozen snapshot")
+
     return {
         "ok": not errors,
+        "integrity_status": "verified" if not errors else "failed",
+        "completeness_status": manifest.get("completeness_status") or "unknown",
+        "numerical_reproduction_status": manifest.get("numerical_reproduction_status") or "not_run",
         "errors": errors,
         "files_checked": len(listed),
         "versions": versions,
@@ -824,6 +1019,7 @@ def reproduce_from_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
     if not integrity.get("ok"):
         return {
             "ok": False,
+            "numerical_reproduction_status": "blocked_by_integrity",
             "integrity": integrity,
             "point": None,
             "mean_ci80": None,
@@ -846,6 +1042,7 @@ def reproduce_from_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
     residual = _read_json(root / "model" / "residual_context.json") or {}
     snapshot = _read_json(root / "snapshot" / "result_snapshot.json") or {}
     completeness = _read_json(root / "completeness" / "ledger.json") or {}
+    value_policy = _read_json(root / "policies" / "value_policy.json") or {}
 
     if coef is None:
         limitations.append("model_coefficients faltante: no integral coefficients on disk")
@@ -883,10 +1080,43 @@ def reproduce_from_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
         if not residual:
             limitations.append("residual_context faltante: intervals not reconstructed")
 
+    arbitration_interval, admissible_interval, adopted_value, policy_notes = (
+        _reconstruct_value_policy(point, mean_ci80, prediction_interval, value_policy)
+    )
+    limitations.extend(policy_notes)
+
     snap_value = _as_mapping(snapshot.get("value"))
     comparison = _compare_to_snapshot(point, mean_ci80, prediction_interval, snap_value, tolerance)
 
+    for field, reconstructed in (
+        ("arbitration_interval", arbitration_interval),
+        ("admissible_interval", admissible_interval),
+    ):
+        expected = _as_mapping(snap_value.get(field))
+        if not expected:
+            comparison[f"{field}_within_tolerance"] = None
+            continue
+        if not reconstructed:
+            comparison[f"{field}_within_tolerance"] = False
+            limitations.append(
+                f"declared {field} was not reconstructed from an explicit value policy"
+            )
+            continue
+        abs_t = float(tolerance["interval_abs"])
+        rel_t = float(tolerance["interval_rel"])
+        checks = []
+        for bound in ("lower", "upper"):
+            observed = number_as_float64(reconstructed[bound])
+            declared = number_as_float64(expected[bound])
+            checks.append(
+                abs(observed - declared) <= abs_t + rel_t * max(abs(observed), abs(declared))
+            )
+        comparison[f"{field}_within_tolerance"] = all(checks)
+
     ok = bool(integrity.get("ok")) and point is not None and bool(comparison.get("point_within_tolerance"))
+    for field in ("arbitration_interval", "admissible_interval"):
+        if snap_value.get(field) is not None and comparison.get(f"{field}_within_tolerance") is not True:
+            ok = False
     if promised and point is None:
         ok = False
     if snap_value.get("point") is not None and point is None:
@@ -943,14 +1173,16 @@ def reproduce_from_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
 
     return {
         "ok": ok,
+        "numerical_reproduction_status": "verified" if ok else "failed",
         "integrity": integrity,
         "promised": promised,
         "point": point,
         "point_transformed": point_transformed,
         "mean_ci80": mean_ci80,
         "prediction_interval": prediction_interval,
-        "arbitration_interval": None,
-        "admissible_interval": None,
+        "arbitration_interval": arbitration_interval,
+        "admissible_interval": admissible_interval,
+        "adopted_value": adopted_value,
         "limitations": limitations,
         "tolerance": tolerance,
         "comparison": comparison,
@@ -958,6 +1190,31 @@ def reproduce_from_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
         "completeness_missing": completeness.get("missing") or [],
         "determinism": spec.get("determinism"),
         "method": spec.get("method"),
+    }
+
+
+def assess_bundle_status(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
+    """Report integrity, completeness and numeric reproduction independently."""
+    root = Path(bundle_dir).resolve()
+    integrity = verify_bundle(root)
+    ledger = _read_json(root / "completeness" / "ledger.json") or {}
+    missing = list(ledger.get("missing") or [])
+    completeness_status = "complete" if not missing else "incomplete"
+    if integrity.get("ok"):
+        reproduction = reproduce_from_bundle(root)
+    else:
+        reproduction = {
+            "ok": False,
+            "numerical_reproduction_status": "blocked_by_integrity",
+            "limitations": list(integrity.get("errors") or []),
+        }
+    return {
+        "integrity_status": integrity.get("integrity_status") or "failed",
+        "completeness_status": completeness_status,
+        "numerical_reproduction_status": reproduction.get("numerical_reproduction_status") or "failed",
+        "integrity": integrity,
+        "completeness": {"missing": missing, "counts": ledger.get("counts") or {}},
+        "numerical_reproduction": reproduction,
     }
 
 
@@ -1918,6 +2175,69 @@ def _compare_to_snapshot(
     return result
 
 
+def _reconstruct_value_policy(
+    point: Optional[float],
+    mean_ci80: Optional[Mapping[str, float]],
+    prediction_interval: Optional[Mapping[str, float]],
+    policy: Mapping[str, Any],
+) -> Tuple[Optional[Dict[str, float]], Optional[Dict[str, float]], Optional[float], List[str]]:
+    """Apply only explicitly declared, whitelisted post-calculation policies."""
+    notes: List[str] = []
+    if point is None or not policy:
+        return None, None, None, notes
+    arbitration = None
+    arbitration_rule = _as_mapping(policy.get("arbitration"))
+    method = str(arbitration_rule.get("method") or "").lower()
+    if method == "percent_around_point":
+        try:
+            percent = number_as_float64(arbitration_rule.get("percent"))
+            if percent < 0 or percent > 100:
+                raise ValueError("percent out of range")
+            delta = point * percent / 100.0
+            arbitration = {"lower": point - delta, "upper": point + delta}
+        except (TypeError, ValueError) as exc:
+            notes.append(f"arbitration policy invalid: {exc}")
+    elif method:
+        notes.append(f"arbitration policy unsupported: {method}")
+
+    admissible = None
+    admissible_rule = _as_mapping(policy.get("admissible"))
+    admissible_method = str(admissible_rule.get("method") or "").lower()
+    if admissible_method == "intersection":
+        names = list(admissible_rule.get("inputs") or [])
+        available = {
+            "mean_ci80": mean_ci80,
+            "prediction_interval": prediction_interval,
+            "arbitration_interval": arbitration,
+        }
+        selected = [available.get(str(name)) for name in names]
+        if selected and all(isinstance(item, Mapping) for item in selected):
+            lower = max(number_as_float64(item.get("lower")) for item in selected if item)
+            upper = min(number_as_float64(item.get("upper")) for item in selected if item)
+            if lower <= upper:
+                admissible = {"lower": lower, "upper": upper}
+            else:
+                notes.append("admissible policy intersection is empty")
+        else:
+            notes.append("admissible policy inputs are missing")
+    elif admissible_method:
+        notes.append(f"admissible policy unsupported: {admissible_method}")
+
+    adopted = None
+    adopted_rule = _as_mapping(policy.get("adopted"))
+    adopted_method = str(adopted_rule.get("method") or "").lower()
+    if adopted_method == "point":
+        adopted = point
+    elif adopted_method == "explicit":
+        try:
+            adopted = number_as_float64(adopted_rule.get("value"))
+        except (TypeError, ValueError) as exc:
+            notes.append(f"adopted value policy invalid: {exc}")
+    elif adopted_method:
+        notes.append(f"adopted value policy unsupported: {adopted_method}")
+    return arbitration, admissible, adopted, notes
+
+
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
     if not path.is_file():
         return None
@@ -1929,6 +2249,7 @@ __all__ = [
     "build_evidence_bundle",
     "verify_bundle",
     "reproduce_from_bundle",
+    "assess_bundle_status",
     "export_share_copy",
     "apply_x_transform",
     "apply_inverse_y",
