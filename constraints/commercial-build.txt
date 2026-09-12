@@ -2,7 +2,7 @@
 #   python -m c15_local.update_constraints --commercial-build
 # Do not hand-edit pins without re-running the installer.
 # python: 3.12.3
-# direct runtime: cryptography, fastapi, httpx, jinja2, matplotlib, numpy, openpyxl, pandas, pip-audit, psutil, pyhanko, pyinstaller, python-dotenv, python-multipart, requests, scipy, seaborn, statsmodels, streamlit, uvicorn, weasyprint, websockets, xlrd
+# direct runtime: cryptography, fastapi, httpx, jinja2, matplotlib, numpy, openpyxl, pandas, pip-audit, psutil, pyhanko, pyinstaller, pypdf, python-dotenv, python-multipart, requests, scipy, seaborn, statsmodels, streamlit, uvicorn, weasyprint, websockets, xlrd
 
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.3
@@ -82,6 +82,7 @@ pyhanko-certvalidator==0.32.1
 pyinstaller==6.22.2
 pyinstaller-hooks-contrib==2026.7
 pyparsing==3.3.2
+pypdf==6.18.1
 pyphen==0.18.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.3

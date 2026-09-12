@@ -67,6 +67,7 @@ hiddenimports = (
     + collect_submodules("streamlit")
     + collect_submodules("pyhanko")
     + collect_submodules("pyhanko_certvalidator")
+    + collect_submodules("pypdf")
     + ["c15_local.launcher"]
 )
 
