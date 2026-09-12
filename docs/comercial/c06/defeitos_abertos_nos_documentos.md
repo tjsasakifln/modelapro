@@ -1,102 +1,191 @@
-# Defeitos abertos nos documentos de C06
+# Registro de verificação adversarial de C06
 
-Cada entregável de C06 passou por verificação adversarial com mutantes. Os
-defeitos abaixo foram **provados**, e **não** foram corrigidos: a remediação
-foi interrompida por limite de sessão.
+**Este arquivo já disse o contrário. A correção está registrada, não apagada.**
 
-Os documentos ficam publicados porque a análise de fundo foi conferida contra
-fontes primárias e se sustenta. Mas nenhum deles deve ser lido como verificado
-enquanto os itens abaixo estiverem abertos. Cada arquivo afetado carrega um
-cabeçalho apontando para cá.
+Uma revisão anterior deste documento afirmava que a remediação de quatro
+entregáveis "não foi executada" e estampava os quatro arquivos como não
+verificados. Isso estava **errado**. Os agentes de remediação morreram por
+limite de sessão **depois** de escrever os arquivos e **antes** de reportar, e
+eu li a ausência do relatório como ausência do trabalho. Conferi arquivo por
+arquivo depois.
 
-## `test_inventory.md` / `test_inventory.json` — remediação NÃO executada
+O erro era meu, e é do tipo que este documento existe para pegar: concluir
+sobre um artefato a partir de um relatório em vez de abrir o artefato.
 
-1. **FIND-04 é falso no próprio SHA que o documento fixa.** Afirma que
-   `verify_artifacts()` nunca executa no CI porque o job `acceptance` passaria
-   só `--required-jobs` e `--results-json`. Em `65cb121` o job passa
-   `--artifacts-dir evidence --expected-sha --min-wide-tests --p04-mode
-   accept-candidate`. O documento descreve o commit **pai** (`8d66c79`) e
-   estampa o resultado com o SHA do filho. Causa: `65cb121` entrou 01:58:30Z,
-   a medição é de 02:01:23Z, e o agente recoletou os testes contra o HEAD novo
-   mas nunca releu o workflow.
-2. **Mesma causa, segunda alegação falsa.** Diz que `p04-harness` roda
-   `--mode diagnose-base`, na tabela da seção 5, em OPT-02, em FIND-04 e
-   textualmente no JSON. Em `65cb121` roda `accept-candidate`.
-3. **Cascata.** "The gate checks job conclusions only" e "no CI path can turn a
-   missing extension into a red build" são ambas falsas no SHA fixado.
-4. **FIND-03 e FIND-08 estão RESOLVIDOS** (commit `be464a2`) e o documento
-   ainda os lista como abertos.
-5. **Cerca de doze node ids citados coletam ZERO** — são testes dentro de
-   classes, escritos com dois segmentos. Um inventário cujas citações não rodam
-   é o contrário de trilha auditável.
-6. Citações de linha erradas (`aggregate_required.py:135-136` não é a checagem
-   de extensões), um nome de teste inexistente
-   (`test_skip_xfail_and_findings_are_caught`), e o remédio proposto em FIND-06
-   não funciona: a contagem é dominada por arquivos **não rastreados**, então
-   citar o SHA não a torna reproduzível.
+## O que a verificação adversarial encontrou, e o que aconteceu depois
 
-FIND-04 **não** é lixo: é uma redescoberta independente do R20-A original, por
-um agente que não sabia do conserto. Deve ser reenquadrado como
-"redescoberto, já corrigido em `65cb121`", não apagado.
+Seis entregáveis, cada um verificado por um agente instruído a refutá-lo, com
+mutantes empíricos. Quatro voltaram `WEAK` com defeitos **provados**.
 
-## `institution_profiles.md` / `real_case_matrix.md` — remediação NÃO executada
+### `test_metamorphic_reference.py` — corrigido e reverificado
 
-1. **O script de verificação não verifica o entregável.** Ele faz grep nos dois
-   textos-fonte por strings **redigitadas à mão dentro do próprio script**; não
-   lê as citações do documento. Prova: substituindo todos os 45 blocos citados
-   por "TEXTO TOTALMENTE INVENTADO QUE NAO EXISTE EM FONTE NENHUMA", o script
-   seguiu imprimindo `PASS=21 FAIL=0`, exit 0.
-2. **A alegação metodológica central é logicamente falsa.** §1.1 diz que
-   contagem igual a 1 demonstra ausência de redação empilhada superada. Não
-   demonstra: uma gêmea revogada é uma string **diferente**, e também ocorre uma
-   vez. Contraprova: o art. 6 caput vigente tem `grep -c` = 1, e a gêmea
-   revogada também.
-3. **O erro que o método deveria evitar aconteceu.** A ementa citada como
-   "verbatim" é a **revogada** pré-2025. A vigente desde 1º/7/2025 — catorze
-   meses antes da data do próprio documento — diz "operação de crédito
-   imobiliário", e o documento nunca a cita, dentro de uma seção intitulada
-   "Texto efetivamente consultado".
-4. **A evidência não é durável.** Os dois textos-fonte e o script viviam só na
-   scratchpad da sessão, fora do worktree. O documento diz ao revisor que a
-   conferência "é reproduzível por qualquer revisor", e nada no repo permite
-   reexecutá-la. *(Parcialmente endereçado: `docs/comercial/c06/sources/` e
-   `scripts/comercial/` foram criados antes da interrupção — o conteúdo não foi
-   verificado por C06.)*
-5. **Cobertura menor que a alegada.** §1.1 diz "cada passagem transcrita foi
-   conferida"; o script checa 7 strings do BCB e 4 da SUSEP de ~19 passagens
-   citadas, duas delas fragmentos truncados que conferem prefixo.
-6. **R2 exagera a seleção adversarial.** Afirma que RC-03, RC-06 e RC-09 são
-   casos em que se espera **não** atingimento do critério. Mas os critérios
-   congelados dessas linhas são comportamentais (o produto **declara**
-   insuficiência amostral, **sinaliza** inadequação do método, **não funde** as
-   populações) — e os autores esperam que o produto faça isso, logo o esperado é
-   **atingimento**. Como congelada, a matriz tem **zero** linhas cujo critério
-   se espera falhar. A garantia anti-cherry-picking é mais fraca que o
-   declarado.
-7. O gate de `NOT_RUN` é `-ge 12` contra matriz de 10 linhas (10 linhas + 2
-   menções em prosa): acoplado a prosa incidental, e não verifica que **cada**
-   linha carrega `NOT_RUN`.
+Defeito provado: **tautologia**. A asserção era
+`arithmetic/geometric == exp(sigma2/2)`, com o próprio teste definindo
+`geometric = exp(point)` e `arithmetic = exp(point + sigma2/2)` — a identidade
+`exp(a+b)/exp(a) == exp(b)`, verdadeira para qualquer `a` e qualquer `b`. Um
+mutante com `sigma2 = 100*sse/df` deixava o teste verde.
 
-As conclusões de fundo foram conferidas independentemente e estão **corretas**:
-valor de avaliação como base operativa, e ausência de qualquer programa formal
-de homologação de *software*. O defeito é o aparato de verificação, não a
-substância.
+Mais: os testes de quase-singularidade usavam `b = x*(1+delta)`, que é múltiplo
+escalar **exato** — posto deficiente exato, não quase-singularidade — e a
+propriedade titulada é **falsa** do oracle (designs com `cond` até 2.2e13 são
+aceitos).
 
-## `reuse.json` / `security_supply_chain.md` — remediação executada, dois defeitos NOVOS
+Corrigido. A reverificação: morto por 7 de 8 mutantes numéricos, inclusive os
+4 que deixavam a versão antiga verde. Veredito `CONFIRMED`.
 
-A remediação corrigiu os seis defeitos provados (a evidência de licença de
-`wheel` e `setuptools` citava arquivos como inexistentes quando existem em
-`dist-info/licenses/`; a contagem de transitivas era ~80 e é 67) e sobreviveu a
-sete mutantes. Mas introduziu:
+### `test_nist_strd.py` / `PROVENANCE.md` — corrigido, conferido por mim
 
-1. **Alegação falsa nova**: o cabeçalho reestampado diz "Nothing cited in this
-   document moved between the two" (`a331606` → `be464a2`), o que `git diff`
-   contradiz.
-2. **Âncoras de linha da §4 não resolvem** no commit que o cabeçalho nomeia: a
-   §4 diz "385 lines" e o workflow tem 400 em `be464a2`.
+Defeitos provados: a alegação "Every single failure was on `B0`" era **falsa**
+(medi eu mesmo: 6 datasets, 13 falhas, 7 fora do `B0`), e onze asserções de
+Filip eram **inertes** (`sd_rel_floor >= 1.0` reduzia o teste a
+`isfinite() and >= 0`, e a previsão "no reproducible significant digit" era
+empiricamente falsa — o oracle reproduz a 8.5-10.1 dígitos).
 
-## O que isto significa para os aceites
+Corrigido. Conferi os dois pontos de risco eu mesmo:
+- os 11 pisos novos **reproduzem mecanicamente** da regra escrita, e o de Filip
+  é 15.270× mais largo que o erro observado — o oposto de número ajustado;
+- os `.dat` foram vendorizados e os 11 sha256 batem (11/11), então os hashes
+  deixaram de ser circulares.
 
-`C06-A05` e `C06-A07` seguem `IMPLEMENTED_PARTIAL` / `BLOCKED_EXTERNAL_EVIDENCE`
-e **não** sobem por causa destes documentos. O item A do inventário não está
-concluído. Nada aqui muda `COMMERCIAL_RELEASE_READY`, que continua **não**.
+### `institution_profiles.md` / `real_case_matrix.md` — corrigido, conferido por mim
+
+Defeito provado mais grave: **o script de verificação não verificava o
+entregável**. Fazia grep nos textos-fonte por strings redigitadas dentro do
+próprio script, sem ler as citações do documento. Substituindo todos os blocos
+citados por texto inventado, ele seguia imprimindo `PASS=21 FAIL=0`.
+
+Também: a alegação metodológica de §1.1 era logicamente falsa (contagem 1 não
+demonstra ausência de redação empilhada — a gêmea revogada é outra string e
+também ocorre uma vez), e a ementa citada como *verbatim* era a **revogada**
+pré-2025 — exatamente a armadilha que o documento dizia ter evitado.
+
+Corrigido. Apliquei o mutante do verificador ao script novo
+(`scripts/comercial/aceite/verify_c06.py`, 459 linhas, que extrai as citações
+**do documento**): 57 passagens substituídas por texto inventado →
+`PASS=53 FAIL=31`, exit 1. O script antigo dava `FAIL=0` sob a mesma mutação.
+A ementa vigente agora é citada, com as duas redações empilhadas explicadas.
+
+### `reuse.json` / `security_supply_chain.md` — corrigido, e dois defeitos novos que a própria correção criou
+
+Os seis defeitos provados foram corrigidos (a evidência de licença de `wheel` e
+`setuptools` citava arquivos como inexistentes quando existem em
+`dist-info/licenses/`; as transitivas eram 67, não "~80"). Mas a correção
+introduziu dois novos, pegos pela reverificação:
+
+1. "Nothing cited in this document moved between the two" — falso: dois
+   arquivos citados moveram (`c15-ci.yml`, `aggregate_required.py`).
+2. As âncoras de linha da §4 não resolviam no commit nomeado (dizia 385 linhas;
+   o workflow tem 409).
+
+Ambos corrigidos por mim.
+
+### `test_inventory.md` / `.json` — corrigido
+
+Defeito provado: **FIND-04 era falso no próprio SHA que o documento fixava**.
+Afirmava que o agregador nunca lia artefatos no CI — descrevendo o commit
+**pai** e estampando o resultado com o SHA do filho. Causa: `65cb121` entrou
+01:58:30Z, a medição é de 02:01:23Z, e o agente recoletou os testes contra o
+HEAD novo sem reler o workflow.
+
+Corrigido, e bem: FIND-04 está marcado `RESOLVED in 65cb121` com a explicação
+do erro, **preservado em vez de apagado**, e reenquadrado como redescoberta
+independente do R20-A por um agente que não sabia do conserto. FIND-03 e
+FIND-08 também `RESOLVED`. O remédio quebrado de FIND-06 (citar o SHA junto da
+contagem) foi substituído por um que funciona.
+
+## Dois vermelhos reais no CI, nenhum deles conserto por tolerância
+
+O run **34667826006** (`c9ab4dc`) foi o primeiro a rodar as duas checagens
+novas. Três coisas saíram vermelhas, e classificá-las importa mais que
+consertá-las rápido.
+
+### 1. `test_nist_strd::test_certified_residual_standard_deviation_and_r_squared[Pontius]` — ABERTO, e não vou afrouxar
+
+```
+Pontius residual sd: certified=0.000205177424076185
+                      observed=0.00020517742407622438
+rel_err=1.919e-13 (12.72 correct digits)
+pre-registered floor=1.845e-13 (kappa_eq=1.845e+01)
+```
+
+Passa na minha máquina, falha no runner do CI. Excede o piso por fator **1.04**.
+
+Subir o piso para 2e-13 faria o teste passar e seria exatamente o que o
+contrato proíbe: ajustar tolerância depois de ver o número. Não fiz, e não
+deve ser feito.
+
+O defeito real é na **regra**, não no número. O piso de `proj_rel_floor` usa
+`A = kappa_eq` para o desvio-padrão residual, mas essa quantidade vem de
+`sse/(n-p)` — uma soma de quadrados, cujo erro relativo não é governado por
+`kappa_eq` com uma casa de margem. Observado 1.9e-13 é ~47× o limite
+`eps*kappa_eq = 4.1e-15`: a regra **sub-prevê** para esta classe de
+quantidade, e Pontius é onde a margem de 1 dígito acabou primeiro.
+
+O conserto honesto é derivar o fator de amplificação correto para quantidades
+do tipo soma-de-quadrados e **rederivar todos os pisos** dessa classe a partir
+da regra corrigida — não só o de Pontius. Isso é análise numérica, não um
+ajuste, e não couberam nesta sessão. Enquanto não for feito, o teste fica
+vermelho e a suíte ampla fica vermelha com ele. Isso é o registro correto do
+estado, não um bloqueio a ser contornado.
+
+### 2. `p02/test_a01_playwright::test_a01_playwright_real_path_or_record_unavailability` — HANDOFF a C02
+
+```
+AssertionError: subject area field missing; body=Trabalho ... 1. Preparação da amostra ...
+```
+
+O navegador **rodou** e a tela carregou; o campo de área do avaliando não foi
+encontrado. É o mesmo arquivo do **FIND-05** do inventário — o teste que antes
+reportava verde quando o fluxo não rodava. Agora falha de verdade, o que é uma
+melhora no sinal e uma piora no estado.
+
+C02 tem quatro commits e trabalho não commitado mexendo no frontend, o que é a
+explicação provável. Arquivo de P02/C02: **não é conserto meu**, é pedido com
+evidência. Registrado aqui porque bloqueia a suíte ampla obrigatória e quem
+vir o vermelho precisa saber de quem é.
+
+### 3. `install-smoke.junit.xml: artifact absent` — era meu, plumbing, consertado
+
+Não era defeito de produto. Eu havia trocado `pip install -e ".[dev]"` por
+`pip install pytest` no passo do smoke, com o raciocínio de que o job
+"clean venv" não deveria instalar o produto em editable. O raciocínio era bom e
+o efeito foi quebrar: `tests/conftest.py` importa `matplotlib` no topo, então o
+pytest nem carrega o conftest — exit 4, nenhum junit escrito, e o upload com
+`if-no-files-found: error` derruba o job. O agregador então reportou o artefato
+ausente, corretamente.
+
+Restaurado, com o motivo escrito no próprio passo. A garantia de venv limpo
+vive no venv que o próprio teste constrói em `$HOME`, que esse install não
+toca.
+
+Vale registrar a forma do erro: uma limpeza que parecia obviamente correta
+quebrou um gate, e o gate pegou. Foi a checagem nova de artefato — adicionada
+duas horas antes — que tornou a quebra visível em vez de silenciosa.
+
+## Ressalvas que seguem abertas
+
+Estas **não** foram corrigidas — a remediação delas nunca foi lançada:
+
+- **`test_mutations_commercial.py`, defeito 3 roda numa superfície que o
+  produto nunca emite.** `provenance.request_spec` é criado pelo próprio teste
+  (`snap.setdefault("provenance", {})["request_spec"] = spec`), e o S01 real
+  traz `evaluation_policy.method == 'none'` — o estado mutado. *(Parcialmente
+  endereçado: a frase falsa "injected into a copy of a real snapshot" foi
+  removida e a superfície está rotulada como `TEST-AUTHORED`; o detector segue
+  sem superfície real.)*
+- **Oito dos dez defeitos comerciais não têm guarda do lado do produto.** Os
+  detectores são de teste, escritos no mesmo arquivo que as mutações — provam
+  que o validador funciona, não que o produto resiste. Divulgado no docstring
+  do módulo, por defeito.
+- **FIND-01, FIND-02, FIND-05, FIND-06, FIND-07** do inventário seguem `OPEN`.
+  O mais grave para o aceite é **FIND-05**:
+  `tests/pro_workflow/p02/test_a01_playwright.py` **reporta verde quando o
+  fluxo de navegador não rodou** — escreve um log `BLOCKED` e retorna. Por não
+  ser skip nem xfail, é invisível ao relatório de skips e ao agregador. É
+  arquivo de P02/C02: handoff, não conserto meu.
+
+## O que isto não muda
+
+Nenhum aceite sobe por causa destas correções. `COMMERCIAL_RELEASE_READY`
+continua **não**. A verificação adversarial por agentes **não é** revisão
+técnica independente e não conta como `INDEPENDENT_TECHNICAL_REVIEW`.

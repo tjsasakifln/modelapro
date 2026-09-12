@@ -83,26 +83,40 @@ Limite de sessão interrompeu quatro agentes. O que ficou:
 - Mutações comerciais: 21 detectores, veredito CONFIRMED
 - Handoff de grau implementado por C01 e reexecutado por C06
 
-**Não executado, e registrado como tal:**
-- Remediação de `test_inventory.{md,json}` — defeitos provados seguem abertos
-- Remediação de `institution_profiles.md` / `real_case_matrix.md` — idem
-- Dois defeitos **novos** em `security_supply_chain.md`, introduzidos pela
-  própria remediação dele
+**Correção de um erro meu:** uma revisão anterior deste handoff dizia que a
+remediação de quatro documentos "não foi executada". Estava errado. Os agentes
+morreram **depois** de escrever e **antes** de reportar, e eu li a ausência do
+relatório como ausência do trabalho. Conferi arquivo por arquivo depois, e os
+quatro estão corrigidos. Registro em
+`defeitos_abertos_nos_documentos.md`, que também guarda a versão errada.
 
-Lista exata: `defeitos_abertos_nos_documentos.md`. **Comece por ela.**
+**Corrigido e conferido por mim, não só pelos agentes:**
+- os 11 pisos novos do NIST reproduzem mecanicamente da regra escrita, e o de
+  Filip é 15.270x mais largo que o erro observado (o oposto de ajustado)
+- os 11 `.dat` vendorizados batem com os sha256 registrados
+- o script institucional novo vai **vermelho** sob o mutante do verificador:
+  57 citações substituídas por texto inventado -> `PASS=53 FAIL=31`, exit 1.
+  O antigo dava `FAIL=0` sob a mesma mutação
+- as duas alegações falsas que a própria remediação do `security_supply_chain`
+  introduziu
+
+**Ressalvas que seguem abertas:**
+- `test_mutations_commercial.py`: o defeito 3 roda numa superfície que o
+  produto nunca emite (`provenance.request_spec` é criado pelo teste). A frase
+  falsa foi removida e a superfície rotulada, mas o detector segue sem
+  superfície real
+- oito dos dez defeitos comerciais não têm guarda do lado do produto
+- **FIND-05** do inventário, o mais grave: `p02/test_a01_playwright.py`
+  reporta verde quando o navegador não rodou. Arquivo de P02/C02 — handoff,
+  não conserto meu
 
 **Não executado, de escopo maior:**
-- Remediação das ressalvas do verificador sobre as mutações comerciais: o
-  defeito 3 roda numa superfície que o produto nunca emite
-  (`provenance.request_spec` é criado pelo próprio teste), e
-  `interval_matches_reference_problems` passa em silêncio quando o artefato
-  não traz intervalo nenhum
-- Composição C01–C05 na #20. Só C01 tem HEAD limpo e foi apenas **lido**
+- Composição C01-C05 na #20. Só C01 tem HEAD limpo (`1d40285`) e foi apenas
+  **lido** em worktree descartável
 
 ## A regra que importa na retomada
 
-Nada aqui autoriza declarar prontidão. Os documentos com defeito estampado
-**não** contam como evidência enquanto os itens abertos não caírem. E os três
-testes de `testes_que_fixam_defeitos.md` ficam vermelhos quando alguém
-consertar o defeito que eles fixam — isso é esperado, e a resposta é invertê-los
-na mesma mudança, nunca apagá-los.
+Nada aqui autoriza declarar prontidão. Os três testes de
+`testes_que_fixam_defeitos.md` ficam vermelhos quando alguém consertar o
+defeito que eles fixam — isso é esperado, e a resposta é invertê-los na mesma
+mudança, nunca apagá-los.

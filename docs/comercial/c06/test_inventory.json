@@ -512,6 +512,5 @@
     "No Windows readiness claim, and no claim that the product was validated by a human appraiser.",
     "Where an area is ABSENT, no compensating coverage was found and none is implied."
   ],
-  "skip_enumeration_oracle": "grep -rn \"pytest\\.skip|skipif|xfail|pytest\\.importorskip\" tests/ --include=*.py, re-run at c9ab4dc: exactly three genuine skip sites (SKIP-01/02/03) and no xfail marker anywhere. The other grep hits are aggregator fixtures and assertions ABOUT skip/xfail counting, not markers. Unchanged since the 705-case snapshot despite the tree growing to 894.",
-  "_WARNING_defeitos_abertos": "Defeitos provados e NAO corrigidos neste arquivo. Ver docs/comercial/c06/defeitos_abertos_nos_documentos.md. FIND-04 e as mencoes a diagnose-base sao FALSAS no SHA fixado; FIND-03 e FIND-08 estao RESOLVIDOS em be464a2; ~12 node ids citados coletam zero."
+  "skip_enumeration_oracle": "grep -rn \"pytest\\.skip|skipif|xfail|pytest\\.importorskip\" tests/ --include=*.py, re-run at c9ab4dc: exactly three genuine skip sites (SKIP-01/02/03) and no xfail marker anywhere. The other grep hits are aggregator fixtures and assertions ABOUT skip/xfail counting, not markers. Unchanged since the 705-case snapshot despite the tree growing to 894."
 }

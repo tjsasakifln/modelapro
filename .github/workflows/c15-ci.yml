@@ -137,10 +137,14 @@ jobs:
         env:
           C15_INSTALL_SMOKE: "1"
         run: |
-          # No editable install here: this job's contract is the installed
-          # distribution. The smoke test builds its own wheel and venv, so it
-          # needs a test runner and nothing else.
-          python -m pip install -c constraints/linux-py3.txt pytest
+          # The runner interpreter needs the dev extras, not because the smoke
+          # test wants the product importable -- it builds its own wheel and its
+          # own venv under $HOME -- but because tests/conftest.py imports
+          # matplotlib at module level, so bare pytest cannot even load the
+          # conftest (exit 4, no junit, and the upload below then fails).
+          # The clean-venv guarantee lives in the smoke test's own venv, which
+          # this install does not touch.
+          python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
           python -m pytest tests/c15_packaging/test_wheel_install_smoke.py -q --tb=short \
             --junitxml=artifacts/install-smoke.junit.xml
       - name: Upload install-smoke evidence

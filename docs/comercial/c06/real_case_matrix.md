@@ -1,10 +1,3 @@
-> **⚠️ DEFEITOS PROVADOS E ABERTOS NESTE DOCUMENTO.** A verificação
-> adversarial provou defeitos aqui que **não** foram corrigidos (remediação
-> interrompida por limite de sessão). Não leia este arquivo como verificado.
-> Lista exata: `docs/comercial/c06/defeitos_abertos_nos_documentos.md`.
-
----
-
 # C06-A04 — Matriz de validação em casos reais (protocolo)
 
 **Campanha:** MP-COM-20260912 / C06

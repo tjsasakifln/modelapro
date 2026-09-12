@@ -1,10 +1,3 @@
-> **⚠️ DEFEITOS PROVADOS E ABERTOS NESTE DOCUMENTO.** A verificação
-> adversarial provou defeitos aqui que **não** foram corrigidos (remediação
-> interrompida por limite de sessão). Não leia este arquivo como verificado.
-> Lista exata: `docs/comercial/c06/defeitos_abertos_nos_documentos.md`.
-
----
-
 # MODELA PRO — Supply chain, secrets hygiene and CI security posture
 
 **Campaign:** MP-COM-20260912/C06 — aceite C06-A07
@@ -12,7 +5,10 @@
 **Branch / commit shipping this document:** `mp-pro-20260911/p04-referencia-consolidacao` @ `be464a2`
 (`git rev-parse --abbrev-ref HEAD` / `git rev-parse --short HEAD`, re-run when this revision was written)
 **Commit at which the evidence below was first gathered:** `a331606`, a verified ancestor of `be464a2`
-(`git merge-base --is-ancestor a331606 HEAD` exits 0). Nothing cited in this document moved between the two;
+(`git merge-base --is-ancestor a331606 HEAD` exits 0). Two files cited here **did** move between the two -- `.github/workflows/c15-ci.yml` and
+`scripts/c15_local/aggregate_required.py` -- and they moved again after `be464a2`. An earlier
+revision of this line claimed nothing cited had moved, which was false; line anchors below are
+therefore re-derived at `2a8009b` rather than at the commit first inspected.
 the header is re-stamped so it names the commit that ships the document rather than a stale one.
 **Date of inspection:** 2026-09-11
 **Companion machine-readable manifest:** [`reuse.json`](./reuse.json)
@@ -282,7 +278,7 @@ there was nothing to redact.
 
 ## 4. CI permissions and workflow trust model
 
-Source: `.github/workflows/c15-ci.yml` (385 lines; it is the **only** file in
+Source: `.github/workflows/c15-ci.yml` (409 lines at `2a8009b`; it is the **only** file in
 `.github/workflows/`, confirmed by `ls .github/workflows/`).
 
 ### 4.1 Token permissions — least privilege, and it is real
