@@ -37,6 +37,7 @@ REQUIRED_RUNTIME_IMPORTS = frozenset(
         "xlrd",
         "cryptography",
         "pyhanko",
+        "pypdf",
     }
 )
 ANNOUNCED_FORMAT_ENGINES = {
@@ -54,7 +55,6 @@ DEV_ONLY = frozenset(
         "build",
         "wheel",
         "setuptools",
-        "pypdf",
         "playwright",
     }
 )

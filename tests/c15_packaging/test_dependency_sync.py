@@ -77,9 +77,9 @@ def test_pytest_is_dev_extra_not_runtime():
     assert "pytest" in dev
     assert "httpx" in runtime
     assert "httpx" not in dev
-    assert "pypdf" in dev
+    assert "pypdf" in runtime
+    assert "pypdf" not in dev
     assert "playwright" in dev
-    assert "pypdf" not in runtime
     assert "playwright" not in runtime
 
 
