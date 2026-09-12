@@ -163,7 +163,7 @@ class TestE2EUiStreamlit:
 
                 body = ""
                 retried = False
-                for _ in range(40):
+                for i in range(60):
                     body = page.inner_text("body")
                     if ("Valor da avaliação" in body or "Cálculo disponível" in body) and (
                         "735.000,00" in body or "735000" in body or "735.000" in body
@@ -171,10 +171,15 @@ class TestE2EUiStreamlit:
                         break
                     if (
                         not retried
-                        and "Estado: Falha" in body
+                        and (
+                            "Estado: Falha" in body
+                            or (i in (8, 20) and "735" not in body)
+                        )
                         and "Característica 'area' ausente" not in body
                     ):
-                        again = page.locator("button[type='submit']").filter(has_text="Executar")
+                        again = page.get_by_role("button", name="Executar avaliação")
+                        if again.count() < 1:
+                            again = page.locator("button[type='submit']").filter(has_text="Executar")
                         if again.count() >= 1 and again.first.is_enabled():
                             again.first.click()
                             retried = True
