@@ -1,0 +1,42 @@
+{
+  "schema_version": "MP-REUSE/1",
+  "owner": "C04",
+  "status": "IMPLEMENTED_PARTIAL",
+  "generated_inventory": {
+    "command": "python -m scripts.comercial.operacao.sbom --generated-at <RFC3339> --output <path>",
+    "scope": "exact isolated release environment",
+    "required_fields": ["name", "version", "license", "homepage"]
+  },
+  "entries": [
+    {
+      "component": "PyInstaller",
+      "origin_url": "https://github.com/pyinstaller/pyinstaller",
+      "tag_or_release": "v6.16.0",
+      "source_sha256": "NOASSERTION (release archive not acquired by C04)",
+      "selected_version_constraint": "constraints/commercial-build.txt: pyinstaller==6.16.0",
+      "spdx": "NOASSERTION (exact release notice not independently retained)",
+      "use": "release build tool only; no copied source",
+      "files_or_functions": [],
+      "adaptations": "none",
+      "update_owner": "C04 release maintenance",
+      "verification": "exact release licence, notices and vulnerability result must be attached to release evidence"
+    },
+    {
+      "component": "pip-audit",
+      "origin_url": "https://github.com/pypa/pip-audit",
+      "tag_or_release": "v2.9.0",
+      "source_sha256": "NOASSERTION (release archive not acquired by C04)",
+      "selected_version_constraint": "constraints/commercial-build.txt: pip-audit==2.9.0",
+      "spdx": "NOASSERTION (exact release notice not independently retained)",
+      "use": "release audit tool only; no copied source",
+      "files_or_functions": [],
+      "adaptations": "none",
+      "update_owner": "C04 release maintenance",
+      "verification": "non-zero audit exits block release pending reviewed mitigation"
+    }
+  ],
+  "blocked": [
+    "Repository/contributor distribution rights require an authorised ownership/licence decision.",
+    "A release-specific SBOM, notices review and vulnerability report have not yet been produced."
+  ]
+}

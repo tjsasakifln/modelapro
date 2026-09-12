@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .packaging_meta import requirement_name, runtime_dependency_specs, source_root
+from .packaging_meta import commercial_build_specs, requirement_name, runtime_dependency_specs, source_root
 
 
 def _run(cmd: list[str]) -> str:
@@ -23,9 +23,15 @@ def main(argv: list[str] | None = None) -> int:
         default=sys.executable,
         help="Interpreter used to create the throwaway venv",
     )
+    parser.add_argument(
+        "--commercial-build",
+        action="store_true",
+        help="regenerate constraints/commercial-build.txt from the release-tools extra",
+    )
     args = parser.parse_args(argv)
     root = source_root()
-    out = root / "constraints" / "linux-py3.txt"
+    out = root / "constraints" / ("commercial-build.txt" if args.commercial_build else "linux-py3.txt")
+    extra = "commercial-build" if args.commercial_build else "dev"
     with tempfile.TemporaryDirectory(prefix="modelapro-c15-lock-") as tmp:
         venv = Path(tmp) / "venv"
         subprocess.run([args.python, "-m", "venv", str(venv)], check=True)
@@ -35,14 +41,15 @@ def main(argv: list[str] | None = None) -> int:
             python = venv / "bin" / "python"
         subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
         subprocess.run(
-            [str(python), "-m", "pip", "install", str(root) + "[dev]"],
+            [str(python), "-m", "pip", "install", str(root) + f"[{extra}]"],
             check=True,
         )
         freeze = _run([str(python), "-m", "pip", "freeze", "--all"])
-    direct = ", ".join(sorted(requirement_name(spec) for spec in runtime_dependency_specs(root)))
+    direct_specs = commercial_build_specs(root) if args.commercial_build else runtime_dependency_specs(root)
+    direct = ", ".join(sorted(requirement_name(spec) for spec in direct_specs))
     lines = [
         "# Locked from a clean venv. Update with:",
-        "#   python -m c15_local.update_constraints",
+        "#   python -m c15_local.update_constraints" + (" --commercial-build" if args.commercial_build else ""),
         "# Do not hand-edit pins without re-running the installer.",
         f"# python: {sys.version.split()[0]}",
         f"# direct runtime: {direct}",
