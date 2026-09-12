@@ -67,3 +67,42 @@ ausente no venv de desenvolvimento. É ambiental: o CI instala `.[dev]` com
   do próprio commit que ele descreve.
 - `COMMERCIAL_RELEASE_READY` não se declara com requisito decisivo pendente.
   Sem merge, venda ou deploy automáticos.
+
+---
+
+## Onde a sessão parou (2026-09-12)
+
+Limite de sessão interrompeu quatro agentes. O que ficou:
+
+**Verificado e commitado:**
+- R20-A fechado, com run vermelho real (34666595782) e a matriz de injeções
+- Piso da suíte ampla como catraca: 700 → 800 (run be464a2 mediu 808, 0 falhas)
+- NIST StRD com os `.dat` vendorizados, 11/11 sha256 conferidos por C06, e os
+  44 pisos rederiváveis da regra escrita
+- Metamórficos: tautologia substituída, morta por 7 de 8 mutantes
+- Mutações comerciais: 21 detectores, veredito CONFIRMED
+- Handoff de grau implementado por C01 e reexecutado por C06
+
+**Não executado, e registrado como tal:**
+- Remediação de `test_inventory.{md,json}` — defeitos provados seguem abertos
+- Remediação de `institution_profiles.md` / `real_case_matrix.md` — idem
+- Dois defeitos **novos** em `security_supply_chain.md`, introduzidos pela
+  própria remediação dele
+
+Lista exata: `defeitos_abertos_nos_documentos.md`. **Comece por ela.**
+
+**Não executado, de escopo maior:**
+- Remediação das ressalvas do verificador sobre as mutações comerciais: o
+  defeito 3 roda numa superfície que o produto nunca emite
+  (`provenance.request_spec` é criado pelo próprio teste), e
+  `interval_matches_reference_problems` passa em silêncio quando o artefato
+  não traz intervalo nenhum
+- Composição C01–C05 na #20. Só C01 tem HEAD limpo e foi apenas **lido**
+
+## A regra que importa na retomada
+
+Nada aqui autoriza declarar prontidão. Os documentos com defeito estampado
+**não** contam como evidência enquanto os itens abertos não caírem. E os três
+testes de `testes_que_fixam_defeitos.md` ficam vermelhos quando alguém
+consertar o defeito que eles fixam — isso é esperado, e a resposta é invertê-los
+na mesma mudança, nunca apagá-los.
