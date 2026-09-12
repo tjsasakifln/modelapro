@@ -17,6 +17,7 @@ def test_event_json_is_utf8_even_under_windows_legacy_default(tmp_path, monkeypa
     }}, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
     original = Path.read_text
+
     def legacy_default(path, encoding=None, **kwargs):
         return original(path, encoding=encoding or "cp1252", **kwargs)
     monkeypatch.setattr(Path, "read_text", legacy_default)

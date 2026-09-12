@@ -21,13 +21,13 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
         state = status.get("state") or status
         st.write("Estado documental:", state.get("case_release_status") or state.get("document_state") or "Ainda não preparado")
         context = json.loads(client.get_artifact("report_context.json"))
-        with st.expander("Arquivos integrais e procedência"):
+        with st.expander("Arquivos integrais e procedência"), st.form(f"{namespace}_attachment_form"):
             attachment = st.file_uploader("Documento ou anexo integral", key=f"{namespace}_attachment")
             category = st.selectbox("Categoria do arquivo", ["document", "annex"], key=f"{namespace}_category")
             source = st.text_input("Fonte e autorização de acesso ao arquivo", key=f"{namespace}_source")
             description = st.text_input("Descrição do documento/anexo", key=f"{namespace}_description")
             authorized = st.checkbox("Tenho autorização para incluir estes bytes no laudo e dossiê", key=f"{namespace}_authorized")
-            if st.button("Anexar arquivo autorizado", key=f"{namespace}_attach"):
+            if st.form_submit_button("Anexar arquivo autorizado"):
                 if attachment is None or not authorized or not source.strip():
                     st.warning("Informe arquivo, procedência e autorização. Não inclua materiais protegidos sem direito de uso.")
                 else:
@@ -38,7 +38,7 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
                     st.session_state.pop(f"{namespace}_signing_request", None)
                     st.json(stored)
                     st.info("Bytes arquivados com hash. Gere novamente os documentos para incorporar o conteúdo e revalidar revisões.")
-        with st.expander("Completar conteúdo e anexos do laudo"):
+        with st.expander("Completar conteúdo e anexos do laudo"), st.form(f"{namespace}_content_form"):
             fields = {}
             for key, label in (
                 ("asset_identification", "Identificação do bem"),
@@ -54,7 +54,7 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
                 value=json.dumps({"output_evidence": context.get("output_evidence") or {}}, ensure_ascii=False, indent=2),
                 key=f"{namespace}_evidence",
             )
-            if st.button("Gerar PDF, DOCX e dossiê", key=f"{namespace}_generate"):
+            if st.form_submit_button("Gerar PDF, DOCX e dossiê"):
                 evidence = json.loads(documentary_json)
                 if not isinstance(evidence, dict) or set(evidence) - {"output_evidence"}:
                     raise ValueError("Use somente output_evidence no objeto JSON; arquivos são enviados pelo registro de anexos.")

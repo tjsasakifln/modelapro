@@ -7,7 +7,9 @@ import pytest
 from c15_local.aggregate_required import check_collection
 
 
-@pytest.mark.parametrize("mutation", [None, "missing_file", "missing_call", "extra_call", "bad_call", "junit", "sha", "run", "exit"])
+@pytest.mark.parametrize("mutation", [
+    None, "missing_file", "missing_call", "extra_call", "bad_call", "junit", "sha", "run", "exit",
+])
 def test_collection_cross_checks_obligations_and_execution(tmp_path, monkeypatch, mutation):
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
     files = [
@@ -36,8 +38,10 @@ def test_collection_cross_checks_obligations_and_execution(tmp_path, monkeypatch
         payload[{"sha": "tested_commit_sha", "run": "run_id", "exit": "exit_code"}[mutation]] = "wrong"
     root = ET.Element("testsuite")
     for name in files[1:] if mutation == "junit" else files:
-        ET.SubElement(root, "testcase", {"classname": name.removesuffix(".py").replace("/", "."),
-                                       "name": "test_obligation"})
+        ET.SubElement(root, "testcase", {
+            "classname": name.removesuffix(".py").replace("/", "."),
+            "name": "test_obligation",
+        })
     ET.ElementTree(root).write(tmp_path / "wide.junit.xml")
     (tmp_path / "collection.json").write_text(json.dumps(payload), encoding="utf-8")
     assert bool(check_collection(tmp_path, "a" * 40)) == (mutation is not None)
