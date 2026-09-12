@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 
 import pytest
@@ -12,6 +13,7 @@ from backend.api import RuntimeBindings, bind_runtime
 from backend.recipient_routes import router
 from modules.job_store import JobStore
 from modules.qualification_profile import resolve_profile
+from modules.qualification_profile.assessment import normalize_institution_receipt
 from modules.report_export.recipient import (
     RecipientReturnError,
     get_recipient_return_status,
@@ -66,6 +68,8 @@ def _store_return(store, job_id, **overrides):
         "received_at": "2026-09-12T16:00:00-03:00",
         "source": "SYNTHETIC_TEST: importado localmente pelo operador",
         "operator_declaration": DECLARATION,
+        "synthetic_test_only": True,
+        "authorized_for_report": False,
     }
     fields.update(overrides)
     return store_recipient_return(store, job_id, **fields)
@@ -73,6 +77,13 @@ def _store_return(store, job_id, **overrides):
 
 def test_persists_original_bytes_hash_profile_and_unverified_status(tmp_path):
     store, job, original_snapshot = _case(tmp_path)
+    observed_artifacts = {
+        "report.pdf": b"REPORT PDF BEFORE IMPORT",
+        "signed_report.pdf": b"SIGNED PDF BEFORE IMPORT",
+        "submission.zip": b"SUBMISSION BEFORE IMPORT",
+    }
+    for name, content in observed_artifacts.items():
+        store.save_artifact(job["job_id"], name, content)
 
     result = _store_return(store, job["job_id"])
 
@@ -89,10 +100,20 @@ def test_persists_original_bytes_hash_profile_and_unverified_status(tmp_path):
     assert record["status"] == "received_declared_unverified"
     assert record["institution_acceptance"] is False
     assert record["authenticity_verified"] is False
+    assert record["bytes_integrity"] == "verified"
     assert record["recipient_id"] == "banco-do-brasil"
     assert record["profile_id"] == "bb-meci-avaliacao-imovel-pf"
     assert record["protocol"] == "PROTOCOLO-TESTE-001"
     assert record["synthetic_test_only"] is True
+    assert record["authorized_for_report"] is False
+    state = record["case_state_at_import"]
+    assert state["result_fingerprint"] == "a" * 64
+    assert state["report_content_fingerprint"] is None
+    assert state["association_to_sent_version_verified"] is False
+    assert state["artifact_sha256"] == {
+        name: hashlib.sha256(content).hexdigest()
+        for name, content in observed_artifacts.items()
+    }
     assert datetime.fromisoformat(record["received_at"]).tzinfo is not None
     assert store.get_artifact(job["job_id"], record["stored_name"]) == (
         b"RETORNO SINTETICO DE TESTE - SEM VALIDADE EXTERNA"
@@ -105,6 +126,9 @@ def test_persists_original_bytes_hash_profile_and_unverified_status(tmp_path):
     assert status["latest"]["proof_sha256"] == record["proof_sha256"]
     assert status["latest"]["bytes_integrity"] == "verified"
     assert status["records"][0]["record_id"] == record["record_id"]
+    assert normalize_institution_receipt(
+        status["institution_acceptance"], resolve_profile(status["profile"])
+    )["recorded"] is True
 
 
 def test_rejects_recipient_mismatch_and_missing_operator_declaration(tmp_path):
@@ -118,6 +142,10 @@ def test_rejects_recipient_mismatch_and_missing_operator_declaration(tmp_path):
         _store_return(store, job["job_id"], operator_declaration="valid=true")
     assert declaration.value.code == "RECIPIENT_DECLARATION_REQUIRED"
     assert get_recipient_return_status(store, job["job_id"])["records"] == []
+
+    with pytest.raises(RecipientReturnError) as invalid_flag:
+        _store_return(store, job["job_id"], authorized_for_report="false")
+    assert invalid_flag.value.code == "RECIPIENT_RETURN_FLAGS_INVALID"
 
 
 def test_same_exact_return_is_idempotent_and_preserves_history(tmp_path):
@@ -141,6 +169,33 @@ def test_same_exact_return_is_idempotent_and_preserves_history(tmp_path):
         "PROTOCOLO-TESTE-002",
     ]
     assert status["latest"]["record_id"] == third["record"]["record_id"]
+
+
+def test_neutral_profile_cannot_invent_an_institution_from_root_recipient(tmp_path):
+    store = JobStore(tmp_path / "neutral-store", recover_abandoned=False)
+    profile = resolve_profile({"id": "abnt-14653-2-regressao-mercado"})
+    job = store.create(
+        request_spec={
+            "schema_version": "MP/1",
+            "qualification_profile": profile,
+            "recipient_id": "banco-do-brasil",
+        },
+        payload={"filename": "SYNTHETIC_TEST.csv"},
+    )
+
+    with pytest.raises(RecipientReturnError) as missing:
+        _store_return(store, job["job_id"])
+    assert missing.value.code == "RECIPIENT_NOT_CONFIGURED"
+
+
+def test_idempotent_retry_refuses_missing_or_tampered_original_bytes(tmp_path):
+    store, job, _snapshot = _case(tmp_path)
+    first = _store_return(store, job["job_id"])["record"]
+    store.save_artifact(job["job_id"], first["stored_name"], b"TAMPERED")
+
+    with pytest.raises(RecipientReturnError) as tampered:
+        _store_return(store, job["job_id"])
+    assert tampered.value.code == "RECIPIENT_RETURN_INTEGRITY_FAILED"
 
 
 def test_authenticated_http_roundtrip_returns_exact_original_bytes(tmp_path):
@@ -170,6 +225,8 @@ def test_authenticated_http_roundtrip_returns_exact_original_bytes(tmp_path):
                     "received_at": "2026-09-12T16:00:00-03:00",
                     "source": "SYNTHETIC_TEST: fixture HTTP local",
                     "operator_declaration": DECLARATION,
+                    "synthetic_test_only": "true",
+                    "authorized_for_report": "true",
                     # A field named valid is ignored by the declared route and
                     # cannot launder this evidence into an acceptance.
                     "valid": "true",
@@ -178,6 +235,8 @@ def test_authenticated_http_roundtrip_returns_exact_original_bytes(tmp_path):
             assert created.status_code == 200
             record = created.json()["record"]
             assert record["institution_acceptance"] is False
+            assert record["synthetic_test_only"] is True
+            assert record["authorized_for_report"] is True
 
             status = client.get(
                 f"/jobs/{job['job_id']}/recipient-return", headers=headers
@@ -191,5 +250,42 @@ def test_authenticated_http_roundtrip_returns_exact_original_bytes(tmp_path):
             )
             assert exact.status_code == 200
             assert exact.content == b"RETORNO SINTETICO DE TESTE - SEM VALIDADE EXTERNA"
+    finally:
+        RuntimeBindings.job_store = None
+
+
+def test_unicode_filename_download_uses_safe_headers_and_exact_bytes(tmp_path):
+    store, job, _snapshot = _case(tmp_path)
+    app = FastAPI()
+    app.include_router(router)
+    bind_runtime(job_store=store)
+    try:
+        with TestClient(app) as client:
+            headers = {"X-Job-Token": job["access_token"]}
+            created = client.post(
+                f"/jobs/{job['job_id']}/recipient-return",
+                headers=headers,
+                files={"file": ("retorno-📄-ç.txt", b"UNICODE TEST", "text/plain")},
+                data={
+                    "recipient_id": "banco-do-brasil",
+                    "protocol": "PROTOCOLO-TESTE-UNICODE",
+                    "received_at": "2026-09-12T16:00:00-03:00",
+                    "source": "SYNTHETIC_TEST: unicode filename",
+                    "operator_declaration": DECLARATION,
+                },
+            )
+            assert created.status_code == 200
+            record_id = created.json()["record"]["record_id"]
+            downloaded = client.get(
+                f"/jobs/{job['job_id']}/recipient-return/{record_id}/file",
+                headers=headers,
+            )
+            assert downloaded.status_code == 200
+            assert downloaded.content == b"UNICODE TEST"
+            disposition = downloaded.headers["content-disposition"]
+            assert "filename=\"retorno-c.txt\"" in disposition
+            assert "filename*=UTF-8''retorno-%F0%9F%93%84-%C3%A7.txt" in disposition
+            assert downloaded.headers["x-content-type-options"] == "nosniff"
+            assert downloaded.headers["cache-control"] == "no-store"
     finally:
         RuntimeBindings.job_store = None

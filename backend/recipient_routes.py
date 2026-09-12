@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import unicodedata
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -62,6 +65,8 @@ async def recipient_return_import(
     received_at: str = Form(...),
     source: str = Form(...),
     operator_declaration: str = Form(...),
+    synthetic_test_only: bool = Form(False),
+    authorized_for_report: bool = Form(False),
     x_job_token: str | None = Header(None),
 ):
     store = _authorized_store(job_id, x_job_token)
@@ -79,6 +84,8 @@ async def recipient_return_import(
             received_at=received_at,
             source=source,
             operator_declaration=operator_declaration,
+            synthetic_test_only=synthetic_test_only,
+            authorized_for_report=authorized_for_report,
         )
     except RecipientReturnError as exc:
         return _error(exc)
@@ -95,16 +102,25 @@ async def recipient_return_file(
         content, record = await asyncio.to_thread(
             recipient_return_bytes, store, job_id, record_id
         )
-        filename = (
-            str(record.get("filename") or "recipient-return.bin")
-            .replace('"', "")
-            .replace("\r", "")
-            .replace("\n", "")
-        )
+        original_filename = str(record.get("filename") or "recipient-return.bin")
+        ascii_filename = unicodedata.normalize("NFKD", original_filename).encode(
+            "ascii", "ignore"
+        ).decode("ascii")
+        ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "-", ascii_filename)
+        ascii_filename = re.sub(r"-+", "-", ascii_filename).strip(".-")
+        ascii_filename = ascii_filename[:80] or "recipient-return.bin"
+        encoded_filename = quote(original_filename, safe="")
         return Response(
             content,
             media_type=str(record.get("media_type") or "application/octet-stream"),
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{ascii_filename}"; '
+                    f"filename*=UTF-8''{encoded_filename}"
+                ),
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store",
+            },
         )
     except RecipientReturnError as exc:
         return _error(exc)

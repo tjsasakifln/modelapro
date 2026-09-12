@@ -622,6 +622,18 @@ def main() -> None:
         declared_unverified = st.checkbox(
             "Declaro que recebi este documento, sem afirmar autenticidade ou aceite institucional"
         )
+        return_is_synthetic = st.checkbox(
+            "Este comprovante é material sintético de TESTE",
+            value=False,
+        )
+        authorized_for_report = st.checkbox(
+            "Autorizo incorporar os bytes deste comprovante em nova geração do laudo/dossiê",
+            value=False,
+            help=(
+                "Sem esta autorização, o comprovante permanece no arquivo local do caso, "
+                "mas seus bytes não entram em nova composição documental."
+            ),
+        )
         if st.button(
             "Arquivar comprovante como recebido e não verificado",
             disabled=not bool(profile.get("recipient_id")),
@@ -646,6 +658,8 @@ def main() -> None:
                         "operator_declaration": (
                             OPERATOR_DECLARATION if declared_unverified else ""
                         ),
+                        "synthetic_test_only": str(return_is_synthetic).lower(),
+                        "authorized_for_report": str(authorized_for_report).lower(),
                     },
                 )
                 recipient_status = client.recipient_return()
@@ -671,7 +685,8 @@ def main() -> None:
             }
         )
         st.caption(
-            "Documento recebido/declarado pelo operador; não autenticado e não interpretado como aceite."
+            "Documento recebido/declarado pelo operador; não autenticado e não interpretado como aceite. "
+            "A associação à versão efetivamente enviada também não foi verificada."
         )
         if st.button("Preparar download do comprovante arquivado"):
             try:

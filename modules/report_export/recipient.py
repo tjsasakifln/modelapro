@@ -70,7 +70,9 @@ def _profile_for_job(job: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
         raise RecipientReturnError(
             "RECIPIENT_PROFILE_MISSING", "job qualification profile is unresolved", status_code=409
         )
-    recipient_id = profile.get("recipient_id") or request_spec.get("recipient_id")
+    # Only an institution-specific catalogue profile establishes this binding.
+    # A free root-level recipient on a neutral profile must not invent one.
+    recipient_id = profile.get("recipient_id")
     if not isinstance(recipient_id, str) or not recipient_id.strip():
         raise RecipientReturnError(
             "RECIPIENT_NOT_CONFIGURED",
@@ -108,6 +110,30 @@ def _acceptance_envelope(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _case_state_at_import(store: Any, job_id: str) -> dict[str, Any]:
+    """Capture observed local state without claiming which bytes were submitted."""
+    snapshot = store.get_snapshot(job_id) or {}
+    provenance = snapshot.get("provenance") if isinstance(snapshot, Mapping) else {}
+    provenance = provenance if isinstance(provenance, Mapping) else {}
+    qualification = provenance.get("qualification_context")
+    qualification = qualification if isinstance(qualification, Mapping) else {}
+
+    def fingerprint(name: str) -> str | None:
+        value = qualification.get(name)
+        return value if isinstance(value, str) and value else None
+
+    artifact_sha256: dict[str, str | None] = {}
+    for name in ("report.pdf", "signed_report.pdf", "submission.zip"):
+        raw = store.get_artifact(job_id, name)
+        artifact_sha256[name] = _sha(raw) if raw is not None else None
+    return {
+        "result_fingerprint": fingerprint("result_fingerprint"),
+        "report_content_fingerprint": fingerprint("report_content_fingerprint"),
+        "artifact_sha256": artifact_sha256,
+        "association_to_sent_version_verified": False,
+    }
+
+
 def store_recipient_return(
     store: Any,
     job_id: str,
@@ -120,6 +146,8 @@ def store_recipient_return(
     received_at: str,
     source: str,
     operator_declaration: str,
+    synthetic_test_only: bool = False,
+    authorized_for_report: bool = False,
 ) -> dict[str, Any]:
     """Persist an immutable sidecar record; never mutate calculation/report bytes."""
     with store._lock:
@@ -135,6 +163,11 @@ def store_recipient_return(
             raise RecipientReturnError(
                 "RECIPIENT_DECLARATION_REQUIRED",
                 "explicit operator declaration of unverified receipt is required",
+            )
+        if type(synthetic_test_only) is not bool or type(authorized_for_report) is not bool:
+            raise RecipientReturnError(
+                "RECIPIENT_RETURN_FLAGS_INVALID",
+                "synthetic_test_only and authorized_for_report must be booleans",
             )
         if not isinstance(content, bytes) or not content:
             raise RecipientReturnError("RECIPIENT_RETURN_EMPTY", "recipient-return file is empty")
@@ -152,6 +185,11 @@ def store_recipient_return(
             )
         normalized_received_at = _normalized_timestamp(received_at)
         digest = _sha(content)
+        effective_synthetic_test_only = (
+            synthetic_test_only
+            or (job.get("request_spec") or {}).get("synthetic_test_only") is True
+        )
+        case_state_at_import = _case_state_at_import(store, job_id)
         identity_material = {
             "proof_sha256": digest,
             "recipient_id": expected_recipient,
@@ -159,11 +197,41 @@ def store_recipient_return(
             "protocol": protocol,
             "received_at": normalized_received_at,
             "source": source,
+            "synthetic_test_only": effective_synthetic_test_only,
+            "authorized_for_report": bool(authorized_for_report),
+            "case_state_at_import": case_state_at_import,
         }
         record_id = _sha(canonical_json(identity_material).encode("utf-8"))
         records = _read_registry(store, job_id)
         existing = next((item for item in records if item.get("record_id") == record_id), None)
         if existing is not None:
+            existing_bytes = store.get_artifact(
+                job_id, str(existing.get("stored_name") or "")
+            )
+            immutable_matches = all(
+                existing.get(key) == value for key, value in identity_material.items()
+            ) and all(
+                (
+                    existing.get("status") == "received_declared_unverified",
+                    existing.get("decision") == "received_declared_unverified",
+                    existing.get("institution_acceptance") is False,
+                    existing.get("authenticity_verified") is False,
+                    existing.get("bytes_integrity") == "verified",
+                    existing.get("profile_version") == profile.get("version"),
+                    existing.get("profile_source_set_sha256")
+                    == profile.get("source_set_sha256"),
+                )
+            )
+            if (
+                not immutable_matches
+                or existing_bytes is None
+                or _sha(existing_bytes) != digest
+            ):
+                raise RecipientReturnError(
+                    "RECIPIENT_RETURN_INTEGRITY_FAILED",
+                    "idempotent recipient-return retry found missing or altered original bytes",
+                    status_code=409,
+                )
             return {
                 "schema_version": SCHEMA_VERSION,
                 "job_id": job_id,
@@ -194,9 +262,10 @@ def store_recipient_return(
             "media_type": str(media_type or "application/octet-stream"),
             "proof_sha256": digest,
             "size": len(content),
-            "synthetic_test_only": bool(
-                (job.get("request_spec") or {}).get("synthetic_test_only")
-            ),
+            "bytes_integrity": "verified",
+            "synthetic_test_only": effective_synthetic_test_only,
+            "authorized_for_report": bool(authorized_for_report),
+            "case_state_at_import": case_state_at_import,
         }
         store.save_artifact(job_id, stored_name, content)
         registry = {
