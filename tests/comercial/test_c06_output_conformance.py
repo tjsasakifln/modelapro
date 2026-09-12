@@ -11,11 +11,13 @@ import copy
 import hashlib
 import io
 import json
+import os
 import re
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 from backend.worker import compose_valuation_job, resolve_peers
@@ -427,6 +429,76 @@ def test_sample_row_override_wins_mapping_and_persists_for_reopening():
         "latitude": -27.99,
         "longitude": -48.99,
         "source": "TESTE: vistoria profissional",
+    }
+
+
+def test_persisted_sample_override_with_zero_coordinates_wins_when_reopened():
+    base = {
+        "sample_evidence_columns": {
+            "address": "endereco", "latitude": "lat",
+            "longitude": "lon", "source": "fonte",
+        },
+        "sample_evidence": {
+            "R000009": {
+                "address": "Greenwich",
+                "latitude": 0,
+                "longitude": 0,
+                "source": "TESTE: vistoria",
+            },
+        },
+        "used_rows": [{
+            "row_id": f"R{index:06d}",
+            "values": {
+                "id": f"CSV-{900 + index}",
+                "endereco": f"Rua Planilha, {index}",
+                "lat": -23.0 - index / 100,
+                "lon": -46.0 - index / 100,
+                "fonte": "TESTE: planilha",
+            },
+            "geolocation": {
+                "address": f"Rua Materializada, {index}",
+                "latitude": -23.5 - index / 100,
+                "longitude": -46.5 - index / 100,
+                "source": "TESTE: contexto anterior",
+            },
+        } for index in range(10)],
+        "excluded_rows": [],
+    }
+
+    reopened = complete_report_context(base, request_spec={}, snapshot={})
+    rows = {row["row_id"]: row for row in reopened["used_rows"]}
+    assert list(rows) == [f"R{index:06d}" for index in range(10)]
+    assert all(rows[f"R{index:06d}"]["values"]["id"] == f"CSV-{900 + index}"
+               for index in range(10))
+
+    # A persisted professional correction is authoritative, including zero;
+    # mapped spreadsheet values and the older materialized row cannot replace it.
+    assert rows["R000009"]["geolocation"] == {
+        "latitude": 0.0,
+        "longitude": 0.0,
+        "address": "Greenwich",
+        "source": "TESTE: vistoria",
+        "coordinate_system": "decimal_degrees_wgs84",
+        "complete": True,
+        "issues": [],
+    }
+    assert rows["R000009"]["source_is_documentary"] is True
+    assert reopened["sample_evidence"]["R000009"] == {
+        "address": "Greenwich",
+        "latitude": 0.0,
+        "longitude": 0.0,
+        "source": "TESTE: vistoria",
+    }
+
+    # A row without an explicit override still follows the persisted mapping.
+    assert rows["R000008"]["geolocation"] == {
+        "latitude": -23.08,
+        "longitude": -46.08,
+        "address": "Rua Planilha, 8",
+        "source": "TESTE: planilha",
+        "coordinate_system": "decimal_degrees_wgs84",
+        "complete": True,
+        "issues": [],
     }
 
 
@@ -1124,6 +1196,15 @@ def test_real_worker_numeric_disclosure_reaches_verified_pdf_docx_xlsx_bytes(tmp
         peers=resolve_peers(), job_store=store,
     )
     snapshot = product["snapshot"]
+    normative_interval = snapshot["provenance"]["normative_assessment"]["intervals"][
+        "arbitration_interval"
+    ]
+    assert snapshot["value"]["arbitration_interval"]["lower"] == pytest.approx(
+        normative_interval["lower"]
+    )
+    assert snapshot["value"]["arbitration_interval"]["upper"] == pytest.approx(
+        normative_interval["upper"]
+    )
     context = __import__("json").loads(
         store.get_artifact(created["job_id"], "report_context.json")
     )
@@ -1152,18 +1233,44 @@ def test_real_worker_numeric_disclosure_reaches_verified_pdf_docx_xlsx_bytes(tmp
         {"report.pdf": pdf, "report.docx": docx, "sample.xlsx": xlsx},
     )
     assert check["ok"] is True, check
-    required_worker_items = {
-        "meci.3.3.1.b", "meci.3.3.1.c", "meci.3.3.1.j", "meci.3.3.1.k",
-        "meci.3.3.1.l", "meci.3.3.1.m1", "meci.3.3.1.m2",
-        "meci.2.3.3.2.excel", "normas.12.1.8.geolocalizacao",
-    }
-    assert required_worker_items <= set(representation["items"])
+    baseline = product_conformance_baseline(profile)
+    signature_requirement = "bb.guiar.assinatura_icp"
+    emitted_content = set(baseline["by_state"]["emitted"]) - {signature_requirement}
+    assert len(emitted_content) == 28
+    assert emitted_content <= set(representation["items"])
+
+    case_assessment = assess_output_conformance(profile, representation)
+    assert signature_requirement not in representation["items"]
+    assert signature_requirement in case_assessment["awaiting_signature"]
+    assert "signed_report.pdf" not in representation["representations"]
+    signature_blockers = [
+        item for item in case_assessment["blocking"]
+        if item.get("requirement_id") == signature_requirement
+    ]
+    assert len(signature_blockers) == 1
+    signature_blocker = signature_blockers[0]
+    assert signature_blocker["code"] == "output_requirement_pending_signature"
+    assert signature_blocker["stage"] == "post_review_external_signature"
+    assert "bytes assinados" in signature_blocker["detail"]
+
+    # Every case-specific human requirement is either represented by supplied
+    # professional input, explicitly pending, or conditionally not applicable.
+    human_requirements = set(baseline["requires_human_input"])
+    human_accounted_for = (
+        set(representation["items"])
+        | set(case_assessment["awaiting_human"])
+        | set(case_assessment["not_applicable"])
+    )
+    assert len(human_requirements) == 11
+    assert human_requirements <= human_accounted_for
     text = extract_pdf_text(pdf)
     assert "Coeficiente de correlação R" in text
     assert "Matriz de correlações" in text
     assert "Dados discrepantes e influentes:" in text
     assert "resíduo internamente studentizado" in text
-    inspection = Path("/tmp/c06-output-conformance-inspection")
+    inspection = Path(os.environ.get(
+        "C17_UI_EVIDENCE", str(tmp_path / "inspection")
+    )) / "c06-output-conformance"
     inspection.mkdir(parents=True, exist_ok=True)
     artifacts = {
         "report.pdf": pdf,
