@@ -102,3 +102,14 @@ def test_constraints_pin_every_direct_runtime_dep():
 
 def test_source_root_helper_matches_checkout():
     assert source_root(Path(__file__)) == REPO_ROOT
+
+
+def test_explicit_package_list_covers_every_source_package() -> None:
+    configured = set(load_pyproject(REPO_ROOT)["tool"]["setuptools"]["packages"])
+    expected = {"c15_local"}
+    for top_level in ("backend", "modules", "frontend", "profiles"):
+        root = REPO_ROOT / top_level
+        for marker in root.rglob("__init__.py"):
+            expected.add(".".join(marker.parent.relative_to(REPO_ROOT).parts))
+    missing = expected - configured
+    assert not missing, f"source packages omitted from installed wheel: {sorted(missing)}"
