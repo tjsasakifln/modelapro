@@ -211,6 +211,15 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
         timeout=45000
     )
     result_region = page.get_by_role("region", name="Valor da avaliação", exact=True)
+    current_job = page.get_by_text(
+        re.compile(r"^Identificador do trabalho: job_[a-f0-9]+$")
+    ).first
+    previous_job_text = None
+    try:
+        expect(current_job).to_be_visible(timeout=1000)
+        previous_job_text = current_job.inner_text()
+    except AssertionError:
+        pass
     file_input = _market_file_input(page)
     file_input.set_input_files(str(path))
     expect(
@@ -230,14 +239,15 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
     expect(execute).to_be_enabled(timeout=45000)
     execute.click()
 
-    accepted = page.get_by_text(re.compile(r"^Trabalho aceito: job_[a-f0-9]+\."))
-    expect(accepted.first).to_be_visible(timeout=90000)
-    accepted_text = accepted.first.inner_text()
-    accepted_match = re.search(r"(job_[a-f0-9]+)", accepted_text)
-    assert accepted_match is not None, accepted_text
-    job_id = accepted_match.group(1)
-    current_job = page.get_by_text(
-        f"Identificador do trabalho: {job_id}", exact=True
+    expect(current_job).to_be_visible(timeout=90000)
+    if previous_job_text is not None:
+        expect(current_job).not_to_have_text(previous_job_text, timeout=90000)
+    current_job_text = current_job.inner_text()
+    current_job_match = re.search(r"(job_[a-f0-9]+)", current_job_text)
+    assert current_job_match is not None, current_job_text
+    job_id = current_job_match.group(1)
+    stale_result = page.get_by_text(
+        "O arquivo mudou. O resultado abaixo pertence à versão anterior.", exact=True
     )
 
     # GET refresh is intentionally explicit in this WebSocket-disabled path.
@@ -246,6 +256,7 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
     for _ in range(12):
         try:
             expect(current_job).to_be_visible(timeout=10000)
+            expect(stale_result).to_have_count(0, timeout=10000)
             expect(result_region).to_be_visible(timeout=10000)
             break
         except AssertionError:
@@ -254,6 +265,7 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
             expect(refresh).to_be_enabled(timeout=20000)
             refresh.click()
     expect(current_job).to_be_visible(timeout=10000)
+    expect(stale_result).to_have_count(0, timeout=10000)
     expect(result_region).to_be_visible(timeout=10000)
     body = page.inner_text("body")
     page.screenshot(path=str(_evidence_dir() / f"result-{tag}.png"))
