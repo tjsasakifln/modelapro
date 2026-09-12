@@ -91,7 +91,10 @@ def test_bank_and_insurer_profiles_never_badge_acceptance_from_compatibility():
     assert bank["blocks_ready_for_professional_signoff"] is False
     assert insurer["method"] == "metodo_quantificacao_de_custo"
     assert insurer["method_supports_purpose"] is True
-    assert insurer["blocks_ready_for_professional_signoff"] is True
+    # The implemented cost route makes the profile selectable/calculable. This
+    # profile-level flag never approves a concrete case: C05 still gates that
+    # case on its normative, documentary and review evidence.
+    assert insurer["blocks_ready_for_professional_signoff"] is False
     assert insurer["homologation_badge"] is None
     assert insurer["required_value_basis"] == "custo_de_reedicao"
     fake_http_200 = {"status": "ok", "http": 200}

@@ -17,7 +17,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRATCH = Path(os.environ.get("P02_SCRATCH", "/tmp/grok-goal-7164525daca4/implementer"))
-EVIDENCE = ROOT / "docs" / "campaigns" / "MP-PRO-20260911" / "P02"
+
+
+def _evidence_dir() -> Path:
+    configured = os.environ.get("C17_UI_EVIDENCE")
+    return Path(configured) / "P02" if configured else SCRATCH / "p02-a01"
 
 
 def _port_free(port: int) -> bool:
@@ -65,16 +69,15 @@ def _write_excel(path: Path) -> None:
 
 
 def _record_block(reason: str) -> Path:
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    EVIDENCE.mkdir(parents=True, exist_ok=True)
-    log_path = SCRATCH / "p02-playwright-unavailable.log"
+    evidence = _evidence_dir()
+    evidence.mkdir(parents=True, exist_ok=True)
+    log_path = evidence / "p02-playwright-unavailable.log"
     payload = {
         "status": "BLOCKED",
         "reason": reason,
         "note": "A01 não foi fabricado. Unitários e AppTest cobrem o restante neste ambiente.",
     }
     log_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    (EVIDENCE / "p02-playwright-unavailable.log").write_text(log_path.read_text(encoding="utf-8"), encoding="utf-8")
     return log_path
 
 
@@ -156,8 +159,7 @@ def test_a01_playwright_real_path_or_record_unavailability(tmp_path):
 
 
 def _drive_two_files(sync_playwright, ui_port: int, csv_path: Path, xlsx_path: Path) -> None:
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    shots = SCRATCH / "p02-a01"
+    shots = _evidence_dir()
     shots.mkdir(parents=True, exist_ok=True)
     request_log = []
 
@@ -172,8 +174,9 @@ def _drive_two_files(sync_playwright, ui_port: int, csv_path: Path, xlsx_path: P
         page = context.new_page()
         page.on("request", lambda req: request_log.append({"method": req.method, "url": req.url}) if "/jobs" in req.url or "/preview" in req.url else None)
         page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_selector("text=MODELA PRO", timeout=45000)
-        page.wait_for_timeout(500)
+        page.get_by_text("MODELA PRO", exact=True).first.wait_for(
+            state="visible", timeout=45000
+        )
         page.screenshot(path=str(shots / "desktop-empty.png"))
         _upload_and_run(page, csv_path, "csv")
         page.set_viewport_size({"width": 390, "height": 720})
@@ -200,36 +203,48 @@ def _market_file_input(page):
 
 
 def _upload_and_run(page, path: Path, tag: str) -> None:
+    from playwright.sync_api import expect
+
+    expect(page.get_by_role("heading", name="1. Encomenda e perfil", exact=True)).to_be_visible(
+        timeout=45000
+    )
+    result_region = page.get_by_role("region", name="Valor da avaliação", exact=True)
     file_input = _market_file_input(page)
     file_input.set_input_files(str(path))
-    try:
-        page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=90000)
-    except Exception:
-        file_input = _market_file_input(page)
-        file_input.set_input_files(str(path))
-        page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=90000)
-    area = page.get_by_placeholder("ex.: 73,5")
-    assert area.count() >= 1, "subject area field missing; body=" + page.inner_text("body")[:1500]
-    area.first.click()
-    area.first.fill("73,5")
-    page.keyboard.press("Tab")
-    page.wait_for_timeout(500)
-    execute = page.get_by_role("button", name="Executar avaliação")
-    try:
-        execute.first.wait_for(state="visible", timeout=20000)
-    except Exception:
-        execute = page.get_by_role("button", name="Executar avaliação")
-    assert execute.count() >= 1, "execute button missing; body=" + page.inner_text("body")[:1500]
-    execute.first.click()
-    body = ""
-    for _ in range(40):
-        body = page.inner_text("body")
-        if "735" in body and ("Valor da avaliação" in body or "Cálculo disponível" in body):
+    expect(
+        page.locator("[data-testid='stFileUploader']").filter(has_text=path.name)
+    ).to_be_visible(timeout=45000)
+    # The prior result must be invalidated before the second file can count as
+    # an exercised XLSX path.
+    expect(result_region).to_have_count(0, timeout=90000)
+    expect(
+        page.get_by_role("heading", name="Interpretação recebida", exact=True)
+    ).to_be_visible(timeout=90000)
+
+    area = page.get_by_placeholder("ex.: 73,5").first
+    expect(area).to_be_visible(timeout=90000)
+    area.fill("73,5", timeout=45000)
+    expect(area).to_have_value("73,5", timeout=45000)
+
+    execute = page.get_by_role("button", name="Executar avaliação", exact=True).first
+    expect(execute).to_be_visible(timeout=45000)
+    expect(execute).to_be_enabled(timeout=45000)
+    execute.click()
+
+    # GET refresh is intentionally explicit in this WebSocket-disabled path.
+    # Locator waits span Streamlit's DOM replacement instead of sampling a
+    # transient count or sleeping after a stale element was found.
+    for _ in range(12):
+        try:
+            expect(result_region).to_be_visible(timeout=10000)
             break
-        refresh = page.get_by_role("button", name="Atualizar estado")
-        if refresh.count() >= 1 and refresh.first.is_enabled():
-            refresh.first.click()
-        page.wait_for_timeout(1500)
-    page.screenshot(path=str(SCRATCH / "p02-a01" / f"result-{tag}.png"))
+        except AssertionError:
+            refresh = page.get_by_role("button", name="Atualizar estado", exact=True).first
+            expect(refresh).to_be_visible(timeout=20000)
+            expect(refresh).to_be_enabled(timeout=20000)
+            refresh.click()
+    expect(result_region).to_be_visible(timeout=10000)
+    body = page.inner_text("body")
+    page.screenshot(path=str(_evidence_dir() / f"result-{tag}.png"))
     assert "Valor da avaliação" in body or "Cálculo disponível" in body, body[:2000]
     assert "735.000" in body or "735000" in body or "735.000,00" in body, body[:1500]
