@@ -75,7 +75,8 @@ def test_pytest_is_dev_extra_not_runtime():
     dev = normalize_names(extras["dev"])
     assert "pytest" not in runtime
     assert "pytest" in dev
-    assert "httpx" in dev
+    assert "httpx" in runtime
+    assert "httpx" not in dev
     assert "pypdf" in dev
     assert "playwright" in dev
     assert "pypdf" not in runtime
