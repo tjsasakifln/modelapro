@@ -103,11 +103,14 @@ def test_wheel_and_sdist_carry_the_exact_source_catalog_and_work_from_arbitrary_
     venv = tmp_path / "venv"
     subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
     subprocess.run(
         [str(python), "-m", "pip", "install", "--no-deps", str(wheel)],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
     arbitrary_cwd = tmp_path / "outside-checkout" / "nested"
     arbitrary_cwd.mkdir(parents=True)
@@ -115,8 +118,6 @@ def test_wheel_and_sdist_carry_the_exact_source_catalog_and_work_from_arbitrary_
         "import json; from modules.qualification_profile import load_catalog; "
         "print(json.dumps(load_catalog(), sort_keys=True, ensure_ascii=False))"
     )
-    env = os.environ.copy()
-    env.pop("PYTHONPATH", None)
     installed = subprocess.run(
         [str(python), "-I", "-c", command],
         check=True,
@@ -126,4 +127,3 @@ def test_wheel_and_sdist_carry_the_exact_source_catalog_and_work_from_arbitrary_
         text=True,
     )
     assert _catalog_identity(json.loads(installed.stdout)) == _catalog_identity(load_catalog())
-
