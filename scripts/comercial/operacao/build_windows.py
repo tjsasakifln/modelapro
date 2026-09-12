@@ -24,6 +24,30 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _write_bundle_inventory(bundle: Path, destination: Path) -> dict:
+    """Hash every file that Inno Setup will consume from the onedir bundle."""
+    entries = [
+        {
+            "path": path.relative_to(bundle).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": sha256(path),
+        }
+        for path in sorted(bundle.rglob("*"))
+        if path.is_file()
+    ]
+    encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+    payload = {
+        "schema_version": "MP-COM-WINDOWS-BUNDLE-INVENTORY/1",
+        "scope": "complete-pyinstaller-onedir-consumed-by-inno-setup",
+        "file_count": len(entries),
+        "total_size": sum(entry["size"] for entry in entries),
+        "inventory_sha256": hashlib.sha256(encoded).hexdigest(),
+        "files": entries,
+    }
+    _write_status(destination, payload)
+    return payload
+
+
 def _source_identity(root: Path) -> str:
     status = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=normal"],
@@ -214,6 +238,7 @@ def build(
             sys.executable,
             generated_at=timestamp,
             lock=lock,
+            root_distribution="modelapro",
         )
         sbom_path = evidence / "SBOM.modelapro.json"
         sbom_path.write_text(
@@ -235,6 +260,7 @@ def build(
         shutil.copy2(audit_path, bundle / audit_path.name)
         shutil.copy2(native_manifest, evidence / native_manifest.name)
         shutil.copy2(trusted_anchor, evidence / "artifact-trusted-vendor-anchor.json")
+        _write_bundle_inventory(bundle, evidence / "bundle-file-inventory.json")
         stage(current_stage, "PASSED")
         current_stage = "installer"
         stage(current_stage, "RUNNING")

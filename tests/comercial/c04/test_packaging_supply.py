@@ -119,6 +119,164 @@ def test_sbom_preserves_hashed_license_and_native_binary_evidence(monkeypatch) -
     assert component["evidence"]["font_files"][0]["sha256"] == "c" * 64
 
 
+def test_sbom_accepts_only_versioned_license_review_with_matching_file_hash(
+    tmp_path: Path, monkeypatch
+) -> None:
+    registry = tmp_path / "reviews.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "MP-COM-PYTHON-LICENSE-REVIEWS/1",
+                "reviews": [
+                    {
+                        "name": "reviewed-lib",
+                        "version": "1.2.3",
+                        "license_expression": "BSD-3-Clause",
+                        "license_file_sha256": ["a" * 64],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sbom, "_pip_report", lambda _python: [{"name": "reviewed-lib", "version": "1.2.3"}]
+    )
+    metadata = {
+        "license": "",
+        "license_expression": "",
+        "home_page": "",
+        "summary": "",
+        "project_urls": [],
+        "license_files": [{"path": "LICENSE", "sha256": "a" * 64, "size": 1}],
+        "native_files": [],
+        "font_files": [],
+    }
+    monkeypatch.setattr(sbom, "_metadata", lambda _python, _name: metadata)
+
+    matched = sbom.build_sbom(
+        "python-test", generated_at="2026-09-12T00:00:00Z", license_reviews=registry
+    )
+    assert matched["components"][0]["licenses"] == [
+        {"license": {"name": "BSD-3-Clause"}}
+    ]
+    assert matched["components"][0]["evidence"]["license_source"] == (
+        "version-and-license-file-review"
+    )
+    assert matched["review_queue"] == []
+
+    metadata["license_files"][0]["sha256"] = "b" * 64
+    mismatched = sbom.build_sbom(
+        "python-test", generated_at="2026-09-12T00:00:00Z", license_reviews=registry
+    )
+    assert mismatched["components"][0]["licenses"] == [
+        {"license": {"name": "NOASSERTION"}}
+    ]
+    assert mismatched["review_queue"][0]["reason"] == "license_review_evidence_mismatch"
+
+
+def test_release_sbom_keeps_build_environment_and_labels_runtime_closure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sbom,
+        "_pip_report",
+        lambda _python: [
+            {"name": "modelapro", "version": "0.1.0"},
+            {"name": "runtime-lib", "version": "2.0"},
+            {"name": "pyinstaller", "version": "6.22.2"},
+        ],
+    )
+    monkeypatch.setattr(
+        sbom,
+        "_runtime_dependency_graph",
+        lambda _python, _root: {
+            "modelapro": ["runtime-lib"],
+            "runtime-lib": [],
+        },
+    )
+    monkeypatch.setattr(
+        sbom,
+        "_metadata",
+        lambda _python, _name: {
+            "license": "MIT",
+            "license_expression": "MIT",
+            "home_page": "",
+            "summary": "",
+            "project_urls": [],
+            "license_files": [],
+            "native_files": [],
+            "font_files": [],
+        },
+    )
+    payload = sbom.build_sbom(
+        "python-test",
+        generated_at="2026-09-12T00:00:00Z",
+        root_distribution="modelapro",
+    )
+    # The build environment is a conservative superset of what PyInstaller can
+    # collect.  Runtime reachability is recorded separately instead of deleting
+    # build-environment components before bundle provenance is available.
+    assert [item["name"] for item in payload["components"]] == [
+        "modelapro",
+        "pyinstaller",
+        "runtime-lib",
+    ]
+    assert payload["metadata"]["inventory_scope"] == "installed-build-environment"
+    assert payload["metadata"]["root_distribution"] == "modelapro"
+    assert payload["metadata"]["declared_runtime_dependency_closure"] == [
+        "modelapro",
+        "runtime-lib",
+    ]
+    assert payload["components"][0]["evidence"]["runtime_dependencies"] == [
+        "runtime-lib"
+    ]
+    assert payload["components"][1]["evidence"]["declared_runtime_dependency"] is False
+
+
+def test_runtime_dependency_graph_propagates_transitive_requested_extras(
+    tmp_path: Path, monkeypatch
+) -> None:
+    def dist(name: str, version: str, requirements: list[str]) -> None:
+        metadata = tmp_path / f"{name.replace('-', '_')}-{version}.dist-info" / "METADATA"
+        metadata.parent.mkdir()
+        lines = ["Metadata-Version: 2.4", f"Name: {name}", f"Version: {version}"]
+        lines.extend(f"Requires-Dist: {requirement}" for requirement in requirements)
+        metadata.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    dist(
+        "root-dist",
+        "1",
+        ["child[feature]", 'root-feature-leaf; extra == "root-feature"'],
+    )
+    dist(
+        "child",
+        "1",
+        [
+            "base",
+            'base-marker-leaf; extra != "feature"',
+            'feature-leaf; extra == "feature"',
+            'unused-leaf; extra == "unused"',
+        ],
+    )
+    dist("base", "1", [])
+    dist("base-marker-leaf", "1", [])
+    dist("feature-leaf", "1", [])
+    dist("root-feature-leaf", "1", [])
+    dist("unused-leaf", "1", [])
+    previous = __import__("os").environ.get("PYTHONPATH", "")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path) + ((":" + previous) if previous else ""))
+
+    graph = sbom._runtime_dependency_graph(sys.executable, "root-dist[root-feature]")
+
+    assert graph == {
+        "base": [],
+        "base-marker-leaf": [],
+        "child": ["base", "base-marker-leaf", "feature-leaf"],
+        "feature-leaf": [],
+        "root-dist": ["child", "root-feature-leaf"],
+        "root-feature-leaf": [],
+    }
+
+
 def test_sbom_cli_requires_fixed_timestamp(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         sbom.main(["--output", str(tmp_path / "sbom.json")])
@@ -165,6 +323,39 @@ def test_native_windows_staging_refuses_non_windows_host(tmp_path: Path, monkeyp
     monkeypatch.setattr(prepare_windows_native.platform, "system", lambda: "Linux")
     with pytest.raises(RuntimeError, match="only be staged on Windows"):
         prepare_windows_native.prepare(tmp_path / "msys64", tmp_path / "native")
+
+
+def test_native_runtime_regeneration_compares_every_byte(tmp_path: Path) -> None:
+    reference = tmp_path / "reference"
+    regenerated = tmp_path / "regenerated"
+    for root in (reference, regenerated):
+        (root / "dlls").mkdir(parents=True)
+        (root / "licenses" / "pkg").mkdir(parents=True)
+        (root / "dlls" / "runtime.dll").write_bytes(b"runtime")
+        (root / "licenses" / "pkg" / "LICENSE").write_bytes(b"terms")
+    evidence = tmp_path / "comparison.json"
+    prepare_windows_native.compare_regeneration(reference, regenerated, evidence)
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert payload["status"] == "PASSED"
+    assert payload["reference_file_count"] == 2
+    assert payload["reference_inventory_sha256"] == payload["regenerated_inventory_sha256"]
+
+    (regenerated / "dlls" / "runtime.dll").write_bytes(b"changed")
+    with pytest.raises(RuntimeError, match="differs from reference"):
+        prepare_windows_native.compare_regeneration(reference, regenerated, evidence)
+    failed = json.loads(evidence.read_text(encoding="utf-8"))
+    assert failed["status"] == "FAILED"
+    assert failed["changed"][0]["path"] == "dlls/runtime.dll"
+
+
+def test_windows_workflow_publishes_native_regeneration_evidence() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github" / "workflows" / "c06-windows.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "--compare-to $native" in workflow
+    assert "--comparison-evidence $comparison" in workflow
+    assert "windows-native-regeneration.json" in workflow
 
 
 def test_test_entitlement_generator_never_persists_private_key(tmp_path: Path) -> None:
@@ -248,6 +439,19 @@ def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
     assert (output / "MODELA-PRO" / "SBOM.modelapro.json").is_file()
     assert (output / "MODELA-PRO" / "pip-audit.json").is_file()
     assert (output / "qualification-evidence" / "native-runtime.json").is_file()
+    bundle_inventory = json.loads(
+        (output / "qualification-evidence" / "bundle-file-inventory.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert bundle_inventory["scope"] == (
+        "complete-pyinstaller-onedir-consumed-by-inno-setup"
+    )
+    assert {item["path"] for item in bundle_inventory["files"]} == {
+        "MODELA-PRO.exe",
+        "SBOM.modelapro.json",
+        "pip-audit.json",
+    }
 
 
 def test_windows_bundle_requires_native_runtime_and_hardens_distribution_evidence() -> None:

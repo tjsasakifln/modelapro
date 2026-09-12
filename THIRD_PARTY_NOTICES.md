@@ -29,9 +29,14 @@ python -m scripts.comercial.operacao.audit --output <path>
 `pip-audit` returning a non-zero status is release-blocking. The initial
 commercial-build tooling is [PyInstaller v6.22.2](https://github.com/pyinstaller/pyinstaller/releases/tag/v6.22.2)
 and [pip-audit v2.10.1](https://github.com/pypa/pip-audit/releases/tag/v2.10.1).
-Their exact source/archive hashes and licence text are **NOASSERTION** until
-the approved release artifact is acquired and reviewed; do not infer them from
-this notice. They are build tools, not buyer runtime components.
+The generated SBOM inventories the full exact build environment as a
+conservative superset and labels the separately resolved declared-runtime
+closure. `third_party/python_license_reviews.json` may resolve missing package
+metadata only when both the exact version and every installed licence-file hash
+match its reviewed record. A mismatch remains `NOASSERTION`; do not infer
+licence terms from this notice. Build tools are not declared buyer runtime
+dependencies, although their presence in the frozen bundle must be established
+from artifact evidence rather than assumed from dependency metadata.
 
 The runtime entitlement verifier uses `cryptography==50.0.1` through its
 public Ed25519 API. Installed distribution metadata reports
@@ -47,7 +52,7 @@ does not confer professional authorship, ICP-Brasil status or institutional
 acceptance, and no private key is bundled.
 
 Historical Linux evidence may contain `NOASSERTION` metadata. The C06 SBOM
-keeps those values as a review queue and additionally records SHA-256 and size
+keeps unresolved values as a review queue and additionally records SHA-256 and size
 for installed LICENSE/COPYING/NOTICE files and native `.dll`, `.pyd`, `.so` and
 `.dylib` members. Missing metadata remains unresolved; it is not converted into
 an incompatibility or an approval. The final Windows artifact must carry its

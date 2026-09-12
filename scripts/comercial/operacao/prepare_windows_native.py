@@ -37,6 +37,60 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def tree_inventory(root: Path) -> list[dict[str, object]]:
+    """Return the complete canonical byte inventory of a staged runtime."""
+    if not root.is_dir():
+        raise FileNotFoundError(f"native runtime tree is absent: {root}")
+    return [
+        {
+            "path": path.relative_to(root).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": _sha256(path),
+        }
+        for path in sorted(
+            (candidate for candidate in root.rglob("*") if candidate.is_file()),
+            key=lambda candidate: candidate.relative_to(root).as_posix().lower(),
+        )
+    ]
+
+
+def compare_regeneration(reference: Path, regenerated: Path, evidence: Path) -> Path:
+    """Persist a byte-for-byte tree comparison and fail on any divergence."""
+    expected = tree_inventory(reference)
+    actual = tree_inventory(regenerated)
+    expected_by_path = {str(item["path"]): item for item in expected}
+    actual_by_path = {str(item["path"]): item for item in actual}
+    changed = [
+        {
+            "path": path,
+            "reference": expected_by_path[path],
+            "regenerated": actual_by_path[path],
+        }
+        for path in sorted(expected_by_path.keys() & actual_by_path.keys(), key=str.lower)
+        if expected_by_path[path] != actual_by_path[path]
+    ]
+    payload = {
+        "schema_version": "MP-COM-WINDOWS-NATIVE-REGENERATION/1",
+        "status": "PASSED" if expected == actual else "FAILED",
+        "reference_file_count": len(expected),
+        "regenerated_file_count": len(actual),
+        "reference_only": sorted(expected_by_path.keys() - actual_by_path.keys(), key=str.lower),
+        "regenerated_only": sorted(actual_by_path.keys() - expected_by_path.keys(), key=str.lower),
+        "changed": changed,
+        "reference_inventory_sha256": hashlib.sha256(
+            json.dumps(expected, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "regenerated_inventory_sha256": hashlib.sha256(
+            json.dumps(actual, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if payload["status"] != "PASSED":
+        raise RuntimeError(f"regenerated native runtime differs from reference: {payload}")
+    return evidence
+
+
 def _run_bash(bash: Path, command: str) -> str:
     result = subprocess.run(
         [str(bash), "-lc", command],
@@ -241,8 +295,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--msys-root", type=Path, default=Path(r"C:\msys64"))
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--compare-to", type=Path)
+    parser.add_argument("--comparison-evidence", type=Path)
     args = parser.parse_args(argv)
+    if bool(args.compare_to) != bool(args.comparison_evidence):
+        parser.error("--compare-to and --comparison-evidence must be supplied together")
     prepare(args.msys_root, args.output)
+    if args.compare_to:
+        compare_regeneration(args.compare_to, args.output, args.comparison_evidence)
     return 0
 
 

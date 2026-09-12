@@ -12,6 +12,13 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
+
+DEFAULT_LICENSE_REVIEWS = (
+    Path(__file__).resolve().parents[3] / "third_party" / "python_license_reviews.json"
+)
+
 
 def _canonical_name(value: str) -> str:
     return "-".join(filter(None, re.split(r"[-_.]+", value.lower())))
@@ -65,6 +72,64 @@ def _pip_report(python: str) -> list[dict]:
     if not isinstance(packages, list):
         raise ValueError("pip list did not return a package list")
     return sorted(packages, key=lambda item: item["name"].lower())
+
+
+def _runtime_dependency_graph(python: str, root_distribution: str) -> dict[str, list[str]]:
+    """Resolve installed runtime requirements and propagate requested extras."""
+    script = r"""
+import importlib.metadata
+import json
+import sys
+
+from packaging.markers import default_environment
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
+root_requirement = Requirement(sys.argv[1])
+root = canonicalize_name(root_requirement.name)
+queue = [root]
+graph = {}
+requested_extras = {root: set(root_requirement.extras)}
+environment = default_environment()
+while queue:
+    name = queue.pop(0)
+    dist = importlib.metadata.distribution(name)
+    canonical = canonicalize_name(dist.metadata['Name'])
+    dependencies = []
+    active_extras = requested_extras.get(canonical, set())
+    marker_extras = [''] + sorted(active_extras)
+    for raw in dist.requires or ():
+        requirement = Requirement(raw)
+        if requirement.marker is not None and not any(
+            requirement.marker.evaluate({**environment, 'extra': extra})
+            for extra in marker_extras
+        ):
+            continue
+        dependency = canonicalize_name(requirement.name)
+        dependencies.append(dependency)
+        previous_extras = requested_extras.setdefault(dependency, set())
+        new_extras = set(requirement.extras) - previous_extras
+        if new_extras:
+            previous_extras.update(new_extras)
+        if dependency not in graph or new_extras:
+            queue.append(dependency)
+    graph[canonical] = sorted(set(dependencies))
+print(json.dumps(graph, sort_keys=True))
+"""
+    result = subprocess.run(
+        [python, "-c", script, root_distribution],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+    root_name = _canonical_name(Requirement(root_distribution).name)
+    if not isinstance(payload, dict) or root_name not in payload:
+        raise ValueError("runtime dependency resolver returned an invalid graph")
+    return {
+        _canonical_name(name): sorted(_canonical_name(item) for item in dependencies)
+        for name, dependencies in payload.items()
+    }
 
 
 def _metadata(python: str, name: str) -> dict:
@@ -122,14 +187,84 @@ print(json.dumps({
     return json.loads(result.stdout)
 
 
+def _license_reviews(path: Path) -> dict[tuple[str, str], dict]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != "MP-COM-PYTHON-LICENSE-REVIEWS/1":
+        raise ValueError("Python licence review registry has an unsupported schema")
+    reviews: dict[tuple[str, str], dict] = {}
+    for item in payload.get("reviews") or ():
+        key = (_canonical_name(str(item.get("name") or "")), str(item.get("version") or ""))
+        expression = str(item.get("license_expression") or "")
+        hashes = item.get("license_file_sha256")
+        if not key[0] or not key[1] or not expression or not isinstance(hashes, list) or not hashes:
+            raise ValueError("Python licence review registry contains an incomplete review")
+        if key in reviews:
+            raise ValueError(f"duplicate Python licence review: {key[0]}=={key[1]}")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", str(value)) for value in hashes):
+            raise ValueError(f"Python licence review contains an invalid hash: {key[0]}=={key[1]}")
+        reviews[key] = {
+            "license_expression": expression,
+            "license_file_sha256": sorted(str(value) for value in hashes),
+        }
+    return reviews
+
+
+def _resolved_license(
+    name: str,
+    version: str,
+    metadata: dict,
+    reviews: dict[tuple[str, str], dict],
+) -> tuple[str, str, dict | None]:
+    declared = metadata["license_expression"] or metadata["license"]
+    if declared:
+        return declared, "installed-distribution-metadata", None
+    review = reviews.get((_canonical_name(name), version))
+    if review is None:
+        return "NOASSERTION", "unresolved", None
+    actual_hashes = sorted(
+        str(item.get("sha256")) for item in metadata.get("license_files") or ()
+    )
+    evidence = {
+        "status": "MATCHED" if actual_hashes == review["license_file_sha256"] else "MISMATCH",
+        "expected_license_file_sha256": review["license_file_sha256"],
+        "actual_license_file_sha256": actual_hashes,
+    }
+    if evidence["status"] == "MISMATCH":
+        return "NOASSERTION", "review-evidence-mismatch", evidence
+    return review["license_expression"], "version-and-license-file-review", evidence
+
+
 def build_sbom(
-    python: str = sys.executable, *, generated_at: str | None = None, lock: Path | None = None
+    python: str = sys.executable,
+    *,
+    generated_at: str | None = None,
+    lock: Path | None = None,
+    root_distribution: str | None = None,
+    license_reviews: Path | None = DEFAULT_LICENSE_REVIEWS,
 ) -> dict:
     """Inventory installed distributions, preserving unknown licences as unknown."""
+    graph = (
+        _runtime_dependency_graph(python, root_distribution)
+        if root_distribution
+        else None
+    )
+    installed = {
+        _canonical_name(item["name"]): item
+        for item in _pip_report(python)
+    }
+    if graph is not None:
+        missing = sorted(set(graph) - installed.keys())
+        if missing:
+            raise RuntimeError(f"runtime dependency closure is not installed: {missing}")
+    reviews = _license_reviews(license_reviews) if license_reviews is not None else {}
     components = []
-    for package in sorted(_pip_report(python), key=lambda item: item["name"].lower()):
+    packages = list(installed.values())
+    for package in sorted(packages, key=lambda item: item["name"].lower()):
         meta = _metadata(python, package["name"])
-        license_value = meta["license_expression"] or meta["license"] or "NOASSERTION"
+        canonical = _canonical_name(package["name"])
+        license_value, license_source, license_review = _resolved_license(
+            package["name"], str(package["version"]), meta, reviews
+        )
         components.append(
             {
                 "type": "library",
@@ -144,6 +279,10 @@ def build_sbom(
                 ],
                 "evidence": {
                     "identity_source": "installed-distribution-metadata",
+                    "license_source": license_source,
+                    "license_review": license_review,
+                    "declared_runtime_dependency": canonical in (graph or {}),
+                    "runtime_dependencies": list((graph or {}).get(canonical) or []),
                     "project_urls": list(meta.get("project_urls") or []),
                     "license_files": list(meta.get("license_files") or []),
                     "native_files": list(meta.get("native_files") or []),
@@ -156,7 +295,18 @@ def build_sbom(
     metadata = {
         "timestamp": generated_at or datetime.now(timezone.utc).isoformat(),
         "component_hash_sha256": component_hash,
+        "inventory_scope": (
+            "installed-build-environment" if root_distribution else "installed-environment"
+        ),
     }
+    if root_distribution:
+        metadata["root_distribution"] = _canonical_name(root_distribution)
+        metadata["declared_runtime_dependency_closure"] = sorted(graph or {})
+    if license_reviews is not None:
+        metadata["license_reviews_path"] = str(license_reviews)
+        metadata["license_reviews_sha256"] = hashlib.sha256(
+            license_reviews.read_bytes()
+        ).hexdigest()
     if lock is not None:
         if not lock.is_file():
             raise FileNotFoundError(f"lock file does not exist: {lock}")
@@ -174,7 +324,11 @@ def build_sbom(
             {
                 "name": component["name"],
                 "version": component["version"],
-                "reason": "license_metadata_missing",
+                "reason": (
+                    "license_review_evidence_mismatch"
+                    if component["evidence"]["license_source"] == "review-evidence-mismatch"
+                    else "license_metadata_missing"
+                ),
             }
             for component in components
             if component["licenses"][0]["license"]["name"] == "NOASSERTION"
