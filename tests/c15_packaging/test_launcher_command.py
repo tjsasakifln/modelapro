@@ -10,6 +10,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
+import pytest
+
 from c15_local.launcher import (
     backend_command,
     frontend_app_path,
@@ -68,6 +70,29 @@ def test_print_commands_json_matches_helpers():
     assert "frontend.app:main" not in json.dumps(payload)
 
 
+def test_backend_import_defers_heavy_document_renderer():
+    env = {
+        **os.environ,
+        "MODELA_SKIP_DOTENV": "1",
+        "PYTHONPATH": str(REPO_ROOT),
+    }
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import backend.api, sys; print('scipy' in sys.modules)",
+        ],
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "False"
+
+
 def _free_loopback_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -108,3 +133,25 @@ def test_backend_process_health_on_loopback():
             proc.wait(timeout=8)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def test_health_wait_fails_immediately_when_product_child_exits(monkeypatch):
+    class ExitedProcess:
+        returncode = 37
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            urllib.error.URLError("connection refused")
+        ),
+    )
+    with pytest.raises(RuntimeError, match=r"frontend.*exit code 37"):
+        wait_for_health(
+            "http://127.0.0.1:9/health",
+            timeout=30,
+            processes={"frontend": ExitedProcess()},
+        )

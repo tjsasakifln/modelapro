@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 root = Path(SPEC).resolve().parents[2]
 frontend_sources = [
@@ -43,6 +43,8 @@ if not trusted_anchor.is_file():
     raise RuntimeError("trusted vendor anchor resource is absent")
 datas = (
     collect_data_files("frontend")
+    + copy_metadata("streamlit", recursive=True)
+    + copy_metadata("modelapro")
     + module_datas
     + collect_data_files("profiles")
     + frontend_sources

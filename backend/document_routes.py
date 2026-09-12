@@ -8,6 +8,7 @@ document bytes or professional-review data are read or changed.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import os
 from pathlib import Path
@@ -16,17 +17,12 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from modules.report_export.workflow import (
-    DocumentWorkflowError,
-    create_signature_request,
-    generate_documents,
-    get_document_status,
-    import_signed_report,
-    record_review,
-    store_document_attachment,
-)
-
 router = APIRouter(tags=["documents"])
+
+
+def _document_workflow():
+    """Load the renderer only when a document endpoint actually needs it."""
+    return importlib.import_module("modules.report_export.workflow")
 
 
 def _store():
@@ -50,7 +46,7 @@ def _authorized_store(job_id: str, token: Optional[str]):
     return store
 
 
-def _error(exc: DocumentWorkflowError) -> JSONResponse:
+def _error(exc: Any) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -85,7 +81,7 @@ def _configured_signature_validation_context():
             raise ValueError("no trust roots configured")
         return ValidationContext(trust_roots=roots, allow_fetching=False)
     except Exception as exc:
-        raise DocumentWorkflowError(
+        raise _document_workflow().DocumentWorkflowError(
             "SIGNATURE_TRUST_CONFIGURATION_INVALID",
             "configured report-signature trust roots could not be loaded",
             status_code=503,
@@ -95,9 +91,10 @@ def _configured_signature_validation_context():
 @router.get("/jobs/{job_id}/documents")
 def document_status(job_id: str, x_job_token: Optional[str] = Header(None)):
     store = _authorized_store(job_id, x_job_token)
+    workflow = _document_workflow()
     try:
-        return get_document_status(store, job_id)
-    except DocumentWorkflowError as exc:
+        return workflow.get_document_status(store, job_id)
+    except workflow.DocumentWorkflowError as exc:
         return _error(exc)
 
 
@@ -108,13 +105,14 @@ def document_generate(
     x_job_token: Optional[str] = Header(None),
 ):
     store = _authorized_store(job_id, x_job_token)
+    workflow = _document_workflow()
     try:
-        return generate_documents(
+        return workflow.generate_documents(
             store,
             job_id,
             report_fields=(payload or {}).get("report_context") or payload or {},
         )
-    except DocumentWorkflowError as exc:
+    except workflow.DocumentWorkflowError as exc:
         return _error(exc)
 
 
@@ -125,8 +123,9 @@ def document_review(
     x_job_token: Optional[str] = Header(None),
 ):
     store = _authorized_store(job_id, x_job_token)
+    workflow = _document_workflow()
     try:
-        return record_review(
+        return workflow.record_review(
             store,
             job_id,
             professional_id=str(payload.get("professional_id") or ""),
@@ -135,7 +134,7 @@ def document_review(
             version=str(payload.get("version") or ""),
             synthetic_test_only=bool(payload.get("synthetic_test_only", False)),
         )
-    except DocumentWorkflowError as exc:
+    except workflow.DocumentWorkflowError as exc:
         return _error(exc)
 
 
@@ -146,14 +145,15 @@ def document_signature_request(
     x_job_token: Optional[str] = Header(None),
 ):
     store = _authorized_store(job_id, x_job_token)
+    workflow = _document_workflow()
     try:
-        return create_signature_request(
+        return workflow.create_signature_request(
             store, job_id, revision_id=str(payload.get("revision_id") or "")
         )
-    except (DocumentWorkflowError, ValueError) as exc:
-        if isinstance(exc, DocumentWorkflowError):
+    except (workflow.DocumentWorkflowError, ValueError) as exc:
+        if isinstance(exc, workflow.DocumentWorkflowError):
             return _error(exc)
-        return _error(DocumentWorkflowError("SIGNATURE_REQUEST_INVALID", str(exc), status_code=400))
+        return _error(workflow.DocumentWorkflowError("SIGNATURE_REQUEST_INVALID", str(exc), status_code=400))
 
 
 @router.post("/jobs/{job_id}/documents/attachments")
@@ -170,9 +170,10 @@ async def document_attachment_upload(
 ):
     """Store exact documentary bytes; mere JSON references are not evidence."""
     store = _authorized_store(job_id, x_job_token)
+    workflow = await asyncio.to_thread(_document_workflow)
     try:
         return await asyncio.to_thread(
-            store_document_attachment,
+            workflow.store_document_attachment,
             store,
             job_id,
             filename=file.filename or "document.bin",
@@ -186,8 +187,8 @@ async def document_attachment_upload(
             requirement_ids=json.loads(requirement_ids),
         )
     except json.JSONDecodeError:
-        return _error(DocumentWorkflowError("ATTACHMENT_REQUIREMENTS_INVALID", "requirement_ids must be JSON", status_code=400))
-    except DocumentWorkflowError as exc:
+        return _error(workflow.DocumentWorkflowError("ATTACHMENT_REQUIREMENTS_INVALID", "requirement_ids must be JSON", status_code=400))
+    except workflow.DocumentWorkflowError as exc:
         return _error(exc)
 
 
@@ -198,15 +199,16 @@ async def document_signature_import(
     x_job_token: Optional[str] = Header(None),
 ):
     store = _authorized_store(job_id, x_job_token)
+    workflow = await asyncio.to_thread(_document_workflow)
     try:
         return await asyncio.to_thread(
-            import_signed_report,
+            workflow.import_signed_report,
             store,
             job_id,
             signed_pdf=await file.read(),
             validation_context=_configured_signature_validation_context(),
         )
-    except (DocumentWorkflowError, ValueError) as exc:
-        if isinstance(exc, DocumentWorkflowError):
+    except (workflow.DocumentWorkflowError, ValueError) as exc:
+        if isinstance(exc, workflow.DocumentWorkflowError):
             return _error(exc)
-        return _error(DocumentWorkflowError("SIGNATURE_IMPORT_INVALID", str(exc), status_code=400))
+        return _error(workflow.DocumentWorkflowError("SIGNATURE_IMPORT_INVALID", str(exc), status_code=400))

@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 # When executed as a checkout script, make the repo root importable.
 if __package__ in {None, ""}:
@@ -93,10 +93,21 @@ def health_url(public_url: str) -> str:
     return public_url.rstrip("/") + "/health"
 
 
-def wait_for_health(url: str, timeout: float = 30.0) -> dict:
+def wait_for_health(
+    url: str,
+    timeout: float = 30.0,
+    *,
+    processes: Optional[Mapping[str, subprocess.Popen]] = None,
+) -> dict:
     deadline = time.time() + timeout
     last_error = "not contacted"
     while time.time() < deadline:
+        for name, process in (processes or {}).items():
+            returncode = process.poll()
+            if returncode is not None:
+                raise RuntimeError(
+                    f"{name} process exited before API health with exit code {returncode}"
+                )
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
                 body = response.read()
@@ -302,7 +313,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     procs.append(frontend)
 
     try:
-        payload = wait_for_health(health_url(cfg.API_PUBLIC_URL), timeout=args.health_timeout)
+        payload = wait_for_health(
+            health_url(cfg.API_PUBLIC_URL),
+            timeout=args.health_timeout,
+            processes={"backend": backend, "frontend": frontend},
+        )
         logger.info("API health %s -> %s", health_url(cfg.API_PUBLIC_URL), payload)
         print(f"API: {cfg.API_PUBLIC_URL}  (health {payload})")
         print(f"UI:  http://{cfg.FRONTEND_HOST}:{cfg.FRONTEND_PORT}")

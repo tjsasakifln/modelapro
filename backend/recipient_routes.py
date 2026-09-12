@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import re
 import unicodedata
 from urllib.parse import quote
@@ -10,15 +11,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from modules.report_export.recipient import (
-    MAX_RETURN_BYTES,
-    RecipientReturnError,
-    get_recipient_return_status,
-    recipient_return_bytes,
-    store_recipient_return,
-)
-
 router = APIRouter(tags=["recipient-return"])
+
+
+def _recipient_workflow():
+    """Load document export code only when this route is exercised."""
+    return importlib.import_module("modules.report_export.recipient")
 
 
 def _authorized_store(job_id: str, token: str | None):
@@ -36,7 +34,7 @@ def _authorized_store(job_id: str, token: str | None):
     return store
 
 
-def _error(exc: RecipientReturnError) -> JSONResponse:
+def _error(exc) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -50,9 +48,10 @@ def _error(exc: RecipientReturnError) -> JSONResponse:
 @router.get("/jobs/{job_id}/recipient-return")
 def recipient_return_status(job_id: str, x_job_token: str | None = Header(None)):
     store = _authorized_store(job_id, x_job_token)
+    workflow = _recipient_workflow()
     try:
-        return get_recipient_return_status(store, job_id)
-    except RecipientReturnError as exc:
+        return workflow.get_recipient_return_status(store, job_id)
+    except workflow.RecipientReturnError as exc:
         return _error(exc)
 
 
@@ -70,10 +69,11 @@ async def recipient_return_import(
     x_job_token: str | None = Header(None),
 ):
     store = _authorized_store(job_id, x_job_token)
-    content = await file.read(MAX_RETURN_BYTES + 1)
+    workflow = await asyncio.to_thread(_recipient_workflow)
+    content = await file.read(workflow.MAX_RETURN_BYTES + 1)
     try:
         return await asyncio.to_thread(
-            store_recipient_return,
+            workflow.store_recipient_return,
             store,
             job_id,
             filename=file.filename or "recipient-return.bin",
@@ -87,7 +87,7 @@ async def recipient_return_import(
             synthetic_test_only=synthetic_test_only,
             authorized_for_report=authorized_for_report,
         )
-    except RecipientReturnError as exc:
+    except workflow.RecipientReturnError as exc:
         return _error(exc)
 
 
@@ -98,9 +98,10 @@ async def recipient_return_file(
     x_job_token: str | None = Header(None),
 ):
     store = _authorized_store(job_id, x_job_token)
+    workflow = await asyncio.to_thread(_recipient_workflow)
     try:
         content, record = await asyncio.to_thread(
-            recipient_return_bytes, store, job_id, record_id
+            workflow.recipient_return_bytes, store, job_id, record_id
         )
         original_filename = str(record.get("filename") or "recipient-return.bin")
         ascii_filename = unicodedata.normalize("NFKD", original_filename).encode(
@@ -122,5 +123,5 @@ async def recipient_return_file(
                 "Cache-Control": "no-store",
             },
         )
-    except RecipientReturnError as exc:
+    except workflow.RecipientReturnError as exc:
         return _error(exc)

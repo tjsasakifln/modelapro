@@ -420,8 +420,23 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir() -> None:
     assert 'pathex=[str(root)]' in spec
     assert "exclude_binaries=True" in spec
     assert "COLLECT(" in spec
+    assert 'copy_metadata("streamlit", recursive=True)' in spec
+    assert 'copy_metadata("modelapro")' in spec
     for buyer_document in (
         "SECURITY.md", "operations_manual.md", "privacy.md",
         "support_and_maintenance.md", "THIRD_PARTY_NOTICES.md",
     ):
         assert buyer_document in spec
+
+
+def test_windows_uninstall_preserves_whichever_profile_was_created() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github" / "workflows" / "c06-windows.yml").read_text(
+        encoding="utf-8"
+    )
+    uninstall = workflow.split(
+        "- name: Uninstall without deleting the separate evidence profile", 1
+    )[1].split("- name: Record artifact hashes and scope limits", 1)[0]
+    assert 'Join-Path $env:RUNNER_TEMP "profile-active"' in uninstall
+    assert 'Join-Path $env:RUNNER_TEMP "profile-restored"' in uninstall
+    assert "Test-Path -LiteralPath $preservedProfile -PathType Container" in uninstall

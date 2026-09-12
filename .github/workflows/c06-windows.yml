@@ -588,6 +588,15 @@ jobs:
             } | ConvertTo-Json | Set-Content (Join-Path $evidence "uninstall.json") -Encoding utf8
             exit 0
           }
+          $activeProfile = Join-Path $env:RUNNER_TEMP "profile-active"
+          $restoredProfile = Join-Path $env:RUNNER_TEMP "profile-restored"
+          $preservedProfile = if (Test-Path -LiteralPath $restoredProfile -PathType Container) {
+            $restoredProfile
+          } elseif (Test-Path -LiteralPath $activeProfile -PathType Container) {
+            $activeProfile
+          } else {
+            throw "no separate evidence profile exists before uninstall"
+          }
           $uninstaller = Join-Path $install "unins000.exe"
           if (-not (Test-Path $uninstaller)) { throw "Inno Setup uninstaller absent" }
           $uninstallProcess = Start-Process -FilePath $uninstaller `
@@ -595,12 +604,13 @@ jobs:
             -Wait -PassThru
           if ($uninstallProcess.ExitCode -ne 0) { exit $uninstallProcess.ExitCode }
           if (Test-Path (Join-Path $install "MODELA-PRO.exe")) { throw "installed executable survived uninstall" }
-          if (-not (Test-Path (Join-Path $env:RUNNER_TEMP "profile-restored"))) { throw "uninstall removed user evidence profile" }
+          if (-not (Test-Path -LiteralPath $preservedProfile -PathType Container)) { throw "uninstall removed user evidence profile" }
           [ordered]@{
             schema_version = "MP-COM-WINDOWS-UNINSTALL/1"
             status = "PASSED"
             installed_executable_removed = $true
             separate_evidence_profile_preserved = $true
+            preserved_profile = $preservedProfile
           } | ConvertTo-Json | Set-Content (Join-Path $env:C06_EVIDENCE "uninstall.json") -Encoding utf8
 
       - name: Record artifact hashes and scope limits
