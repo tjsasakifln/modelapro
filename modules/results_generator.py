@@ -208,6 +208,15 @@ def _fmt(value: Optional[float], decimals: int = 2, prefix: str = "") -> str:
         return str(value)
 
 
+def _fmt_pvalue(value: Any) -> str:
+    number = _as_finite_number(value)
+    if number is None or number < 0 or number > 1:
+        return "—"
+    if 0 < number < 0.0001:
+        return f"{number:.3e}"
+    return f"{number:.4f}"
+
+
 def _fmt_pt_br(value: Any, decimals: int = 2) -> str:
     number = _as_finite_number(value)
     if number is None:
@@ -369,22 +378,48 @@ def _metrics_block(model: Mapping[str, Any], statistical: Mapping[str, Any]) -> 
     if not metrics_src:
         metrics_src = {
             k: statistical.get(k)
-            for k in ("r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson")
+            for k in ("r", "r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson")
             if statistical.get(k) is not None
         }
         if statistical.get("f_pvalue") is not None and "f_pvalue" not in metrics_src:
             metrics_src["f_pvalue"] = statistical.get("f_pvalue")
     present = bool(metrics_src)
-    return {
+    definitions = _as_mapping(model.get("metric_definitions"))
+    r_definition = _as_mapping(definitions.get("r"))
+    r2_definition = _as_mapping(definitions.get("r2"))
+    dw_definition = _as_mapping(definitions.get("durbin_watson"))
+    candidate_spec = _as_mapping(model.get("candidate_spec"))
+    transform_state = _as_mapping(model.get("target_transform_state"))
+    target_transform = _safe_text(
+        model.get("y_transformation")
+        or candidate_spec.get("y_transformation")
+        or transform_state.get("name")
+        or transform_state.get("transformation")
+        or "não informada"
+    )
+    r2_relation_src = _as_mapping(metrics_src.get("r2_relation"))
+    r2_relation = {
+        "present": bool(r2_relation_src),
+        "r_squared": format_snapshot_number(r2_relation_src.get("r_squared")),
+        "r2": format_snapshot_number(r2_relation_src.get("r2")),
+        "difference": format_snapshot_number(r2_relation_src.get("difference")),
+        "text": (
+            "No ajuste OLS com intercepto sobre a mesma amostra efetiva e escala "
+            "centrada, o quadrado de R coincide com R² dentro da precisão numérica."
+            if r2_relation_src else ""
+        ),
+    }
+    view = {
         "present": present,
         "source": "model.metrics" if isinstance(model.get("metrics"), Mapping) and model.get("metrics") else (
             "validation.statistical" if present else ""
         ),
         "external": False,
+        "r": _fmt(_as_finite_number(metrics_src.get("r")), 4) if present else "—",
         "r2": _fmt(_as_finite_number(metrics_src.get("r2")), 4) if present else "—",
         "r2_adjusted": _fmt(_as_finite_number(metrics_src.get("r2_adjusted")), 4) if present else "—",
         "f_statistic": _fmt(_as_finite_number(metrics_src.get("f_statistic")), 3) if present else "—",
-        "f_pvalue": _fmt(_as_finite_number(metrics_src.get("f_pvalue")), 4) if present else "—",
+        "f_pvalue": _fmt_pvalue(metrics_src.get("f_pvalue")) if present else "—",
         "durbin_watson": _fmt(
             _as_finite_number(
                 metrics_src.get("durbin_watson") or metrics_src.get("autocorrelation_durbin_watson")
@@ -393,12 +428,297 @@ def _metrics_block(model: Mapping[str, Any], statistical: Mapping[str, Any]) -> 
         )
         if present
         else "—",
+        "r2_relation": r2_relation,
+        "target_transform": target_transform,
+        "r_scale": _safe_text(r_definition.get("scale") or "não informada"),
+        "r2_scale": _safe_text(r2_definition.get("scale") or "não informada"),
+        "durbin_watson_scale": _safe_text(dw_definition.get("scale") or "não informada"),
         "note": (
-            "Indicadores de ajustamento da amostra utilizada (não são desempenho de validação externa)."
+            "Indicadores de ajuste dentro da amostra efetiva do modelo, calculados sobre "
+            f"o alvo na escala modelada (transformação: {target_transform}; "
+            f"escala declarada para R: {r_definition.get('scale') or 'não informada'}; "
+            f"para R²: {r2_definition.get('scale') or 'não informada'}). "
+            "Não são desempenho de validação externa."
             if present
             else "Indicadores de ajustamento não foram fornecidos neste snapshot."
         ),
     }
+    view["tokens"] = {
+        field: report_field_token("metrics", field)
+        for field in (
+            "r", "r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson"
+        )
+    }
+    return view
+
+
+def _statistical_diagnostics(statistical: Mapping[str, Any]) -> Dict[str, Any]:
+    diagnostics = _as_mapping(statistical.get("diagnostics"))
+    standardized = _as_mapping(diagnostics.get("standardized_residuals"))
+    standardized_values = [
+        number for value in _as_list(standardized.get("values"))
+        if (number := _as_finite_number(value)) is not None
+    ]
+    frequency = _as_mapping(diagnostics.get("normal_frequency_comparison"))
+    frequency_rows = []
+    for row in _as_list(frequency.get("intervals")):
+        if not isinstance(row, Mapping):
+            continue
+        observed_probability = _as_finite_number(row.get("observed_probability"))
+        row_index = len(frequency_rows)
+        frequency_rows.append({
+            "z": _fmt(_as_finite_number(row.get("z")), 2),
+            "nominal_percent": _fmt(_as_finite_number(row.get("nominal_percent")), 2),
+            "observed_count": row.get("observed_count"),
+            "observed_percent": _fmt(
+                observed_probability * 100.0 if observed_probability is not None else None, 2
+            ),
+            "tokens": {
+                field: report_field_token("normal_frequency", row_index, field)
+                for field in ("z", "nominal_percent", "observed_count", "observed_percent")
+            },
+        })
+    correlation = _as_mapping(diagnostics.get("correlation_matrix"))
+
+    def technical_label(value: Any, labels: Mapping[str, str]) -> str:
+        raw = _safe_text(value or "")
+        return labels.get(raw, raw)
+
+    def matrix_block(
+        raw: Any, *, section: str, inherited_available: bool = False
+    ) -> Dict[str, Any]:
+        block = _as_mapping(raw)
+        variables = [str(item) for item in _as_list(block.get("variables"))]
+        values = []
+        for row in _as_list(block.get("values")):
+            values.append([
+                _fmt(number, 4) if (number := _as_finite_number(value)) is not None else "—"
+                for value in _as_list(row)
+            ])
+        valid = bool(variables and len(values) == len(variables)) and all(
+            len(row) == len(variables) for row in values
+        )
+        complete = (
+            block.get("status") in (None, "complete")
+            and block.get("missing_cells") in (None, 0, [])
+            and not block.get("missing_variables")
+        )
+        panels = []
+        if valid:
+            for start in range(0, len(variables), 6):
+                stop = min(start + 6, len(variables))
+                panels.append({
+                    "number": len(panels) + 1,
+                    "variables": variables[start:stop],
+                    "rows": [
+                        {
+                            "variable": variables[index],
+                            "values": row[start:stop],
+                            "cell_tokens": [
+                                report_field_token(
+                                    section, variables[index], variables[column],
+                                    len(panels) + 1,
+                                )
+                                for column in range(start, stop)
+                            ],
+                        }
+                        for index, row in enumerate(values)
+                    ],
+                })
+        return {
+            "present": valid and complete
+            and (block.get("available") is True or inherited_available)
+            and not block.get("reason"),
+            "variables": variables,
+            "values": values if valid else [],
+            "panels": panels,
+            "n": block.get("n"),
+            "sample": _safe_text(block.get("sample") or ""),
+            "sample_label": technical_label(block.get("sample"), {
+                "effective_model_sample": "amostra efetiva do modelo",
+            }),
+            "scale": _safe_text(block.get("scale") or ""),
+            "scale_label": technical_label(block.get("scale"), {
+                "original": "escala original",
+                "design": "escala da matriz de projeto",
+            }),
+            "reason": _safe_text(block.get("reason") or ""),
+        }
+
+    elasticities = _as_mapping(diagnostics.get("elasticities"))
+    elasticity_rows = []
+    for row in _as_list(elasticities.get("items")):
+        if not isinstance(row, Mapping):
+            continue
+        row_index = len(elasticity_rows)
+        elasticity_rows.append({
+            "variable": _safe_text(row.get("variable") or ""),
+            "elasticity": format_snapshot_number(row.get("elasticity")),
+            "base_value": format_snapshot_number(row.get("base_value")),
+            "base_prediction": format_snapshot_number(row.get("base_prediction")),
+            "step": format_snapshot_number(row.get("step")),
+            "derivative": format_snapshot_number(row.get("derivative")),
+            "tokens": {
+                field: report_field_token("elasticity", row_index, field)
+                for field in (
+                    "variable", "elasticity", "base_value", "base_prediction", "step",
+                    "derivative",
+                )
+            },
+        })
+    outliers = _as_mapping(diagnostics.get("outlier_count"))
+    definition_rows = []
+    definition_labels = {
+        "detected": "Critério para dados discrepantes detectados",
+        "excluded": "Critério para dados excluídos",
+        "influential": "Critério para pontos influentes",
+    }
+    for key, raw_text in _as_mapping(outliers.get("definition")).items():
+        text = _safe_text(raw_text)
+        if text.startswith("used observations with abs(internally studentized residual) > "):
+            limit = text.rsplit(" > ", 1)[-1]
+            text = (
+                "observações usadas cujo resíduo internamente studentizado, em "
+                f"módulo, é maior que {limit}"
+            )
+        elif text == (
+            "observations absent from the effective fit under declared/pre-fit sample policy; "
+            "they are not inferred to be outliers"
+        ):
+            text = (
+                "observações ausentes do ajuste efetivo conforme a política amostral "
+                "declarada antes do ajuste; exclusão não implica classificação como outlier"
+            )
+        elif text == (
+            "used observations flagged by the fit influence union (Cook distance, "
+            "internally studentized residual, or leverage)"
+        ):
+            text = (
+                "observações usadas sinalizadas pela união dos critérios de influência: "
+                "distância de Cook, resíduo internamente studentizado ou alavancagem"
+            )
+        elif text.startswith("|standardized_residual| > "):
+            text = "resíduo padronizado, em módulo, maior que " + text.split(" > ", 1)[1]
+        definition_rows.append({
+            "key": _safe_text(key),
+            "label": definition_labels.get(str(key), f"Critério técnico ({key})"),
+            "text": text,
+        })
+    return {
+        "standardized_residuals": {
+            "definition": _safe_text(standardized.get("definition") or ""),
+            "values": standardized_values,
+            "n": standardized.get("n"),
+            "present": bool(standardized_values) and standardized.get("available") is True
+            and not standardized.get("reason"),
+            "reason": _safe_text(standardized.get("reason") or ""),
+        },
+        "normal_frequency": {
+            "rows": frequency_rows,
+            "n": frequency.get("n"),
+            "present": bool(frequency_rows) and frequency.get("available") is True
+            and not frequency.get("reason"),
+            "reason": _safe_text(frequency.get("reason") or ""),
+        },
+        "correlation": matrix_block(correlation, section="correlation_original"),
+        "correlation_design": matrix_block(
+            correlation.get("design"),
+            section="correlation_design",
+            inherited_available=correlation.get("available") is True
+            and not correlation.get("reason"),
+        ),
+        "elasticities": {
+            "method": _safe_text(elasticities.get("method") or ""),
+            "method_label": technical_label(elasticities.get("method"), {
+                "central_finite_difference_predict_original": (
+                    "diferença finita central na predição em unidade original"
+                ),
+            }),
+            "point": _safe_text(elasticities.get("point") or ""),
+            "point_label": technical_label(elasticities.get("point"), {
+                "subject": "imóvel avaliando",
+            }),
+            "relative_step": format_snapshot_number(elasticities.get("relative_step")),
+            "items": elasticity_rows,
+            "warnings": [_safe_text(item) for item in _as_list(elasticities.get("warnings"))],
+            "present": bool(elasticity_rows) and elasticities.get("available") is True
+            and not elasticities.get("reason")
+            and _as_mapping(elasticities.get("coverage")).get("complete") is True
+            and not _as_mapping(elasticities.get("coverage")).get("missing_variables"),
+            "reason": _safe_text(elasticities.get("reason") or ""),
+        },
+        "outliers": {
+            "detected": outliers.get("detected"),
+            "excluded": outliers.get("excluded"),
+            "influential": outliers.get("influential"),
+            "definition": _redact_mapping(outliers.get("definition") or {}),
+            "definition_rows": definition_rows,
+            "tokens": {
+                field: report_field_token("outliers", field)
+                for field in ("detected", "excluded", "influential")
+            },
+            "present": outliers.get("available") is True and not outliers.get("reason")
+            and _as_mapping(outliers.get("coverage")).get("complete") is True
+            and all(outliers.get(key) is not None for key in ("detected", "excluded", "influential")),
+            "reason": _safe_text(outliers.get("reason") or ""),
+        },
+    }
+
+
+def sample_cell_token(
+    kind: str, row_id: Any, field: Any, *, panel: Optional[int] = None
+) -> str:
+    """Return a short stable marker binding a rendered cell to row and panel."""
+    row_key = hashlib.sha256(str(row_id).encode("utf-8")).hexdigest()[:10]
+    field_key = hashlib.sha256(str(field).encode("utf-8")).hexdigest()[:10]
+    panel_key = f":P{panel}" if panel is not None else ""
+    return f"[MPS:{kind[:1].upper()}:{row_key}:{field_key}{panel_key}]"
+
+
+def report_field_token(section: str, *parts: Any) -> str:
+    """Bind a displayed statistical value to its semantic section and field."""
+    material = canonical_json([str(section), *[str(part) for part in parts]])
+    key = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+    return f"[MPSTAT:{key}]"
+
+
+def _ledger_value_panels(
+    rows: Sequence[Mapping[str, Any]], columns: Sequence[str], *, kind: str,
+    width: int = 5
+) -> List[Dict[str, Any]]:
+    """Lay out every sample value in readable panels with repeated row IDs."""
+    panels: List[Dict[str, Any]] = []
+    names = [str(column) for column in columns]
+    for offset in range(0, len(names), width):
+        panel_columns = names[offset : offset + width]
+        panel_rows = []
+        panel_number = len(panels) + 1
+        for row in rows:
+            values = list(row.get("value_cells") or [])
+            panel_rows.append({
+                "seq": row.get("seq"),
+                "row_id": row.get("row_id"),
+                "row_id_token": sample_cell_token(
+                    kind, row.get("row_id"), "row_id", panel=panel_number
+                ),
+                "cells": values[offset : offset + len(panel_columns)],
+                "cell_tokens": [
+                    sample_cell_token(
+                        kind, row.get("row_id"), column, panel=panel_number
+                    )
+                    for column in panel_columns
+                ],
+            })
+        panels.append({
+            "number": panel_number,
+            "columns": panel_columns,
+            "header_tokens": [
+                sample_cell_token(kind, "__header__", column, panel=panel_number)
+                for column in panel_columns
+            ],
+            "rows": panel_rows,
+        })
+    return panels
 
 
 def _context_sources(ctx: Mapping[str, Any], provenance: Mapping[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -649,7 +969,8 @@ def _coef_rows(model: Mapping[str, Any]) -> List[Dict[str, Any]]:
                     "variable": str(name),
                     "coefficient_full": format_snapshot_number(number),
                     "coefficient": _fmt(number, 6) if number is not None else "—",
-                    "pvalue": _fmt(_as_finite_number(pvalues.get(name)), 4) if name in pvalues else "—",
+                    "pvalue": _fmt_pvalue(pvalues.get(name)) if name in pvalues else "—",
+                    "pvalue_token": report_field_token("coefficient_pvalue", name),
                     "vif": _fmt(_as_finite_number(vif.get(name)), 3)
                     if name in vif and str(name) != "const"
                     else "—",
@@ -666,7 +987,8 @@ def _coef_rows(model: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 "variable": str(name),
                 "coefficient_full": format_snapshot_number(number),
                 "coefficient": _fmt(number, 6) if number is not None else "—",
-                "pvalue": _fmt(_as_finite_number(item.get("pvalue")), 4),
+                "pvalue": _fmt_pvalue(item.get("pvalue")),
+                "pvalue_token": report_field_token("coefficient_pvalue", name),
                 "vif": _fmt(_as_finite_number(item.get("vif")), 3)
                 if str(name) != "const"
                 else "—",
@@ -675,8 +997,11 @@ def _coef_rows(model: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _index_rows(rows: Sequence[Any]) -> Dict[str, Dict[str, Any]]:
+def _index_rows(
+    rows: Sequence[Any], *, metadata_columns: Sequence[str] = ()
+) -> Dict[str, Dict[str, Any]]:
     indexed: Dict[str, Dict[str, Any]] = {}
+    documentary_columns = {str(column) for column in metadata_columns if str(column)}
     for raw in rows:
         if isinstance(raw, Mapping):
             rid = _row_id(raw)
@@ -684,15 +1009,26 @@ def _index_rows(rows: Sequence[Any]) -> Dict[str, Dict[str, Any]]:
             extra = {
                 k: v
                 for k, v in raw.items()
-                if k not in {"row_id", "id", "identificador", "source", "justification", "values", "label", "name"}
+                if k not in {
+                    "row_id", "id", "identificador", "source", "source_is_documentary",
+                    "justification", "values", "label", "name", "address", "endereco",
+                    "latitude", "longitude", "geolocation",
+                }
             }
-            merged_values = dict(values)
+            merged_values = {
+                key: value for key, value in values.items()
+                if str(key) not in documentary_columns
+            }
             merged_values.update(extra)
             indexed[rid] = {
                 "row_id": rid,
                 "source": _safe_text(raw.get("source") or raw.get("fonte") or ""),
                 "justification": _safe_text(raw.get("justification") or raw.get("justificativa") or ""),
                 "label": _safe_text(raw.get("label") or raw.get("name") or ""),
+                "address": _safe_text(raw.get("address") or raw.get("endereco") or ""),
+                "latitude": _as_finite_number(raw.get("latitude")),
+                "longitude": _as_finite_number(raw.get("longitude")),
+                "geolocation": _as_mapping(raw.get("geolocation")),
                 "values": {str(k): v for k, v in merged_values.items()},
             }
         else:
@@ -721,6 +1057,7 @@ def _ledger_rows(
         justification = info.get("justification") or ""
         label = info.get("label") or ""
         values = info.get("values") or {}
+        geolocation = _as_mapping(info.get("geolocation"))
         storage_values = {
             str(k): format_snapshot_number(v) if _as_finite_number(v) is not None else _safe_text(v)
             for k, v in values.items()
@@ -731,6 +1068,10 @@ def _ledger_rows(
                 "source": source if source else "Fonte não informada no contexto do relatório",
                 "justification": justification if justification else default_justification,
                 "label": label,
+                "address": info.get("address") or geolocation.get("address") or "",
+                "latitude": info.get("latitude") if info.get("latitude") is not None else geolocation.get("latitude"),
+                "longitude": info.get("longitude") if info.get("longitude") is not None else geolocation.get("longitude"),
+                "geolocation_complete": geolocation.get("complete") is True,
                 "values": values,
                 "storage_values": storage_values,
                 "value_cells": [storage_values.get(k, values.get(k, "")) for k in sorted(values.keys())],
@@ -794,9 +1135,33 @@ def build_report_view(
     documentary = validation.get("documentary")
     document_state = assess_document_state(snapshot, ctx)
     qualification_profile = _as_mapping(document_state.get("profile"))
-    qualification_rules = [
-        _redact_mapping(rule) for rule in _as_list(document_state.get("rule_results")) if isinstance(rule, Mapping)
-    ]
+    qualification_rules = []
+    status_labels = {
+        "passed": "Atendido",
+        "failed": "Não atendido",
+        "pending_manual": "Pendente de insumo profissional",
+        "unsupported": "Sem suporte",
+        "not_applicable": "Não aplicável",
+        "unverified": "Não verificado",
+    }
+    for raw_rule in _as_list(document_state.get("rule_results")):
+        if not isinstance(raw_rule, Mapping):
+            continue
+        rule = _redact_mapping(raw_rule)
+        rule["status_label"] = status_labels.get(
+            str(rule.get("status") or ""), _safe_text(rule.get("status") or "PENDENTE")
+        )
+        rule["source_display"] = " / ".join(
+            part for part in (
+                _safe_text(rule.get("source_id") or ""),
+                _safe_text(rule.get("edition_or_version") or ""),
+            ) if part
+        ) or "PENDENTE"
+        rule["evidence_display"] = "; ".join(
+            _safe_text(item) for item in _as_list(rule.get("evidence_refs"))
+        ) or "Sem evidência registrada"
+        rule["observed_display"] = _safe_text(rule.get("observed") or "—")
+        qualification_rules.append(rule)
 
     unit = _normalize_unit(target.get("unit") if target.get("unit") is not None else ctx.get("target_unit"))
     unit_pending = unit is None
@@ -834,8 +1199,14 @@ def build_report_view(
     if n_excluded is None:
         n_excluded = len(excluded_ids)
 
-    used_details = _index_rows(_as_list(ctx.get("used_rows")))
-    excluded_details = _index_rows(_as_list(ctx.get("excluded_rows")))
+    evidence_columns = _as_mapping(ctx.get("sample_evidence_columns"))
+    metadata_columns = [str(value) for value in evidence_columns.values() if value]
+    used_details = _index_rows(
+        _as_list(ctx.get("used_rows")), metadata_columns=metadata_columns
+    )
+    excluded_details = _index_rows(
+        _as_list(ctx.get("excluded_rows")), metadata_columns=metadata_columns
+    )
     used_rows = _ledger_rows(
         used_ids,
         used_details,
@@ -856,6 +1227,21 @@ def build_report_view(
         row["seq"] = n
         storage = row.get("storage_values") or {}
         row["value_cells"] = [storage.get(k, row["values"].get(k, "")) for k in excluded_value_columns]
+    for kind, rows in (("used", used_rows), ("excluded", excluded_rows)):
+        for row in rows:
+            row["cell_tokens"] = {
+                field: sample_cell_token(kind, row.get("row_id"), field)
+                for field in (
+                    "row_id", "source", "justification", "label", "address",
+                    "latitude", "longitude",
+                )
+            }
+    used_value_panels = _ledger_value_panels(
+        used_rows, used_value_columns, kind="used"
+    )
+    excluded_value_panels = _ledger_value_panels(
+        excluded_rows, excluded_value_columns, kind="excluded"
+    )
 
     issues = _group_issues([_issue_dict(i) for i in _as_list(snapshot.get("issues"))])
     issues_by_origin: Dict[str, List[Dict[str, Any]]] = {
@@ -924,6 +1310,7 @@ def build_report_view(
     ]
 
     metrics = _metrics_block(model, statistical)
+    diagnostics = _statistical_diagnostics(statistical)
     equation = compose_model_equation(model, target_col=str(target.get("column") or ""))
     chart_series = assess_chart_series(ctx, used_row_ids=used_ids)
     external_validation = None
@@ -978,6 +1365,19 @@ def build_report_view(
 
     subject = ctx.get("subject") if isinstance(ctx.get("subject"), Mapping) else {}
     subject_items = [(str(k), subject[k]) for k in subject]
+    subject_geolocation = _as_mapping(subject.get("geolocation"))
+    variable_classification = []
+    for raw in _as_list(ctx.get("variable_classification")):
+        if not isinstance(raw, Mapping):
+            continue
+        variable_classification.append({
+            "variable": _safe_text(raw.get("variable") or raw.get("name") or ""),
+            "criterion": _safe_text(raw.get("criterion") or ""),
+            "coding": _safe_text(raw.get("coding") or ""),
+            "categories": _safe_text(raw.get("categories") or ""),
+            "scale_values": _safe_text(raw.get("scale_values") or ""),
+            "complete": raw.get("complete") is True,
+        })
 
     model_id = (
         model.get("model_id")
@@ -1045,7 +1445,7 @@ def build_report_view(
         or "PENDENTE",
         "MPQUAL_REVIEW_EVENTS": str(len(document_state.get("review_events") or [])),
         "MPQUAL_RULES_SHA256": hashlib.sha256(
-            canonical_json(qualification_rules).encode("utf-8")
+            canonical_json(document_state.get("rule_results") or []).encode("utf-8")
         ).hexdigest(),
         "MPQUAL_REVIEW_SHA256": hashlib.sha256(
             canonical_json(document_state.get("review_events") or []).encode("utf-8")
@@ -1109,6 +1509,7 @@ def build_report_view(
                 else _safe_text(item.get("grade") or item.get("status") or "Pendente"),
                 "detail": _safe_text(item.get("detail") or item.get("evidence_status") or ""),
                 "evidence_status": _safe_text(item.get("evidence_status") or item.get("status") or ""),
+                "points": item.get("points"),
             }
         )
 
@@ -1132,12 +1533,13 @@ def build_report_view(
         or ""
     )
     purpose = (
-        qualification_profile.get("purpose")
-        or ctx.get("purpose")
+        ctx.get("purpose")
+        or qualification_profile.get("purpose")
         or snapshot.get("purpose")
         or provenance.get("purpose")
         or ""
     )
+    objective = ctx.get("objective") or snapshot.get("objective") or ""
     rights = ctx.get("rights") or ctx.get("property_rights") or ""
     asset_identification = ctx.get("asset_identification") or ctx.get("asset") or subject
     if isinstance(asset_identification, Mapping):
@@ -1235,6 +1637,12 @@ def build_report_view(
         "case_release_status": document_state["case_release_status"],
         "applicant": _safe_text(applicant) or "Não informado",
         "purpose": _safe_text(purpose) or "Não informado",
+        "objective": _safe_text(objective) or _pending("objetivo da avaliação não informado"),
+        "market_diagnosis": _safe_text(ctx.get("market_diagnosis") or "")
+        or _pending("diagnóstico do mercado não informado"),
+        "grade_i_justification": _safe_text(ctx.get("grade_i_justification") or "")
+        or _pending("justificativa para Grau I não informada"),
+        "observations": [_safe_text(item) for item in _as_list(ctx.get("observations"))],
         "target_col": _safe_text(target.get("column") or ""),
         "target_estimand": _safe_text(target.get("estimand") or ""),
         "unit": unit,
@@ -1308,6 +1716,8 @@ def build_report_view(
         "excluded_rows": excluded_rows,
         "used_value_columns": used_value_columns,
         "excluded_value_columns": excluded_value_columns,
+        "used_value_panels": used_value_panels,
+        "excluded_value_panels": excluded_value_panels,
         "used_count_mismatch": (
             n_used is not None and used_ids and int(n_used) != len(used_ids)
         ),
@@ -1353,6 +1763,15 @@ def build_report_view(
         "formula": _safe_text(equation["formula"]),
         "formula_display": _safe_text(equation["formula_display"]),
         "formula_storage": _safe_text(equation["formula_storage"]),
+        "original_scale_formula": _safe_text(equation["original_scale_formula"]),
+        "original_scale_formula_storage": _safe_text(
+            equation["original_scale_formula_storage"]
+        ),
+        "original_scale_formula_present": equation["original_scale_present"],
+        "retransformation_method": _safe_text(equation.get("retransformation_method") or ""),
+        "retransformation_estimand": _safe_text(
+            equation.get("retransformation_estimand") or ""
+        ),
         "formula_source": equation["source"],
         "formula_present": equation["present"],
         "fitting_scale": equation["fitting_scale"],
@@ -1363,6 +1782,7 @@ def build_report_view(
         "coef_rows": _coef_rows(model),
         "metrics": metrics,
         "metrics_present": metrics["present"],
+        "statistical_diagnostics": diagnostics,
         "chart_series": chart_series,
         "chart_available": chart_series["plot"],
         "chart_absence_reason": chart_series["reason"],
@@ -1373,6 +1793,8 @@ def build_report_view(
         "annexes": annexes,
         "subject_items": subject_items,
         "has_subject": bool(subject_items),
+        "subject_geolocation": subject_geolocation,
+        "variable_classification": variable_classification,
         "asset_identification_display": asset_identification_display or _pending("identificação do bem não informada"),
         "rights_display": _safe_text(rights) or _pending("direitos avaliados não informados"),
         "region_characterization": _safe_text(ctx.get("region_characterization") or ""),
@@ -1439,6 +1861,7 @@ def _charts_from_series(
     axis_fitted: str = "Valores ajustados",
     axis_resid: str = "Resíduos",
     axis_observed: str = "Valores observados",
+    standardized_residuals: Any = None,
 ) -> Dict[str, str]:
     charts: Dict[str, str] = {}
     fitted_arr = np.asarray(fitted, dtype=float) if fitted is not None else np.array([])
@@ -1459,11 +1882,19 @@ def _charts_from_series(
     plt.tight_layout()
     charts["residuals_vs_fitted"] = _figure_to_base64()
 
+    standardized_arr = np.asarray(
+        standardized_residuals, dtype=float
+    ) if standardized_residuals is not None else np.array([])
+    hist_arr = standardized_arr if standardized_arr.size == resid_arr.size else resid_arr
+    hist_standardized = standardized_arr.size == resid_arr.size
     plt.figure(figsize=_CHART_FIGSIZE)
-    sns.histplot(resid_arr, kde=True)
-    plt.xlabel(axis_resid)
+    sns.histplot(hist_arr, kde=True)
+    plt.xlabel("Resíduos padronizados" if hist_standardized else axis_resid)
     plt.ylabel("Frequência")
-    plt.title("Histograma dos resíduos")
+    plt.title(
+        "Histograma dos resíduos padronizados"
+        if hist_standardized else "Histograma dos resíduos"
+    )
     plt.tight_layout()
     charts["residuals_hist"] = _figure_to_base64()
 
@@ -1531,6 +1962,11 @@ def _attach_charts(
                 axis_fitted=series.get("axis_fitted") or "Valores ajustados",
                 axis_resid=series.get("axis_resid") or "Resíduos",
                 axis_observed=series.get("axis_observed") or "Valores observados",
+                standardized_residuals=(
+                    ((view.get("statistical_diagnostics") or {}).get(
+                        "standardized_residuals"
+                    ) or {}).get("values")
+                ),
             )
             for key, val in generated.items():
                 charts.setdefault(key, val)

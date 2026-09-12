@@ -205,6 +205,34 @@
     font-size: 7.5pt;
   }
   table.ledger-table { font-size: 7.5pt; }
+  table.correlation-panel { font-size: 7.8pt; table-layout: fixed; }
+  table.correlation-panel th, table.correlation-panel td {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+    padding: 2px 3px;
+  }
+  table.correlation-panel th:first-child { width: 24%; }
+  .rule-card {
+    border: 1px solid #aebbc4;
+    border-left: 4px solid #0b3d5c;
+    padding: 6px 8px;
+    margin: 0.45em 0;
+    page-break-inside: avoid;
+  }
+  .rule-card p { margin: 2px 0; }
+  table.ledger-core { table-layout: fixed; font-size: 7.8pt; }
+  table.ledger-core th:nth-child(1) { width: 5%; }
+  table.ledger-core th:nth-child(2) { width: 16%; }
+  table.ledger-core th:nth-child(4), table.ledger-core th:nth-child(5) { width: 13%; }
+  table.ledger-values { table-layout: fixed; font-size: 7.8pt; }
+  table.ledger-values th, table.ledger-values td {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  .ledger-note { page-break-inside: avoid; margin: 0 0 0.55em 0; }
+  .cell-token { display: block; color: #667; font-size: 4pt; white-space: nowrap; }
   .seq { width: 2.4em; white-space: nowrap; }
   .lead-value { font-size: 13pt; font-weight: bold; color: #0b3d5c; }
   .tech-trail { page-break-before: always; }
@@ -247,6 +275,7 @@
   <div class="meta-block">
     <p><b>Solicitante:</b> {{ applicant }}</p>
     <p><b>Finalidade:</b> {{ purpose }}</p>
+    <p><b>Objetivo da avaliação:</b> {{ objective }}</p>
     <p><b>Bem e direitos avaliados:</b> {{ asset_identification_display }}</p>
     <p><b>Direitos:</b> {{ rights_display }}</p>
     <p><b>Data-base (referência):</b>
@@ -297,6 +326,7 @@
   <h2>Caracterização e pressupostos</h2>
   <p><b>Região:</b> {{ region_characterization or "PENDENTE — caracterização da região não informada" }}</p>
   <p><b>Imóvel:</b> {{ property_characterization or "PENDENTE — caracterização do imóvel não informada" }}</p>
+  <p><b>Diagnóstico do mercado:</b> {{ market_diagnosis }}</p>
   {% if assumptions %}
   <ul>{% for assumption in assumptions %}<li>{{ assumption }}</li>{% endfor %}</ul>
   {% else %}
@@ -343,25 +373,25 @@
       <td>O ponto acima é a estimativa do snapshot (em geral média condicional / estimando declarado). Mediana, quando houver, aparece só na descritiva amostral e não substitui este ponto.</td>
     </tr>
   </table>
+  <h3>Observações do avaliador</h3>
+  {% if observations %}
+  <ul>{% for observation in observations %}<li>{{ observation }}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="pending">Pendência: observações do avaliador não informadas.</p>
+  {% endif %}
 
   <h2>Regras aplicáveis e evidências</h2>
   {% if qualification_rules %}
-  <table>
-    <thead><tr><th>Regra</th><th>Fonte / edição</th><th>Cláusula</th><th>Estado</th><th>Observado</th><th>Evidências</th><th>Explicação</th></tr></thead>
-    <tbody>
-    {% for rule in qualification_rules %}
-      <tr>
-        <td class="col-id">{{ rule.rule_id }}</td>
-        <td>{{ rule.source_id }} / {{ rule.edition_or_version }}</td>
-        <td>{{ rule.clause }}</td>
-        <td class="col-id">{{ rule.status }}</td>
-        <td class="long-wrap">{{ rule.observed }}</td>
-        <td class="long-wrap">{{ rule.evidence_refs|join("; ") }}</td>
-        <td class="long-wrap">{{ rule.explanation }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  {% for rule in qualification_rules %}
+  <div class="rule-card">
+    <p><b class="col-id">{{ rule.rule_id }}</b> — <b>{{ rule.status_label }}</b> <span class="col-id">[{{ rule.status }}]</span></p>
+    <p>{{ rule.explanation }}</p>
+    <p><b>Fonte / edição:</b> {{ rule.source_display }}</p>
+    <p><b>Cláusula:</b> {{ rule.clause or "PENDENTE" }}</p>
+    <p><b>Valor observado:</b> {{ rule.observed_display }}</p>
+    <p><b>Evidência:</b> {{ rule.evidence_display }}</p>
+  </div>
+  {% endfor %}
   {% else %}
   <p class="pending">Resultados do classificador canônico não fornecidos.</p>
   {% endif %}
@@ -453,10 +483,13 @@
   <p>Grau de fundamentação informado: <span class="badge">{{ grau_fundamentacao_label }}</span>
      {% if grau_fundamentacao_points is not none %} — pontos: {{ grau_fundamentacao_points }}{% endif %}
   </p>
+  {% if grau_fundamentacao_label == "Grau I" %}
+  <p><b>Justificativa para adoção do Grau I:</b> {{ grade_i_justification }}</p>
+  {% endif %}
   {% if item_scores %}
   <table>
     <thead>
-      <tr><th>Item</th><th>Descrição</th><th>Grau / status</th><th>Detalhe / evidência</th></tr>
+      <tr><th>Item</th><th>Descrição</th><th>Grau / status</th><th>Pontos</th><th>Detalhe / evidência</th></tr>
     </thead>
     <tbody>
       {% for it in item_scores %}
@@ -464,6 +497,7 @@
         <td>{{ it.item }}</td>
         <td class="long-wrap">{{ it.description }}</td>
         <td>{{ it.grau_label }}</td>
+        <td>{{ it.points if it.points is not none else "PENDENTE" }}</td>
         <td class="long-wrap">{{ it.detail }} {% if it.evidence_status %}(evidência: {{ it.evidence_status }}){% endif %}</td>
       </tr>
       {% endfor %}
@@ -582,9 +616,6 @@
   <p>
     Equação na escala de ajuste (<b>{{ fitting_scale }}</b>).
     O valor do snapshot não foi recalculado a partir desta fórmula arredondada.
-    {% if formula_log_scale %}
-    Esta minuta não imprime exp(…) como média sem o método de retransformação informado.
-    {% endif %}
   </p>
   {% if formula_present %}
   <div class="formula-box">{{ formula_display or formula }}</div>
@@ -597,6 +628,16 @@
   {% for note in formula_notes %}
   <p class="disclaimer">{{ note }}</p>
   {% endfor %}
+  <h3>Equação com a variável dependente na unidade original</h3>
+  {% if original_scale_formula_present %}
+  <div class="formula-box">{{ original_scale_formula }}</div>
+  {% if original_scale_formula_storage and original_scale_formula_storage != original_scale_formula %}
+  <p class="muted">Precisão de armazenamento: <span class="formula-box">{{ original_scale_formula_storage }}</span></p>
+  {% endif %}
+  <p>Método de retransformação: <b>{{ retransformation_method }}</b>. Estimando: <b>{{ retransformation_estimand }}</b>.</p>
+  {% else %}
+  <p class="pending">Pendência: forma na unidade original e método de retransformação não comprovados pelo snapshot.</p>
+  {% endif %}
   {% endif %}
   {% if variable_meanings %}
   <h3>Significado das variáveis na especificação</h3>
@@ -624,6 +665,16 @@
     </tbody>
   </table>
   {% endif %}
+  <h3>Critérios de enquadramento e escalas das variáveis</h3>
+  {% if variable_classification %}
+  <table>
+    <thead><tr><th>Variável</th><th>Critério de enquadramento</th><th>Codificação</th><th>Categorias</th><th>Escala</th></tr></thead>
+    <tbody>{% for row in variable_classification %}<tr>
+      <td>{{ row.variable }}</td><td>{{ row.criterion or "PENDENTE" }}</td>
+      <td>{{ row.coding or "PENDENTE" }}</td><td>{{ row.categories or "—" }}</td><td>{{ row.scale_values or "—" }}</td>
+    </tr>{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="pending">Pendência: critérios de enquadramento e escalas não informados.</p>{% endif %}
   {% if coef_rows %}
   <table>
     <thead>
@@ -641,7 +692,7 @@
         <td class="long-wrap">{{ row.variable }}</td>
         <td>{{ row.coefficient }}</td>
         <td>{{ row.coefficient_full }}</td>
-        <td>{{ row.pvalue }}</td>
+        <td>{{ row.pvalue }}<span class="cell-token">{{ row.pvalue_token }}</span></td>
         <td>{{ row.vif }}</td>
       </tr>
       {% endfor %}
@@ -658,11 +709,14 @@
   <h3>Ajustamento (R²) — não é critério de avaliação superior</h3>
   {% if metrics_present %}
   <table class="metrics-grid">
-    <tr><td class="label">R²</td><td>{{ metrics.r2 }}</td></tr>
-    <tr><td class="label">R² ajustado</td><td>{{ metrics.r2_adjusted }}</td></tr>
-    <tr><td class="label">Estatística F (p-valor)</td><td>{{ metrics.f_statistic }} ({{ metrics.f_pvalue }})</td></tr>
-    <tr><td class="label">Durbin-Watson</td><td>{{ metrics.durbin_watson }}</td></tr>
+    <tr><td class="label">Coeficiente de correlação R</td><td>{{ metrics.r }}<span class="cell-token">{{ metrics.tokens.r }}</span></td></tr>
+    <tr><td class="label">R²</td><td>{{ metrics.r2 }}<span class="cell-token">{{ metrics.tokens.r2 }}</span></td></tr>
+    <tr><td class="label">R² ajustado</td><td>{{ metrics.r2_adjusted }}<span class="cell-token">{{ metrics.tokens.r2_adjusted }}</span></td></tr>
+    <tr><td class="label">Estatística F</td><td>{{ metrics.f_statistic }}<span class="cell-token">{{ metrics.tokens.f_statistic }}</span></td></tr>
+    <tr><td class="label">p-valor do teste F</td><td>{{ metrics.f_pvalue }}<span class="cell-token">{{ metrics.tokens.f_pvalue }}</span></td></tr>
+    <tr><td class="label">Durbin-Watson</td><td>{{ metrics.durbin_watson }}<span class="cell-token">{{ metrics.tokens.durbin_watson }}</span></td></tr>
   </table>
+  {% if metrics.r2_relation.present %}<p class="muted">{{ metrics.r2_relation.text }} Valores registrados: R² obtido de R = {{ metrics.r2_relation.r_squared }}; R² do ajuste = {{ metrics.r2_relation.r2 }}; diferença = {{ metrics.r2_relation.difference }}.</p>{% endif %}
   <p class="disclaimer">
     {{ metrics.note }}
     Um R² maior não significa, por si só, avaliação superior, maior grau normativo, nem laudo melhor.
@@ -671,6 +725,37 @@
   {% else %}
   <p class="no-data">{{ metrics.note }}</p>
   {% endif %}
+
+  {% set diag = statistical_diagnostics %}
+  <h3>Diagnósticos estatísticos exigidos</h3>
+  {% if diag.outliers.present %}
+  <p><b>Dados discrepantes e influentes:</b> detectados {{ diag.outliers.detected }}<span class="cell-token">{{ diag.outliers.tokens.detected }}</span>; excluídos {{ diag.outliers.excluded }}<span class="cell-token">{{ diag.outliers.tokens.excluded }}</span>; influentes {{ diag.outliers.influential }}<span class="cell-token">{{ diag.outliers.tokens.influential }}</span>.</p>
+  {% for definition in diag.outliers.definition_rows %}
+  <p class="muted"><b>{{ definition.label }}:</b> {{ definition.text }} <span class="col-id">[{{ definition.key }}]</span></p>
+  {% endfor %}
+  {% else %}<p class="pending">Contagem de outliers não fornecida.</p>{% endif %}
+  {% if diag.normal_frequency.present %}
+  <table><thead><tr><th>Intervalo padronizado</th><th>Referência (%)</th><th>Observados</th><th>Amostra (%)</th></tr></thead><tbody>
+  {% for row in diag.normal_frequency.rows %}<tr><td>[-{{ row.z }}; +{{ row.z }}]<span class="cell-token">{{ row.tokens.z }}</span></td><td>{{ row.nominal_percent }}<span class="cell-token">{{ row.tokens.nominal_percent }}</span></td><td>{{ row.observed_count }}<span class="cell-token">{{ row.tokens.observed_count }}</span></td><td>{{ row.observed_percent }}<span class="cell-token">{{ row.tokens.observed_percent }}</span></td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="pending">Cotejo 68%/90%/95% dos resíduos padronizados não fornecido.</p>{% endif %}
+  {% for matrix in [diag.correlation, diag.correlation_design] %}
+  {% if matrix.present %}
+  <p><b>Matriz de correlações:</b> {{ matrix.scale_label }}, {{ matrix.sample_label }}, n={{ matrix.n }}. <span class="muted">Metadados: escala={{ matrix.scale }}; amostra={{ matrix.sample }}.</span></p>
+  {% for panel in matrix.panels %}
+  <p class="muted">Painel {{ panel.number }} de {{ matrix.panels|length }} — colunas {{ panel.variables|join(", ") }}.</p>
+  <table class="correlation-panel"><thead><tr><th>Variável (linha)</th>{% for variable in panel.variables %}<th>{{ variable }}</th>{% endfor %}</tr></thead><tbody>
+  {% for row in panel.rows %}<tr><th>{{ row.variable }}</th>{% for value in row["values"] %}<td>{{ value }}<span class="cell-token">{{ row.cell_tokens[loop.index0] }}</span></td>{% endfor %}</tr>{% endfor %}
+  </tbody></table>
+  {% endfor %}
+  {% endif %}{% endfor %}
+  {% if diag.elasticities.present %}
+  <p><b>Elasticidades no ponto de estimação:</b> método {{ diag.elasticities.method_label }}, ponto {{ diag.elasticities.point_label }}, passo relativo {{ diag.elasticities.relative_step }}. <span class="muted">Metadados: método={{ diag.elasticities.method }}; ponto={{ diag.elasticities.point }}.</span></p>
+  <table><thead><tr><th>Variável</th><th>Elasticidade</th><th>Valor-base</th><th>Predição-base</th><th>Passo</th><th>Derivada</th></tr></thead><tbody>
+  {% for row in diag.elasticities["items"] %}<tr><td>{{ row.variable }}<span class="cell-token">{{ row.tokens.variable }}</span></td><td>{{ row.elasticity }}<span class="cell-token">{{ row.tokens.elasticity }}</span></td><td>{{ row.base_value }}<span class="cell-token">{{ row.tokens.base_value }}</span></td><td>{{ row.base_prediction }}<span class="cell-token">{{ row.tokens.base_prediction }}</span></td><td>{{ row.step }}<span class="cell-token">{{ row.tokens.step }}</span></td><td>{{ row.derivative }}<span class="cell-token">{{ row.tokens.derivative }}</span></td></tr>{% endfor %}
+  </tbody></table>
+  {% for warning in diag.elasticities.warnings %}<p class="disclaimer">{{ warning }}</p>{% endfor %}
+  {% else %}<p class="pending">Elasticidades no ponto de estimação não fornecidas.</p>{% endif %}
 
   {% if external_validation and external_validation.present %}
   <h3>Validação externa (quando executada)</h3>
@@ -712,8 +797,8 @@
   {% endif %}
   {% if charts.residuals_hist %}
   <div class="chart-block">
-    <p><b>Gráfico: Histograma dos resíduos</b></p>
-    <img class="chart-img" src="data:image/png;base64,{{ charts.residuals_hist }}" alt="Histograma dos resíduos">
+    <p><b>Gráfico: Histograma dos resíduos{% if statistical_diagnostics.standardized_residuals.present %} padronizados{% endif %}</b></p>
+    <img class="chart-img" src="data:image/png;base64,{{ charts.residuals_hist }}" alt="Histograma dos resíduos padronizados">
   </div>
   {% endif %}
   {% if chart_warning %}
@@ -733,6 +818,9 @@
       {% endfor %}
     </tbody>
   </table>
+  {% if subject_geolocation %}
+  <p><b>Geolocalização do avaliando:</b> latitude {{ subject_geolocation.latitude }}, longitude {{ subject_geolocation.longitude }}; endereço {{ subject_geolocation.address or "PENDENTE" }}; fonte {{ subject_geolocation.source or "PENDENTE" }}; sistema {{ subject_geolocation.coordinate_system }}.</p>
+  {% endif %}
   {% endif %}
 
   {% if market_summary_rows %}
@@ -776,72 +864,83 @@
     Não há truncamento às primeiras 200 linhas.
   </p>
   {% if used_rows %}
-  <table class="ledger-table">
+  <h3>Identificação, fonte e geolocalização</h3>
+  <table class="ledger-core">
     <thead>
       <tr>
         <th class="seq">nº</th>
         <th class="col-id">row_id</th>
-        <th>Fonte</th>
-        <th>Justificativa</th>
-        <th>Rótulo</th>
-        {% for col in used_value_columns %}
-        <th class="col-id">{{ col }}</th>
-        {% endfor %}
+        <th>Fonte</th><th>Endereço</th><th>Latitude</th><th>Longitude</th>
       </tr>
     </thead>
     <tbody>
       {% for row in used_rows %}
       <tr>
         <td class="seq">{{ row.seq }}</td>
-        <td class="col-id">{{ row.row_id }}</td>
-        <td class="long-wrap">{{ row.source }}</td>
-        <td class="long-wrap">{{ row.justification }}</td>
-        <td class="long-wrap">{{ row.label }}</td>
-        {% for cell in row.value_cells %}
-        <td class="long-wrap">{{ cell }}</td>
-        {% endfor %}
+        <td class="col-id">{{ row.row_id }}<span class="cell-token">{{ row.cell_tokens.row_id }}</span></td>
+        <td class="long-wrap">{{ row.source }}<span class="cell-token">{{ row.cell_tokens.source }}</span></td>
+        <td class="long-wrap">{{ row.address or "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.address }}</span></td><td class="col-num">{{ row.latitude if row.latitude is not none else "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.latitude }}</span></td><td class="col-num">{{ row.longitude if row.longitude is not none else "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.longitude }}</span></td>
       </tr>
+      <tr><td colspan="6" class="ledger-note"><b>Justificativa:</b> {{ row.justification }}<span class="cell-token">{{ row.cell_tokens.justification }}</span>{% if row.label %}<b>Rótulo:</b> {{ row.label }}<span class="cell-token">{{ row.cell_tokens.label }}</span>{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  {% for panel in used_value_panels %}
+  <h3>Valores da amostra — painel {{ panel.number }} de {{ used_value_panels|length }}</h3>
+  <table class="ledger-values"><thead><tr><th>nº</th><th>row_id</th>{% for col in panel.columns %}<th>{{ col }}<span class="cell-token">{{ panel.header_tokens[loop.index0] }}</span></th>{% endfor %}</tr></thead><tbody>
+  {% for row in panel.rows %}<tr><td class="seq">{{ row.seq }}</td><td class="col-id">{{ row.row_id }}<span class="cell-token">{{ row.row_id_token }}</span></td>{% for cell in row.cells %}<td class="col-num">{{ cell }}<span class="cell-token">{{ row.cell_tokens[loop.index0] }}</span></td>{% endfor %}</tr>{% endfor %}
+  </tbody></table>
+  {% endfor %}
   {% else %}
   <p class="no-data">Nenhum used_row_id no snapshot.</p>
   {% endif %}
 
   <h2>Registros excluídos (integral)</h2>
   {% if excluded_rows %}
-  <table class="ledger-table">
+  <table class="ledger-core">
     <thead>
       <tr>
         <th class="seq">nº</th>
         <th class="col-id">row_id</th>
         <th>Fonte</th>
         <th>Justificativa</th>
-        {% for col in excluded_value_columns %}
-        <th class="long-wrap">{{ col }}</th>
-        {% endfor %}
+        <th>Endereço</th><th>Latitude</th><th>Longitude</th>
       </tr>
     </thead>
     <tbody>
       {% for row in excluded_rows %}
       <tr>
         <td class="seq">{{ row.seq }}</td>
-        <td class="col-id">{{ row.row_id }}</td>
-        <td class="long-wrap">{{ row.source }}</td>
-        <td class="long-wrap">{{ row.justification }}</td>
-        {% for cell in row.value_cells %}
-        <td class="long-wrap">{{ cell }}</td>
-        {% endfor %}
+        <td class="col-id">{{ row.row_id }}<span class="cell-token">{{ row.cell_tokens.row_id }}</span></td>
+        <td class="long-wrap">{{ row.source }}<span class="cell-token">{{ row.cell_tokens.source }}</span></td>
+        <td class="long-wrap">{{ row.justification }}<span class="cell-token">{{ row.cell_tokens.justification }}</span></td>
+        <td class="long-wrap">{{ row.address or "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.address }}</span></td>
+        <td class="col-num">{{ row.latitude if row.latitude is not none else "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.latitude }}</span></td>
+        <td class="col-num">{{ row.longitude if row.longitude is not none else "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.longitude }}</span></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% for panel in excluded_value_panels %}
+  <h3>Valores excluídos — painel {{ panel.number }} de {{ excluded_value_panels|length }}</h3>
+  <table class="ledger-values"><thead><tr><th>nº</th><th>row_id</th>{% for col in panel.columns %}<th>{{ col }}<span class="cell-token">{{ panel.header_tokens[loop.index0] }}</span></th>{% endfor %}</tr></thead><tbody>
+  {% for row in panel.rows %}<tr><td class="seq">{{ row.seq }}</td><td class="col-id">{{ row.row_id }}<span class="cell-token">{{ row.row_id_token }}</span></td>{% for cell in row.cells %}<td class="col-num">{{ cell }}<span class="cell-token">{{ row.cell_tokens[loop.index0] }}</span></td>{% endfor %}</tr>{% endfor %}
+  </tbody></table>
+  {% endfor %}
   {% else %}
   <p class="no-data">Nenhum excluded_row_id no snapshot.</p>
   {% endif %}
   </div>
 
   <div class="annex">
+    <h2>Anexo — demonstrativo da pontuação de fundamentação e precisão</h2>
+    {% if item_scores %}
+    <table><thead><tr><th>Item</th><th>Descrição</th><th>Grau/status</th><th>Pontos</th><th>Evidência</th></tr></thead><tbody>
+    {% for it in item_scores %}<tr><td>{{ it.item }}</td><td>{{ it.description }}</td><td>{{ it.grau_label }}</td><td>{{ it.points if it.points is not none else "PENDENTE" }}</td><td>{{ it.detail }} {{ it.evidence_status }}</td></tr>{% endfor %}
+    </tbody></table>
+    <p>Grau de precisão: {{ grau_precisao_label }}{% if precisao_amplitude_pct is not none %}; amplitude {{ precisao_amplitude_pct }}%{% endif %}.</p>
+    {% else %}<p class="pending">Demonstrativo por item não fornecido.</p>{% endif %}
+
     <h2>Anexo integral — identificadores usados e excluídos</h2>
     <p>
       Este anexo faz parte dos mesmos bytes do PDF. A lista abaixo é completa

@@ -28,6 +28,7 @@ from ..report_presenter.qualification import (
 from ..report_presenter.verifier import verify_report_consistency
 from ..results_generator import render_report
 from .docx import build_docx, verify_docx_equivalence
+from .sample_xlsx import build_sample_xlsx, verify_sample_xlsx
 from .submission import build_submission_package, verify_submission_package, _verify_dossier_archive
 
 
@@ -55,7 +56,8 @@ def _serialized(operation):
 
 def _archive_current_documents(store, job_id, *, retire_unsigned=False):
     """Retain a byte-exact historical generation before invalidating its names."""
-    names = ["report.pdf", "report.docx", "report_context.json", "document_state.json",
+    names = ["report.pdf", "report.docx", "sample.xlsx", "report_context.json",
+             "output_manifest.json", "output_representation_manifest.json", "document_state.json",
              "signature_request.json", "signed_report.pdf", "submission.zip", "evidence_bundle.zip"]
     current = {name: raw for name in names if (raw := store.get_artifact(job_id, name)) is not None}
     if not current:
@@ -73,7 +75,7 @@ def _archive_current_documents(store, job_id, *, retire_unsigned=False):
     store.save_artifact(job_id, "document_history.zip", output.getvalue())
     retired = ["signature_request.json", "signed_report.pdf", "submission.zip"]
     if retire_unsigned:
-        retired += ["report.pdf", "report.docx"]
+        retired += ["report.pdf", "report.docx", "sample.xlsx", "output_representation_manifest.json"]
     for name in retired:
         store.retire_artifact(job_id, name)
 
@@ -386,6 +388,112 @@ def _artifact_inventory(store: Any, job_id: str, names: list[str]) -> Dict[str, 
     return result
 
 
+def _representation_manifest(
+    snapshot: Mapping[str, Any],
+    context: Mapping[str, Any],
+    *,
+    pdf: bytes,
+    docx: bytes,
+    sample_xlsx: bytes,
+    signed_pdf: Optional[bytes] = None,
+    signature_record: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Bind requirement locators to verified, byte-exact representations.
+
+    This post-render manifest is deliberately outside ``result_fingerprint``:
+    a PDF cannot contain its own hash. It binds back to the stable result and
+    report-content fingerprints that the bytes themselves expose.
+    """
+    pdf_check = verify_report_consistency(pdf, snapshot, context)
+    docx_check = verify_docx_equivalence(docx, snapshot, context)
+    xlsx_check = verify_sample_xlsx(sample_xlsx, snapshot, context)
+    representations: Dict[str, Dict[str, Any]] = {
+        "report.pdf": {
+            "sha256": _sha(pdf), "size": len(pdf), "media_type": "application/pdf",
+            "verified": pdf_check.get("ok") is True,
+        },
+        "report.docx": {
+            "sha256": _sha(docx), "size": len(docx),
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "verified": docx_check.get("equivalent") is True,
+        },
+        "sample.xlsx": {
+            "sha256": _sha(sample_xlsx), "size": len(sample_xlsx),
+            "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "verified": xlsx_check.get("ok") is True,
+            "row_count": xlsx_check.get("row_count"),
+        },
+    }
+    if signed_pdf is not None and signature_record is not None:
+        local = dict(signature_record.get("local_verification") or {})
+        policy = dict(local.get("policy") or {})
+        signature_valid = bool(
+            signature_record.get("status") == "valid"
+            and local.get("status") == "valid"
+        )
+        icp_valid = bool(
+            signature_valid
+            and signature_record.get("synthetic_test_only") is not True
+            and policy.get("trust_framework") == "ICP-Brasil"
+            and policy.get("trust_anchor_allowlist_verified") is True
+            and policy.get("signature_policy_verified") is True
+            and policy.get("revocation_policy_verified") is True
+            and policy.get("policy_registry_current") is True
+        )
+        representations["signed_report.pdf"] = {
+            "sha256": _sha(signed_pdf), "size": len(signed_pdf),
+            "media_type": "application/pdf", "verified": signature_valid,
+            "trust_policy": "icp_brasil" if icp_valid else None,
+            "icp_brasil_verified": icp_valid,
+            "signature_record_sha256": _sha(canonical_json(dict(signature_record)).encode("utf-8")),
+        }
+    manifest = build_output_manifest(snapshot, context, representations=representations)
+    qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
+    manifest.update({
+        "manifest_role": "post_render_byte_evidence",
+        "result_fingerprint": qctx.get("result_fingerprint"),
+        "report_content_fingerprint": report_content_fingerprint(snapshot, context),
+    })
+    return manifest
+
+
+def _verify_representation_manifest(
+    manifest: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    context: Mapping[str, Any],
+    artifacts: Mapping[str, bytes],
+) -> Dict[str, Any]:
+    findings = []
+    if manifest.get("schema_version") != "MP-OUTPUT-MANIFEST/1":
+        findings.append({"code": "OUTPUT_MANIFEST_SCHEMA_INVALID"})
+    if manifest.get("manifest_role") != "post_render_byte_evidence":
+        findings.append({"code": "OUTPUT_MANIFEST_ROLE_INVALID"})
+    qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
+    if manifest.get("result_fingerprint") != qctx.get("result_fingerprint"):
+        findings.append({"code": "OUTPUT_MANIFEST_RESULT_MISMATCH"})
+    if manifest.get("report_content_fingerprint") != report_content_fingerprint(snapshot, context):
+        findings.append({"code": "OUTPUT_MANIFEST_CONTENT_MISMATCH"})
+    for name, meta in (manifest.get("representations") or {}).items():
+        if not isinstance(meta, Mapping) or meta.get("verified") is not True:
+            findings.append({"code": "OUTPUT_REPRESENTATION_NOT_VERIFIED", "name": name})
+            continue
+        data = artifacts.get(str(name))
+        if data is None:
+            findings.append({"code": "OUTPUT_REPRESENTATION_MISSING", "name": name})
+            continue
+        if _sha(data) != meta.get("sha256") or len(data) != meta.get("size"):
+            findings.append({"code": "OUTPUT_REPRESENTATION_BYTES_MISMATCH", "name": name})
+    derived = build_output_manifest(
+        snapshot,
+        context,
+        representations=manifest.get("representations") or {},
+    )
+    for field in ("items", "content", "unverified_declarations"):
+        if canonical_json(manifest.get(field)) != canonical_json(derived.get(field)):
+            findings.append({"code": "OUTPUT_MANIFEST_DERIVATION_MISMATCH", "field": field})
+    return {"ok": not findings, "findings": findings}
+
+
 @_serialized
 def generate_documents(
     store: Any,
@@ -430,7 +538,27 @@ def generate_documents(
             item for item in context["documentary_files"]
             if item.get("sha256") not in prior_hashes
         ] + receipt_file
-    output_manifest = build_output_manifest(snapshot, context)
+    sample_xlsx = build_sample_xlsx(snapshot, context)
+    xlsx_check = verify_sample_xlsx(sample_xlsx, snapshot, context)
+    if not xlsx_check.get("ok"):
+        raise DocumentWorkflowError(
+            "REPORT_XLSX_INCONSISTENT",
+            "effective-sample XLSX failed verification: "
+            + ", ".join(str(item.get("code")) for item in xlsx_check.get("findings") or []),
+        )
+    output_manifest = build_output_manifest(
+        snapshot,
+        context,
+        representations={
+            "sample.xlsx": {
+                "sha256": _sha(sample_xlsx),
+                "size": len(sample_xlsx),
+                "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "verified": True,
+                "row_count": xlsx_check.get("row_count"),
+            }
+        },
+    )
     current_qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
     snapshot = _reassess(
         snapshot,
@@ -444,9 +572,18 @@ def generate_documents(
     # result_fingerprint changed after adding the real output manifest.  The
     # final report-content fingerprint is computed only from that stable result.
     pdf, docx = _render_and_verify(snapshot, context)
+    representation_manifest = _representation_manifest(
+        snapshot, context, pdf=pdf, docx=docx, sample_xlsx=sample_xlsx
+    )
+    dossier_files = list(context.get("documentary_files") or []) + [{
+        "filename": "sample.xlsx",
+        "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "sha256": _sha(sample_xlsx),
+        "bytes": sample_xlsx,
+    }]
     dossier = _refresh_dossier(
         store, job_id, snapshot=snapshot, pdf=pdf, docx=docx,
-        documentary_files=context.get("documentary_files") or [], persist=False,
+        documentary_files=dossier_files, persist=False,
     )
     _archive_current_documents(store, job_id)
     store.save_snapshot(job_id, snapshot)
@@ -454,8 +591,10 @@ def generate_documents(
     # own immutable artifact and are reloaded by digest for later stages.
     _save_json(store, job_id, "report_context.json", _json_value(context))
     _save_json(store, job_id, "output_manifest.json", output_manifest)
+    _save_json(store, job_id, "output_representation_manifest.json", representation_manifest)
     store.save_artifact(job_id, "report.pdf", pdf)
     store.save_artifact(job_id, "report.docx", docx)
+    store.save_artifact(job_id, "sample.xlsx", sample_xlsx)
     store.save_artifact(job_id, "evidence_bundle.zip", dossier)
     state = assess_document_state(snapshot, context)
     result = {
@@ -468,7 +607,8 @@ def generate_documents(
         "artifacts": _artifact_inventory(
             store,
             job_id,
-            ["report.pdf", "report.docx", "evidence_bundle.zip"],
+            ["report.pdf", "report.docx", "sample.xlsx", "evidence_bundle.zip",
+             "output_representation_manifest.json"],
         ),
         "dossier_available": dossier is not None,
     }
@@ -497,6 +637,11 @@ def record_review(
     if synthetic_test_only:
         context["synthetic_test_only"] = True
     output_manifest = _load_json_artifact(store, job_id, "output_manifest.json")
+    sample_xlsx = store.get_artifact(job_id, "sample.xlsx")
+    if sample_xlsx is None or not verify_sample_xlsx(sample_xlsx, snapshot, context).get("ok"):
+        raise DocumentWorkflowError(
+            "REPORT_XLSX_INCONSISTENT", "controlled sample.xlsx is missing or inconsistent"
+        )
     qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
     result_fp = str(qctx.get("result_fingerprint") or "")
     report_fp = report_content_fingerprint(snapshot, context)
@@ -528,15 +673,25 @@ def record_review(
         signature=None,
     )
     pdf, docx = _render_and_verify(snapshot, context)
+    representation_manifest = _representation_manifest(
+        snapshot, context, pdf=pdf, docx=docx, sample_xlsx=sample_xlsx
+    )
+    dossier_files = list(context.get("documentary_files") or []) + [{
+        "filename": "sample.xlsx",
+        "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "sha256": _sha(sample_xlsx),
+        "bytes": sample_xlsx,
+    }]
     dossier = _refresh_dossier(
         store, job_id, snapshot=snapshot, pdf=pdf, docx=docx,
-        documentary_files=context.get("documentary_files") or [], persist=False,
+        documentary_files=dossier_files, persist=False,
     )
     _archive_current_documents(store, job_id)
     store.save_snapshot(job_id, snapshot)
     _save_json(store, job_id, "report_context.json", _json_value(context))
     store.save_artifact(job_id, "report.pdf", pdf)
     store.save_artifact(job_id, "report.docx", docx)
+    _save_json(store, job_id, "output_representation_manifest.json", representation_manifest)
     store.save_artifact(job_id, "evidence_bundle.zip", dossier)
     state = assess_document_state(snapshot, context)
     result = {
@@ -570,8 +725,12 @@ def create_signature_request(store: Any, job_id: str, *, revision_id: str) -> Di
     if not revision_id or revision_id != latest.get("version"):
         raise DocumentWorkflowError("SIGNATURE_REVISION_MISMATCH", "signature must reference the current approved review")
     docx = store.get_artifact(job_id, "report.docx")
-    if docx is None:
-        raise DocumentWorkflowError("DOCUMENT_ARTIFACT_MISSING", "controlled DOCX is required before signature export")
+    sample_xlsx = store.get_artifact(job_id, "sample.xlsx")
+    if docx is None or sample_xlsx is None:
+        raise DocumentWorkflowError(
+            "DOCUMENT_ARTIFACT_MISSING",
+            "controlled DOCX and effective-sample XLSX are required before signature export",
+        )
     reviewed_bytes = _load_json_artifact(store, job_id, "document_state.json")
     dossier = store.get_artifact(job_id, "evidence_bundle.zip")
     if (reviewed_bytes.get("schema_version") != "MP-REVIEW/1"
@@ -579,6 +738,20 @@ def create_signature_request(store: Any, job_id: str, *, revision_id: str) -> Di
             or reviewed_bytes.get("docx_sha256") != _sha(docx)
             or reviewed_bytes.get("dossier_sha256") != _sha(dossier)):
         raise DocumentWorkflowError("SIGNATURE_EXPORT_INCONSISTENT", "current bytes differ from the recorded professional review")
+    representation_manifest = _load_json_artifact(
+        store, job_id, "output_representation_manifest.json"
+    )
+    representation_check = _verify_representation_manifest(
+        representation_manifest,
+        snapshot,
+        context,
+        {"report.pdf": pdf, "report.docx": docx, "sample.xlsx": sample_xlsx},
+    )
+    if not representation_check.get("ok"):
+        raise DocumentWorkflowError(
+            "SIGNATURE_EXPORT_INCONSISTENT",
+            "output representation manifest does not match controlled bytes",
+        )
     try:
         if not verify_report_consistency(pdf, snapshot, context).get("ok"):
             raise ValueError("controlled PDF differs from the reviewed content")
@@ -628,14 +801,28 @@ def import_signed_report(
     request = _load_json_artifact(store, job_id, "signature_request.json")
     unsigned = store.get_artifact(job_id, "report.pdf")
     docx = store.get_artifact(job_id, "report.docx")
-    if unsigned is None or docx is None:
-        raise DocumentWorkflowError("DOCUMENT_ARTIFACT_MISSING", "unsigned PDF or DOCX is missing")
+    sample_xlsx = store.get_artifact(job_id, "sample.xlsx")
+    if unsigned is None or docx is None or sample_xlsx is None:
+        raise DocumentWorkflowError(
+            "DOCUMENT_ARTIFACT_MISSING", "unsigned PDF, DOCX or effective-sample XLSX is missing"
+        )
+    qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
+    resolved_profile = dict(qctx.get("resolved_profile") or {})
+    effective_policy = dict(policy or {})
+    if resolved_profile.get("id") == "bb-meci-avaliacao-imovel-pf":
+        # The recipient profile, not the HTTP payload or an operator label,
+        # selects the mandatory trust framework.
+        effective_policy.update({
+            "trust_framework": "ICP-Brasil",
+            "require_trust": True,
+            "require_revocation": True,
+        })
     record = record_external_signature(
         bytes(signed_pdf),
         request,
         unsigned_pdf=unsigned,
         validation_context=validation_context,
-        policy=policy,
+        policy=effective_policy,
     )
     if record.get("status") != "valid":
         raise DocumentWorkflowError(
@@ -644,7 +831,14 @@ def import_signed_report(
             + ", ".join(str(item.get("code")) for item in record.get("findings") or []),
             status_code=422,
         )
-    qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
+    icp_signature_verified = bool(
+            record.get("status") == "valid"
+            and (record.get("local_verification") or {}).get("status") == "valid"
+            and record.get("synthetic_test_only") is not True
+            and ((record.get("local_verification") or {}).get("policy") or {}).get(
+                "trust_anchor_allowlist_verified"
+            ) is True
+    )
     signature_for_qualification = {
         "integrity_verified": True,
         "fingerprint": record.get("result_fingerprint"),
@@ -652,6 +846,13 @@ def import_signed_report(
         "report_content_fingerprint": record.get("report_content_fingerprint"),
         "unsigned_pdf_sha256": record.get("unsigned_pdf_sha256"),
         "signed_pdf_sha256": record.get("signed_pdf_sha256"),
+        "required_output_signature_verified": icp_signature_verified,
+        "output_evidence": {
+            "bb.guiar.assinatura_icp": (
+                "MP-OUTPUT-MANIFEST/1:representations.signed_report.pdf"
+                "#assinatura-cadeia-validada"
+            )
+        } if icp_signature_verified else {},
     }
     snapshot = _reassess(
         snapshot,
@@ -687,6 +888,21 @@ def import_signed_report(
             ),
             status_code=422,
         )
+    representation_manifest = _representation_manifest(
+        snapshot,
+        signed_context,
+        pdf=unsigned,
+        docx=docx,
+        sample_xlsx=sample_xlsx,
+        signed_pdf=bytes(signed_pdf),
+        signature_record=record,
+    )
+    dossier_files = list(context.get("documentary_files") or []) + [{
+        "filename": "sample.xlsx",
+        "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "sha256": _sha(sample_xlsx),
+        "bytes": sample_xlsx,
+    }]
     dossier = _refresh_dossier(
         store,
         job_id,
@@ -695,7 +911,7 @@ def import_signed_report(
         docx=docx,
         signature_record=record,
         signed_pdf=bytes(signed_pdf),
-        documentary_files=context.get("documentary_files") or [],
+        documentary_files=dossier_files,
         persist=False,
     )
     requirement_map = _requirement_map(snapshot)
@@ -709,6 +925,8 @@ def import_signed_report(
             dossier_bytes=dossier,
             requirement_map=requirement_map,
             signed_pdf_bytes=bytes(signed_pdf),
+            sample_xlsx_bytes=sample_xlsx,
+            output_manifest_bytes=canonical_json(representation_manifest).encode("utf-8"),
         )
         check = verify_submission_package(submission)
         if not check.get("ok"):
@@ -718,6 +936,7 @@ def import_signed_report(
     store.save_artifact(job_id, "signed_report.pdf", bytes(signed_pdf))
     store.save_artifact(job_id, "evidence_bundle.zip", dossier)
     store.save_artifact(job_id, "submission.zip", submission)
+    _save_json(store, job_id, "output_representation_manifest.json", representation_manifest)
     result = {
         "schema_version": "MP-SIGNED-DOCUMENT/1",
         "job_id": job_id,
@@ -729,7 +948,8 @@ def import_signed_report(
         "artifacts": _artifact_inventory(
             store,
             job_id,
-            ["signed_report.pdf", "evidence_bundle.zip", "submission.zip"],
+            ["signed_report.pdf", "sample.xlsx", "evidence_bundle.zip", "submission.zip",
+             "output_representation_manifest.json"],
         ),
     }
     _save_json(store, job_id, "document_state.json", result)
@@ -752,6 +972,9 @@ def get_document_status(store: Any, job_id: str) -> Dict[str, Any]:
             [
                 "report.pdf",
                 "report.docx",
+                "sample.xlsx",
+                "output_manifest.json",
+                "output_representation_manifest.json",
                 "evidence_bundle.zip",
                 "signature_request.json",
                 "signed_report.pdf",

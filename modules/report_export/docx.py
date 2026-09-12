@@ -85,11 +85,13 @@ def _document_body(
         _paragraph("Identificação e finalidade", style="Heading1"),
         _paragraph(f"Solicitante: {view.get('applicant')}"),
         _paragraph(f"Finalidade: {view.get('purpose')}"),
+        _paragraph(f"Objetivo da avaliação: {view.get('objective')}"),
         _paragraph(f"Bem/direitos: {view.get('asset_identification_display')}"),
         _paragraph(f"Data-base: {view.get('reference_date_display')}"),
         _paragraph(f"Vistoria: {view.get('inspection_date_display')}"),
         _paragraph(f"Região: {view.get('region_characterization') or 'PENDENTE'}"),
         _paragraph(f"Imóvel: {view.get('property_characterization') or 'PENDENTE'}"),
+        _paragraph(f"Diagnóstico do mercado: {view.get('market_diagnosis')}"),
         _paragraph(f"Direitos: {view.get('rights_display') or 'PENDENTE'}"),
         _paragraph("Fontes", style="Heading2"),
         *[_paragraph(_source_text(source)) for source in (view.get("sources") or [])],
@@ -109,6 +111,15 @@ def _document_body(
     if not view.get("cost_route"):
         parts.append(_paragraph(
             f"Equação: {view.get('formula_display') or view.get('formula') or 'PENDENTE'}"
+        ))
+        parts.append(_paragraph(
+            "Equação na unidade original: "
+            + str(view.get("original_scale_formula") or "PENDENTE")
+        ))
+        parts.append(_paragraph(
+            "Retransformação: método "
+            + str(view.get("retransformation_method") or "PENDENTE")
+            + "; estimando " + str(view.get("retransformation_estimand") or "PENDENTE")
         ))
     if view.get("cost_route"):
         parts.append(_paragraph("Memória da quantificação de custo", style="Heading2"))
@@ -141,17 +152,92 @@ def _document_body(
         )
     if len(coef_rows) > 1:
         parts.append(_table(coef_rows))
+    classification_rows = [["Variável", "Critério", "Codificação", "Categorias", "Escala"]]
+    for row in view.get("variable_classification") or []:
+        classification_rows.append([
+            row.get("variable"), row.get("criterion"), row.get("coding"),
+            row.get("categories"), row.get("scale_values"),
+        ])
+    if len(classification_rows) > 1:
+        parts.append(_table(classification_rows))
     metric_rows = [["Métrica", "Valor"]]
     metrics = view.get("metrics") if isinstance(view.get("metrics"), Mapping) else {}
-    for metric in metrics.get("rows") or []:
-        metric_rows.append([metric.get("label"), metric.get("value")])
+    for key, label in (
+        ("r", "R"), ("r2", "R²"), ("r2_adjusted", "R² ajustado"),
+        ("f_statistic", "F calculado"), ("f_pvalue", "p-valor do teste F"),
+        ("durbin_watson", "Durbin-Watson"),
+    ):
+        metric_rows.append([label, metrics.get(key)])
     if len(metric_rows) > 1:
         parts.append(_table(metric_rows))
+        parts.append(_paragraph(metrics.get("note")))
+        relation = metrics.get("r2_relation") or {}
+        if relation.get("present"):
+            parts.append(_paragraph(
+                f"{relation.get('text')} Valores registrados: R² obtido de R = "
+                f"{relation.get('r_squared')}; R² do ajuste = {relation.get('r2')}; "
+                f"diferença = {relation.get('difference')}."
+            ))
+    diagnostics = view.get("statistical_diagnostics") or {}
+    normal = diagnostics.get("normal_frequency") or {}
+    if normal.get("present"):
+        rows = [["Intervalo z", "Referência (%)", "Observados", "Amostra (%)"]]
+        rows.extend([
+            [f"[-{row.get('z')}; +{row.get('z')}]", row.get("nominal_percent"),
+             row.get("observed_count"), row.get("observed_percent")]
+            for row in normal.get("rows") or []
+        ])
+        parts.append(_table(rows))
+    for matrix in (diagnostics.get("correlation") or {}, diagnostics.get("correlation_design") or {}):
+        if matrix.get("present"):
+            parts.append(_paragraph(
+                f"Matriz de correlações — {matrix.get('scale_label')}, "
+                f"{matrix.get('sample_label')}, n={matrix.get('n')}. "
+                f"Metadados: escala={matrix.get('scale')}; amostra={matrix.get('sample')}"
+            ))
+            panels = matrix.get("panels") or []
+            for panel in panels:
+                parts.append(_paragraph(
+                    f"Painel {panel.get('number')} de {len(panels)} — colunas "
+                    + ", ".join(panel.get("variables") or [])
+                ))
+                rows = [["Variável (linha)"] + list(panel.get("variables") or [])]
+                rows.extend([
+                    [row.get("variable")] + list(row.get("values") or [])
+                    for row in panel.get("rows") or []
+                ])
+                parts.append(_table(rows))
+    elasticities = diagnostics.get("elasticities") or {}
+    if elasticities.get("present"):
+        rows = [["Variável", "Elasticidade", "Valor-base", "Predição-base", "Passo", "Derivada"]]
+        rows.extend([
+            [row.get("variable"), row.get("elasticity"), row.get("base_value"),
+             row.get("base_prediction"), row.get("step"), row.get("derivative")]
+            for row in elasticities.get("items") or []
+        ])
+        parts.append(_paragraph(
+            f"Elasticidades — método {elasticities.get('method_label')}, "
+            f"ponto {elasticities.get('point_label')}. Metadados: "
+            f"método={elasticities.get('method')}; ponto={elasticities.get('point')}"
+        ))
+        parts.append(_table(rows))
+    outliers = diagnostics.get("outliers") or {}
+    if outliers.get("present"):
+        parts.append(_paragraph(
+            f"Dados discrepantes e influentes: detectados {outliers.get('detected')}; "
+            f"excluídos {outliers.get('excluded')}; influentes {outliers.get('influential')}."
+        ))
+        for definition in outliers.get("definition_rows") or []:
+            parts.append(_paragraph(
+                f"{definition.get('label')}: {definition.get('text')} "
+                f"[{definition.get('key')}]"
+            ))
 
     parts.extend(
         [
             _paragraph("Pressupostos, busca e validade", style="Heading1"),
             *[_paragraph(item) for item in (view.get("assumptions") or [])],
+            *[_paragraph("Observação: " + item) for item in (view.get("observations") or [])],
             _paragraph(
                 f"Cobertura da busca: {view.get('search_summary') or 'PENDENTE'}"
             ),
@@ -194,22 +280,32 @@ def _document_body(
             _paragraph(f"Grau de precisão: {view.get('grau_precisao_label')}"),
         ]
     )
-    rule_rows = [
-        ["Regra", "Fonte/versão", "Cláusula", "Estado", "Evidência", "Explicação"]
-    ]
+    if view.get("grau_fundamentacao_label") == "Grau I":
+        parts.append(_paragraph(
+            f"Justificativa para Grau I: {view.get('grade_i_justification')}"
+        ))
+    score_rows = [["Item", "Descrição", "Grau/status", "Pontos", "Evidência"]]
+    score_rows.extend([
+        [item.get("item"), item.get("description"), item.get("grau_label"),
+         item.get("points"), item.get("detail")]
+        for item in view.get("item_scores") or []
+    ])
+    if len(score_rows) > 1:
+        parts.append(_paragraph("Anexo — demonstrativo da pontuação", style="Heading2"))
+        parts.append(_table(score_rows))
     for rule in view.get("qualification_rules") or []:
-        rule_rows.append(
-            [
-                rule.get("rule_id"),
-                f"{rule.get('source_id') or ''} {rule.get('edition_or_version') or ''}".strip(),
-                rule.get("clause"),
-                rule.get("status"),
-                ", ".join(str(x) for x in (rule.get("evidence_refs") or [])),
-                rule.get("explanation"),
-            ]
-        )
-    if len(rule_rows) > 1:
-        parts.append(_table(rule_rows))
+        parts.extend([
+            _paragraph(
+                f"Regra {rule.get('rule_id')} — {rule.get('status_label')} "
+                f"[{rule.get('status')}]",
+                style="Heading2",
+            ),
+            _paragraph(rule.get("explanation")),
+            _paragraph(f"Fonte / edição: {rule.get('source_display')}"),
+            _paragraph(f"Cláusula: {rule.get('clause') or 'PENDENTE'}"),
+            _paragraph(f"Valor observado: {rule.get('observed_display')}"),
+            _paragraph(f"Evidência: {rule.get('evidence_display')}"),
+        ])
 
     parts.append(_paragraph("Documentos e fotografias autorizados", style="Heading1"))
     attachment_rows = [["Arquivo", "Tipo", "Estado", "SHA-256"]]
@@ -231,9 +327,7 @@ def _document_body(
         parts.append(_image_paragraph(rel_id, name, len(parts) + 1))
 
     parts.append(_paragraph("Amostra integral", style="Heading1"))
-    used_headers = ["nº", "row_id", "Fonte", "Justificativa"] + list(
-        view.get("used_value_columns") or []
-    )
+    used_headers = ["nº", "row_id", "Fonte", "Endereço", "Latitude", "Longitude"]
     used_rows = [used_headers]
     for row in view.get("used_rows") or []:
         used_rows.append(
@@ -241,16 +335,31 @@ def _document_body(
                 row.get("seq"),
                 row.get("row_id"),
                 row.get("source"),
-                row.get("justification"),
+                row.get("address"),
+                row.get("latitude"),
+                row.get("longitude"),
             ]
-            + list(row.get("value_cells") or [])
         )
+        used_rows.append(["Justificativa / rótulo", row.get("justification"), row.get("label") or ""])
     parts.append(_table(used_rows))
+    for panel in view.get("used_value_panels") or []:
+        parts.append(_paragraph(
+            f"Valores da amostra — painel {panel.get('number')} de "
+            f"{len(view.get('used_value_panels') or [])}",
+            style="Heading2",
+        ))
+        rows = [["nº", "row_id"] + list(panel.get("columns") or [])]
+        rows.extend([
+            [row.get("seq"), row.get("row_id")] + list(row.get("cells") or [])
+            for row in panel.get("rows") or []
+        ])
+        parts.append(_table(rows))
     if view.get("excluded_rows"):
         parts.append(_paragraph("Registros excluídos", style="Heading2"))
-        excluded_headers = ["nº", "row_id", "Fonte", "Justificativa"] + list(
-            view.get("excluded_value_columns") or []
-        )
+        excluded_headers = [
+            "nº", "row_id", "Fonte", "Justificativa", "Endereço", "Latitude",
+            "Longitude",
+        ]
         excluded_rows = [excluded_headers]
         for row in view.get("excluded_rows") or []:
             excluded_rows.append(
@@ -259,10 +368,24 @@ def _document_body(
                     row.get("row_id"),
                     row.get("source"),
                     row.get("justification"),
+                    row.get("address"),
+                    row.get("latitude"),
+                    row.get("longitude"),
                 ]
-                + list(row.get("value_cells") or [])
             )
         parts.append(_table(excluded_rows))
+        for panel in view.get("excluded_value_panels") or []:
+            parts.append(_paragraph(
+                f"Valores excluídos — painel {panel.get('number')} de "
+                f"{len(view.get('excluded_value_panels') or [])}",
+                style="Heading2",
+            ))
+            rows = [["nº", "row_id"] + list(panel.get("columns") or [])]
+            rows.extend([
+                [row.get("seq"), row.get("row_id")] + list(row.get("cells") or [])
+                for row in panel.get("rows") or []
+            ])
+            parts.append(_table(rows))
 
     parts.extend(
         [
@@ -283,6 +406,14 @@ def _document_body(
             _paragraph("Campos congelados", style="Heading2"),
         ]
     )
+    location = view.get("subject_geolocation") or {}
+    if location:
+        parts.append(_paragraph(
+            "Geolocalização do avaliando: "
+            f"latitude {location.get('latitude')}; longitude {location.get('longitude')}; "
+            f"endereço {location.get('address')}; fonte {location.get('source')}; "
+            f"sistema {location.get('coordinate_system')}"
+        ))
     for line in view.get("frozen_lines") or []:
         parts.append(_paragraph(line))
     return "".join(parts)

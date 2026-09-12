@@ -259,6 +259,8 @@ def build_submission_package(
     dossier_bytes: Optional[bytes] = None,
     requirement_map: Optional[Mapping[str, Any]] = None,
     signed_pdf_bytes: Optional[bytes] = None,
+    sample_xlsx_bytes: Optional[bytes] = None,
+    output_manifest_bytes: Optional[bytes] = None,
 ) -> bytes:
     """Create a reproducible package containing neutral evidence and mapping."""
     state = assess_document_state(snapshot, report_context)
@@ -349,6 +351,10 @@ def build_submission_package(
         files["evidence/dossier.zip"] = bytes(dossier_bytes)
     if signed_pdf_bytes is not None:
         files["document/report.signed.pdf"] = bytes(signed_pdf_bytes)
+    if sample_xlsx_bytes is not None:
+        files["data/sample.xlsx"] = bytes(sample_xlsx_bytes)
+    if output_manifest_bytes is not None:
+        files["requirements/output-representations.json"] = bytes(output_manifest_bytes)
     metadata = {
         "schema_version": "MP-SUBMISSION/1",
         "profile_id": profile_id or None,
@@ -367,6 +373,13 @@ def build_submission_package(
             "editable_report",
         ),
         "document/report.signed.pdf": ("application/pdf", "cryptographically_signed_report"),
+        "data/sample.xlsx": (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "effective_market_sample",
+        ),
+        "requirements/output-representations.json": (
+            "application/json", "byte_exact_output_manifest",
+        ),
         "evidence/dossier.zip": ("application/zip", "audit_dossier"),
         "requirements/map.json": ("application/json", "institution_requirement_map"),
         "qualification/document_state.json": (
@@ -435,6 +448,49 @@ def verify_submission_package(package_bytes: bytes) -> Dict[str, Any]:
                         )
                 except zipfile.BadZipFile:
                     findings.append({"code": "SUBMISSION_DOCX_INVALID"})
+            if "data/sample.xlsx" in names:
+                try:
+                    with zipfile.ZipFile(io.BytesIO(archive.read("data/sample.xlsx")), "r") as xlsx:
+                        xlsx_names = set(xlsx.namelist())
+                    if "xl/workbook.xml" not in xlsx_names or "xl/worksheets/sheet1.xml" not in xlsx_names:
+                        findings.append({"code": "SUBMISSION_XLSX_INVALID"})
+                except zipfile.BadZipFile:
+                    findings.append({"code": "SUBMISSION_XLSX_INVALID"})
+            if "requirements/output-representations.json" in names:
+                try:
+                    output_manifest = json.loads(
+                        archive.read("requirements/output-representations.json")
+                    )
+                    if output_manifest.get("schema_version") != "MP-OUTPUT-MANIFEST/1":
+                        findings.append({"code": "SUBMISSION_OUTPUT_MANIFEST_INVALID"})
+                    package_paths = {
+                        "report.pdf": "document/report.pdf",
+                        "report.docx": "document/report.docx",
+                        "sample.xlsx": "data/sample.xlsx",
+                        "signed_report.pdf": "document/report.signed.pdf",
+                    }
+                    for name, representation in (
+                        output_manifest.get("representations") or {}
+                    ).items():
+                        path = package_paths.get(str(name))
+                        if not path or path not in names or not isinstance(representation, Mapping):
+                            findings.append({
+                                "code": "SUBMISSION_OUTPUT_REPRESENTATION_MISSING",
+                                "name": name,
+                            })
+                            continue
+                        payload = archive.read(path)
+                        if (
+                            hashlib.sha256(payload).hexdigest()
+                            != representation.get("sha256")
+                            or len(payload) != representation.get("size")
+                        ):
+                            findings.append({
+                                "code": "SUBMISSION_OUTPUT_REPRESENTATION_MISMATCH",
+                                "name": name,
+                            })
+                except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                    findings.append({"code": "SUBMISSION_OUTPUT_MANIFEST_INVALID"})
             if "evidence/dossier.zip" in names:
                 dossier = _verify_dossier_archive(
                     archive.read("evidence/dossier.zip"),
