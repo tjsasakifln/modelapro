@@ -68,7 +68,7 @@ hiddenimports = (
 
 a = Analysis(
     [str(root / "scripts" / "c15_local" / "launcher.py")],
-    pathex=["."],
+    pathex=[str(root)],
     binaries=native_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
