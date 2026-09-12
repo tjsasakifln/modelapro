@@ -521,8 +521,99 @@ def _wait_for_product_ports_closed(timeout: float = 15.0) -> list[str]:
     return _open_product_ports()
 
 
+def _windows_descendant_pids(parent_pid: int) -> list[int]:
+    """Snapshot descendants before terminating a windowless launcher."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+    if snapshot == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    parents: dict[int, int] = {}
+    try:
+        entry = ProcessEntry()
+        entry.dwSize = ctypes.sizeof(entry)
+        present = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while present:
+            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            present = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    descendants: set[int] = set()
+    changed = True
+    while changed:
+        changed = False
+        for pid, direct_parent in parents.items():
+            if pid not in descendants and (
+                direct_parent == parent_pid or direct_parent in descendants
+            ):
+                descendants.add(pid)
+                changed = True
+    return sorted(descendants)
+
+
+def _windows_process_alive(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return exit_code.value == 259
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _wait_for_windows_children_stopped(
+    child_pids: list[int], timeout: float = 15.0
+) -> list[int]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        alive = [pid for pid in child_pids if _windows_process_alive(pid)]
+        if not alive:
+            return []
+        time.sleep(0.25)
+    return [pid for pid in child_pids if _windows_process_alive(pid)]
+
+
 def _stop(process: subprocess.Popen, log: Any) -> dict[str, Any]:
     shutdown: dict[str, Any] = {"status": "PASSED", "parent_pid": process.pid}
+    child_pids = _windows_descendant_pids(process.pid) if os.name == "nt" else []
+    if os.name == "nt":
+        shutdown["observed_child_pids"] = child_pids
     if process.poll() is None:
         if os.name == "nt":
             # Abrupt parent termination is deliberate: the frozen launcher
@@ -542,9 +633,12 @@ def _stop(process: subprocess.Popen, log: Any) -> dict[str, Any]:
         shutdown["process_already_exited"] = True
     shutdown["parent_returncode"] = process.returncode
     if os.name == "nt":
+        alive_children = _wait_for_windows_children_stopped(child_pids)
         open_ports = _wait_for_product_ports_closed()
+        shutdown["child_processes_exited"] = not alive_children
+        shutdown["remaining_child_pids_before_fallback"] = alive_children
         shutdown["service_ports_closed"] = not open_ports
-        if open_ports:
+        if alive_children or open_ports:
             # Cleanup is best effort after recording a failed containment
             # check; it must never turn that failure into passing evidence.
             system_root = os.environ.get("SystemRoot", r"C:\Windows").rstrip("\\/")
@@ -560,8 +654,8 @@ def _stop(process: subprocess.Popen, log: Any) -> dict[str, Any]:
             shutdown["error"] = {
                 "type": "VerificationError",
                 "detail": (
-                    "launcher termination left installed service ports open: "
-                    + ", ".join(open_ports)
+                    "launcher termination left installed child processes or service "
+                    f"ports active: child_pids={alive_children}, ports={open_ports}"
                 ),
             }
     return shutdown

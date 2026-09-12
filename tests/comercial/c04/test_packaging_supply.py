@@ -952,6 +952,14 @@ def test_windows_product_shutdown_kills_complete_process_tree(
 
     monkeypatch.setattr(verify_windows_install.os, "name", "nt")
     monkeypatch.setattr(
+        verify_windows_install, "_windows_descendant_pids", lambda _pid: [5001, 5002]
+    )
+    monkeypatch.setattr(
+        verify_windows_install,
+        "_wait_for_windows_children_stopped",
+        lambda _pids: [],
+    )
+    monkeypatch.setattr(
         verify_windows_install, "_wait_for_product_ports_closed", lambda: []
     )
     process = Process()
@@ -964,6 +972,9 @@ def test_windows_product_shutdown_kills_complete_process_tree(
         "parent_pid": 4242,
         "method": "parent_termination_with_job_containment",
         "parent_returncode": 1,
+        "observed_child_pids": [5001, 5002],
+        "child_processes_exited": True,
+        "remaining_child_pids_before_fallback": [],
         "service_ports_closed": True,
     }
 
@@ -985,11 +996,19 @@ def test_windows_product_shutdown_fails_before_using_cleanup_fallback(
         return SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(verify_windows_install.os, "name", "nt")
+    monkeypatch.setattr(
+        verify_windows_install, "_windows_descendant_pids", lambda _pid: [5001]
+    )
+    monkeypatch.setattr(
+        verify_windows_install,
+        "_wait_for_windows_children_stopped",
+        lambda _pids: [5001],
+    )
     monkeypatch.setenv("SystemRoot", r"C:\WINDOWS")
     monkeypatch.setattr(
         verify_windows_install,
         "_wait_for_product_ports_closed",
-        lambda: ["127.0.0.1:8000"],
+        lambda: [],
     )
     monkeypatch.setattr(verify_windows_install.subprocess, "run", run)
 
@@ -1003,9 +1022,11 @@ def test_windows_product_shutdown_fails_before_using_cleanup_fallback(
         "/F",
     ]
     assert result["status"] == "FAILED"
-    assert result["service_ports_closed"] is False
+    assert result["child_processes_exited"] is False
+    assert result["remaining_child_pids_before_fallback"] == [5001]
+    assert result["service_ports_closed"] is True
     assert result["fallback_taskkill_exit_code"] == 0
-    assert "ports open" in result["error"]["detail"]
+    assert "child processes" in result["error"]["detail"]
 
 
 def test_windows_transition_scope_separates_bootstrap_from_distinct_recalculation():
