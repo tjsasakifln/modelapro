@@ -299,6 +299,17 @@ def _decide_release(
             ),
         })
 
+    for prohibited in profile.get("_model_use_prohibited") or []:
+        blockers.append({
+            "code": "model_use_prohibited",
+            "rule_id": prohibited.get("rule_id"),
+            "detail": (
+                f"{prohibited.get('clause')}: {prohibited.get('prohibition')}. "
+                "A norma veda a utilização do modelo neste caso; não é aviso e não "
+                "se supera por revisão profissional."
+            ),
+        })
+
     if calculation_status != CALC_OK:
         blockers.append({
             "code": f"calculation_{calculation_status}",
@@ -515,8 +526,10 @@ def assess_qualification(
     })
 
     review_events = list(ctx.get("review_events") or [])
+    release_profile = dict(resolved)
+    release_profile["_model_use_prohibited"] = assessment.get("model_use_prohibited") or []
     release = _decide_release(
-        profile=resolved,
+        profile=release_profile,
         rule_results=rule_results,
         calculation_status=calculation_status,
         grade_status=grade_status,

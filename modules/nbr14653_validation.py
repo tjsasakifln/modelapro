@@ -174,8 +174,32 @@ def assess_normative(context: Mapping[str, Any]) -> Dict[str, Any]:
                 professional_finding=findings.get(pid),
             )
         )
+    model_use_prohibited: List[Dict[str, Any]] = []
     for pr in pressupostos:
         if pr["status"] == rules.PRESSUPOSTO_VIOLATED:
+            spec = rules.PRESSUPOSTOS_BY_ID.get(pr["id"]) or {}
+            if spec.get("blocks_use_when_incoherent"):
+                # Anexo A.2 g) is the only clause in this block that VEDA the
+                # use of the model. It must not be reported with the same code
+                # as an ordinary violated assumption, or nothing can act on it.
+                model_use_prohibited.append({
+                    "rule_id": pr["id"],
+                    "clause": pr["clause"],
+                    "prohibition": spec.get("prohibition"),
+                    "detail": pr["detail"],
+                })
+                issues.append(
+                    rules.make_issue(
+                        "model_use_prohibited",
+                        (
+                            f"{pr['clause']}: {spec.get('prohibition')}. "
+                            f"{pr['detail']}"
+                        ),
+                        severity="error",
+                        affected_ids=[pr["id"]],
+                    )
+                )
+                continue
             issues.append(
                 rules.make_issue(
                     "pressuposto_violado",
@@ -312,6 +336,9 @@ def assess_normative(context: Mapping[str, Any]) -> Dict[str, Any]:
         ),
         "micronumerosidade": micro,
         "pressupostos": pressupostos,
+        # Non-empty only when a clause that forbids using the model is
+        # violated (Anexo A.2 g). Consumers must refuse release, not warn.
+        "model_use_prohibited": model_use_prohibited,
         "source_documents": rules.SOURCE_DOCUMENTS,
         "cross_edition_notes": rules.CROSS_EDITION_NOTES,
         "rule_inventory": rules.inventory_audit(),
@@ -359,6 +386,9 @@ def _item_payload(item: int, description: str, result: Mapping[str, Any]) -> Dic
         "source": result.get("source"),
         "reasons": result.get("reasons") or result.get("limitations") or [],
         "provenance": result.get("provenance"),
+        # Set only by classify_documentary_item (items 1 and 3). For the
+        # calculated items it is None, which consumers must not read as False.
+        "provenance_verified": result.get("provenance_verified"),
     }
 
 

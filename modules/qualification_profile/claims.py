@@ -280,6 +280,29 @@ def evaluate_claim(
             ),
         }
 
+    # A subject key that is present but empty is as unverifiable as a missing
+    # one: without it the wording would name "None" as the institution, the
+    # version or the scope.
+    empty_subject = sorted(
+        k for k, v in subj.items()
+        if v is None or (isinstance(v, str) and not v.strip()) or v == "?"
+    )
+    if empty_subject:
+        return {
+            "kind": kind,
+            "scope": CLAIM_SCOPE[kind],
+            "state": CLAIM_BLOCKED,
+            "registry_version": CLAIMS_REGISTRY_VERSION,
+            "missing": [f"subject.{k}" for k in empty_subject],
+            "rejected": [],
+            "permitted_wording": None,
+            "detail": (
+                f"Alegação {kind!r} BLOQUEADA: o sujeito da alegação tem campo(s) "
+                f"vazio(s) {empty_subject}. Uma alegação que não nomeia instituição, "
+                "versão ou escopo não é verificável."
+            ),
+        }
+
     try:
         wording = spec["wording_template"].format(**subj)
     except KeyError as exc:

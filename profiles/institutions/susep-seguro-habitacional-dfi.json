@@ -1,0 +1,116 @@
+{
+  "id": "susep-seguro-habitacional-dfi",
+  "version": "0.1.0",
+  "kind": "institution",
+  "state": "pending",
+  "label": "Seguro habitacional — cobertura DFI (danos físicos ao imóvel)",
+  "recipient_id": "seguradora-do-ramo-habitacional",
+  "regulator": "SUSEP / CNSP",
+  "purpose": "seguro",
+  "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
+  "value_basis": "limite_maximo_de_garantia",
+  "method": "definicao_contratual_apolice",
+  "asset_scope": "imovel_urbano_residencial_financiado",
+  "act_type_established": "regra_contratual_ou_regulatoria",
+  "sources": [
+    {
+      "id": "susep-seguro-habitacional-page",
+      "kind": "pagina_oficial_do_regulador",
+      "title": "SUSEP — Seguro Habitacional (página oficial do regulador)",
+      "url": "https://www.gov.br/susep/pt-br/assuntos/meu-futuro-seguro/seguros-previdencia-e-capitalizacao/seguros/seguro-habitacional",
+      "edition_or_version": "consultada em 2026-09-11",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "coberturas MIP e DFI; regra do limite máximo de garantia de cada uma; atos citados",
+      "verbatim_anchors": [
+        "O limite máximo de garantia correspondente à cobertura dos riscos de DFI consistirá, em qualquer tempo, do valor da avaliação inicial do imóvel",
+        "O limite máximo de garantia correspondente à cobertura dos riscos de MIP consistirá, a cada mês, do valor do saldo devedor do financiamento do imóvel"
+      ]
+    },
+    {
+      "id": "resolucao-cnsp-447-2022",
+      "kind": "ato_regulatorio",
+      "title": "Resolução CNSP nº 447, de 10 de outubro de 2022",
+      "url": "https://www2.susep.gov.br/safe/scripts/bnweb/bnmapi.exe?router=upload%2F26564",
+      "edition_or_version": "447/2022",
+      "consulted_on": "2026-09-11",
+      "content_conferred": false,
+      "conferred_scope": "identificado como o ato vigente do seguro habitacional (revogou a Res. CNSP 205/2009) a partir da página oficial da SUSEP; TEXTO INTEGRAL NÃO CONFERIDO nesta campanha"
+    },
+    {
+      "id": "abnt-nbr-14653-1-2019",
+      "kind": "norma_tecnica",
+      "title": "ABNT NBR 14653-1:2019 — Procedimentos gerais",
+      "edition_or_version": "2019 (2ª edição)",
+      "sha256": "125eeed437c28a07691bfef72eaf4a3c9e1a3a1720e6a5e2cce1e548a02fcc92",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "3.1.51 valor em risco; 3.1.11.3/3.1.11.5 custos; Seção 6 a) b) finalidade e objetivo"
+    }
+  ],
+  "minimum_fundamentacao_grade": null,
+  "decisive_rules": [
+    "parte1.bases_de_valor",
+    "dfi.lmg.base",
+    "dfi.condicoes_contratuais"
+  ],
+  "what_this_profile_is": [
+    "É o perfil REGULATÓRIO/CONTRATUAL da cobertura DFI do seguro habitacional, obtido da página oficial do regulador (SUSEP).",
+    "NÃO é homologação de software por seguradora alguma. Nenhuma seguradora avaliou este produto.",
+    "NÃO é aceitação de laudo por seguradora alguma."
+  ],
+  "value_basis_finding": {
+    "detail": "O limite máximo de garantia da cobertura DFI é, em qualquer tempo, o VALOR DA AVALIAÇÃO INICIAL DO IMÓVEL que serviu de base ao financiamento, atualizado pelo índice convencionado no contrato de seguro. O da cobertura MIP é, a cada mês, o SALDO DEVEDOR do financiamento.",
+    "consequence": "São três grandezas distintas e nenhuma é substituível por outra: valor de mercado (ABNT NBR 14653-1:2019, 3.1.47), limite máximo de garantia (cláusula do contrato de seguro) e saldo devedor (grandeza financeira). A cobertura DFI indeniza dano físico, de modo que uma avaliação a valor de mercado NÃO é, por si, a base indenizatória; quando a finalidade exigir custo, a base correta é custo de reprodução (3.1.11.5) ou de reedição (3.1.11.3), pelo método da quantificação de custo (9.3), nunca preço de mercado convertido por coeficiente.",
+    "not_generalizable": "O seguro habitacional com MIP e DFI tem regras contratuais próprias. NÃO se generaliza a todo seguro residencial ou patrimonial: em seguros, o tipo de valor depende do produto e do contrato, e nem todo seguro usa a mesma base."
+  },
+  "requirements": [
+    {
+      "id": "dfi.lmg.base",
+      "clause": "SUSEP — Seguro Habitacional (LMG da cobertura DFI)",
+      "requirement": "O trabalho deve identificar o valor da avaliação inicial do imóvel que serve de base ao LMG da cobertura DFI, com data de referência explícita.",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "dfi.lmg.atualizacao",
+      "clause": "SUSEP — Seguro Habitacional (atualização do LMG)",
+      "requirement": "Identificar o índice e a periodicidade de atualização convencionados, que devem acompanhar o contrato de financiamento quando este tiver cláusula de atualização.",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "dfi.base_de_valor_declarada",
+      "clause": "ABNT NBR 14653-1:2019, Seção 6 a) e b)",
+      "requirement": "Declarar finalidade (seguro) e objetivo (tipo de valor) no laudo, coerentes com a base exigida pelo contrato.",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "dfi.condicoes_contratuais",
+      "clause": "condições contratuais da apólice",
+      "requirement": "Versão das condições contratuais, componentes incluídos e excluídos da cobertura, data e índice, documentação exigida e forma de conclusão do trabalho.",
+      "verification": "documental",
+      "state": "blocked_external_evidence",
+      "criterion_ref": "exige as condições gerais de uma apólice concreta, não obtidas nesta campanha"
+    },
+    {
+      "id": "dfi.custo_quando_exigido",
+      "clause": "ABNT NBR 14653-2:2011, 9.3 / Tabelas 6 e 7",
+      "requirement": "Quando o contrato exigir base de custo, apresentar a memória de cálculo do custo (custo direto, BDI e depreciação física) pelo método da quantificação de custo.",
+      "verification": "calculated",
+      "state": "blocked_external_evidence",
+      "criterion_ref": "rota de cálculo de custo é handoff a C01; insumo CUB/NBR 12721 não obtido"
+    }
+  ],
+  "blocked_external_evidence": {
+    "why_not_verified": "Duas pernas faltam para este perfil sair de 'pending': (a) o TEXTO INTEGRAL da Resolução CNSP 447/2022, identificado mas não conferido nesta campanha; (b) as CONDIÇÕES CONTRATUAIS de uma apólice concreta, que definem componentes incluídos e excluídos, índice e documentação exigida.",
+    "exact_material": [
+      "Resolução CNSP nº 447/2022, texto integral vigente e atos modificadores, do repositório normativo da SUSEP",
+      "Condições gerais de uma apólice de seguro habitacional concreta, fornecidas pela seguradora ou pelo agente financeiro"
+    ],
+    "responsible": "titular do projeto, por via autorizada; nenhuma compra, contato ou envio de dados foi realizado nesta campanha"
+  },
+  "notes": [
+    "state='pending' impede ready_for_professional_signoff para este perfil, por construção.",
+    "A ausência de aceite de seguradora não é aprovação implícita nem proibição de vender com alegação mais restrita; é a alegação 'aceito pela instituição' que fica bloqueada."
+  ],
+  "source_set_sha256": "b6d005c81712c9d5a2a3be65c784f9cde968d3970b7c13edbfd36c6957649bef"
+}

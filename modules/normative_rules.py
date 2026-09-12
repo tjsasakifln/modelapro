@@ -13,6 +13,7 @@ Measure-only admission is not a pass.
 
 from __future__ import annotations
 
+import copy
 import math
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -1330,10 +1331,19 @@ def classify_item4_extrapolacao(
 def statistical_warnings(
     statistical: Optional[Mapping[str, Any]],
     *,
-    significance_aux: float = 0.10,
+    significance_aux: Optional[float] = None,
     vif_convention: float = 10.0,
 ) -> List[str]:
-    """Anexo A diagnostics as warnings only — never a Tabela 1/2 cutoff."""
+    """Anexo A diagnostics as warnings only — never a Tabela 1/2 cutoff.
+
+    ``significance_aux`` defaults to the Anexo A.3.1 ceiling read from the
+    provenance registry rather than to a second hardcoded copy of 10%: a
+    duplicated threshold can drift away from its recorded source.
+    ``vif_convention`` is deliberately NOT in that registry — the standard
+    defines no VIF cutoff, so it has no normative provenance to record.
+    """
+    if significance_aux is None:
+        significance_aux = max_auxiliary_alpha()
     warnings: List[str] = []
     if not statistical:
         return warnings
@@ -2022,10 +2032,15 @@ MEASURE_UPPER_FACTOR_ALTERNATIVE = 1.0
 
 
 def threshold_provenance(key: str) -> Dict[str, Any]:
-    """Provenance record for a threshold family. Raises on unknown key."""
+    """Provenance record for a threshold family. Raises on unknown key.
+
+    Returns a DEEP copy: a shallow one leaves the nested ``values`` mapping
+    shared, so a caller mutating it would silently rewrite the normative
+    registry for the rest of the process.
+    """
     if key not in THRESHOLD_PROVENANCE:
         raise KeyError(f"sem proveniência registrada para o limiar {key!r}")
-    return dict(THRESHOLD_PROVENANCE[key])
+    return copy.deepcopy(THRESHOLD_PROVENANCE[key])
 
 
 # --- Anexo A.2 a): micronumerosidade -----------------------------------------
@@ -2239,7 +2254,7 @@ PRESSUPOSTOS: List[Dict[str, Any]] = [
             "avaliando com a estrutura de multicolinearidade inferida"
         ),
         "prohibition": "vedada a utilização do modelo em caso de incoerência",
-        "attention_threshold": 0.80,
+        "attention_threshold": THRESHOLD_PROVENANCE["CORRELATION_ATTENTION"]["values"]["threshold"],
         "attention_clause": "A.2.1.5.2 (matriz de correlações, atenção a resultados > 0,80)",
         "reaction": (
             "É a única cláusula deste bloco que VEDA o uso do modelo. A vedação depende de "
