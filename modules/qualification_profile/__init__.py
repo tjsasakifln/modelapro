@@ -19,6 +19,7 @@ from .catalog import (
     resolve_profile,
     source_set_sha256,
 )
+from .interval_policy import resolve_arbitration_policy
 from .output_conformance import (
     BASELINE_STATES,
     NON_CONFORMING_BASELINE,
@@ -69,6 +70,7 @@ __all__ = [
     "resolve_profile",
     "source_set_sha256",
     "ProfileError",
+    "resolve_arbitration_policy",
     "make_rule_result",
     "satisfies",
     "RULE_STATUSES",

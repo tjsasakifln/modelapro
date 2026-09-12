@@ -210,6 +210,121 @@ def empty_value() -> Dict[str, Any]:
     }
 
 
+def _same_arbitration_rule(declared: Any, canonical: Mapping[str, Any]) -> bool:
+    if not isinstance(declared, Mapping):
+        return False
+    nested = declared.get("arbitration")
+    rule = nested if isinstance(nested, Mapping) else declared
+    expected = _as_mapping(canonical.get("arbitration"), "canonical arbitration")
+    if str(rule.get("method") or "").lower() != "percent_around_point":
+        return False
+    observed = _finite_or_none(rule.get("percent"))
+    target = _finite_or_none(expected.get("percent"))
+    return observed is not None and target is not None and observed == target
+
+
+def _resolved_value_policy(
+    spec: Mapping[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any], List[str]]:
+    """Separate a catalog-derived rule from human-selected adopted-value policy."""
+    from modules.qualification_profile.interval_policy import resolve_arbitration_policy
+
+    declared_policy = _as_mapping(spec.get("value_policy"), "value_policy")
+    used_policy = copy.deepcopy(declared_policy)
+    declared_rules = []
+    if isinstance(declared_policy.get("arbitration"), Mapping):
+        declared_rules.append(
+            ("request_spec.value_policy.arbitration", declared_policy["arbitration"])
+        )
+    direct = spec.get("c05_interval_rule")
+    if isinstance(direct, Mapping):
+        declared_rules.append(("request_spec.c05_interval_rule", direct))
+    profile_ref = _as_mapping(spec.get("qualification_profile"), "qualification_profile")
+    inline = profile_ref.get("interval_rule")
+    if isinstance(inline, Mapping):
+        declared_rules.append(("request_spec.qualification_profile.interval_rule", inline))
+
+    used_policy.pop("arbitration", None)
+    used_policy.pop("arbitration_interval", None)
+    used_policy.pop("arbitration_source", None)
+    canonical = resolve_arbitration_policy(profile_ref)
+    if canonical is None:
+        if declared_rules:
+            used_policy["arbitration_resolution"] = {
+                "status": "rejected_unverified_or_inapplicable_profile",
+                "declarations": [name for name, _rule in declared_rules],
+            }
+        return None, used_policy, ["arbitration_rule_unverified"]
+
+    conflicts = [
+        name for name, rule in declared_rules
+        if not _same_arbitration_rule(rule, canonical)
+    ]
+    if conflicts:
+        used_policy["arbitration_resolution"] = {
+            "status": "conflict_fail_closed",
+            "conflicts": conflicts,
+            "canonical_source": canonical.get("source"),
+        }
+        return None, used_policy, ["arbitration_policy_conflict"]
+
+    used_policy["schema_version"] = canonical.get("schema_version")
+    used_policy["applicability"] = canonical.get("applicability")
+    used_policy["arbitration"] = copy.deepcopy(canonical.get("arbitration"))
+    used_policy["arbitration_source"] = copy.deepcopy(canonical.get("source"))
+    used_policy.setdefault("source", copy.deepcopy(canonical.get("source")))
+    used_policy["arbitration_resolution"] = {"status": "applied_verified_profile_rule"}
+    return canonical, used_policy, []
+
+
+def _compose_profile_intervals(
+    assessment: Mapping[str, Any],
+    spec: Mapping[str, Any],
+) -> Dict[str, Any]:
+    from modules.valuation_policy.intervals import compose_value_intervals
+
+    out = dict(assessment)
+    value = dict(empty_value())
+    value.update(_as_mapping(out.get("value"), "assessment.value"))
+    statistical = _as_mapping(out.get("statistical"), "assessment.statistical")
+    limitations = list(statistical.get("limitations") or [])
+    rule, used_policy, policy_notes = _resolved_value_policy(spec)
+    residual_complete = not any(
+        note in limitations
+        for note in (LIMITATION_NO_INTERVALS, LIMITATION_INCOMPLETE, LIMITATION_MALFORMED)
+    )
+    unified, interval_notes = compose_value_intervals(
+        point=value.get("point"),
+        mean_ci80=value.get("mean_ci80"),
+        prediction_interval=value.get("prediction_interval"),
+        c05_interval_rule=rule,
+        residual_complete=residual_complete,
+        limitations=limitations,
+    )
+    value.update(unified)
+    for note in [*policy_notes, *interval_notes]:
+        if note not in limitations:
+            limitations.append(note)
+    statistical["limitations"] = limitations
+    out["value"] = value
+    out["statistical"] = statistical
+    out["value_policy"] = used_policy
+    if "arbitration_policy_conflict" in policy_notes:
+        issues = list(out.get("issues") or [])
+        issues.append(
+            _issue(
+                "arbitration_policy_conflict",
+                "error",
+                "c14.evaluate_fitted",
+                "Regra de campo de arbítrio declarada conflita com a autoridade "
+                "verificada; intervalo mantido nulo.",
+                evidence=used_policy.get("arbitration_resolution") or {},
+            )
+        )
+        out["issues"] = issues
+    return out
+
+
 def _interval(lower: Optional[float], upper: Optional[float], extra: Optional[Mapping[str, Any]] = None) -> Optional[Dict[str, Any]]:
     lo = _finite_or_none(lower)
     hi = _finite_or_none(upper)
@@ -1045,27 +1160,8 @@ def builtin_evaluate_fitted(
         )
         return _failed_assessment(candidate_id, subject_id, raw_values, used_row_ids, issues)
 
-    from modules.valuation_policy.intervals import compose_value_intervals
-
-    residual_complete = LIMITATION_NO_INTERVALS not in limitations and LIMITATION_INCOMPLETE not in limitations and LIMITATION_MALFORMED not in limitations
-    c05_rule = None
-    if isinstance(spec, Mapping):
-        c05_rule = spec.get("c05_interval_rule") or (spec.get("qualification_profile") or {}).get("interval_rule")
-    unified, interval_notes = compose_value_intervals(
-        point=point,
-        mean_ci80=value.get("mean_ci80"),
-        prediction_interval=value.get("prediction_interval"),
-        c05_interval_rule=c05_rule,
-        residual_complete=residual_complete,
-        limitations=limitations,
-    )
-    value["mean_ci80"] = unified.get("mean_ci80")
-    value["prediction_interval"] = unified.get("prediction_interval")
-    value["arbitration_interval"] = unified.get("arbitration_interval")
-    value["admissible_interval"] = unified.get("admissible_interval")
-    for note in interval_notes:
-        if note not in limitations:
-            limitations.append(note)
+    value["arbitration_interval"] = None
+    value["admissible_interval"] = None
     mean_ci80 = value.get("mean_ci80") if isinstance(value.get("mean_ci80"), Mapping) else None
     if mean_ci80 is None and (LIMITATION_NO_INTERVALS in limitations or LIMITATION_INCOMPLETE in limitations or LIMITATION_MALFORMED in limitations):
         issues.append(
@@ -1088,7 +1184,7 @@ def builtin_evaluate_fitted(
         "estimand": estimand,
         "residual_state_status": (_as_mapping(residual_state).get("status") if isinstance(residual_state, Mapping) else None),
     }
-    return {
+    return _compose_profile_intervals({
         "candidate_id": candidate_id,
         "subject_id": subject_id,
         "subject_raw": raw_values,
@@ -1104,7 +1200,7 @@ def builtin_evaluate_fitted(
         "model_eligibility": _empty_eligibility(ELIGIBLE, []),
         "used_row_ids": used_row_ids,
         "issues": issues,
-    }
+    }, spec)
 
 
 def _failed_assessment(
@@ -1352,7 +1448,7 @@ def _assessment_to_mapping(assessment: Any) -> Dict[str, Any]:
     }
 
 
-def _peer_evaluate_fitted(candidate_fit: Any, subject_design: Any, request_spec: Any) -> Dict[str, Any]:
+def evaluate_fitted(candidate_fit: Any, subject_design: Any, request_spec: Any) -> Dict[str, Any]:
     """Use C04 when a live CandidateFit with model_object is in memory; else apply frozen state.
 
     C04 refuses mappings and fits without model_object (it will not unpickle). A FrozenProject
@@ -1373,7 +1469,10 @@ def _peer_evaluate_fitted(candidate_fit: Any, subject_design: Any, request_spec:
             and getattr(candidate_fit, "status", None) in {None, "fitted"}
         )
         if live:
-            return _assessment_to_mapping(peer(candidate_fit, subject_design, request_spec))
+            raw = _assessment_to_mapping(peer(candidate_fit, subject_design, request_spec))
+            return _compose_profile_intervals(
+                raw, _as_mapping(request_spec, "request_spec")
+            )
     return builtin_evaluate_fitted(candidate_fit, subject_design, request_spec)
 
 
@@ -1414,7 +1513,7 @@ def resolve_adapters(overrides: Optional[Mapping[str, Callable[..., Any]]] = Non
     """Prefer published MP/1 callables; otherwise the frozen-application builtins."""
     adapters = {
         "transform_subject": _peer_transform_subject,
-        "evaluate_fitted": _peer_evaluate_fitted,
+        "evaluate_fitted": evaluate_fitted,
         "assess_normative": _try_import("modules.nbr14653_validation", "assess_normative") or builtin_assess_normative,
         "inverse_target_prediction": _invert_target,
     }
@@ -2060,6 +2159,29 @@ def _evaluate_one(
             "unit": request_spec.get("target_unit"),
             "validation": assessment.get("normative"),
             "pendencias": issues,
+            "version_link": _version_link(frozen, reuse_key),
+            "assessment": assessment,
+        }
+
+    policy_conflicts = [
+        issue for issue in assessment.get("issues") or []
+        if issue.get("code") == "arbitration_policy_conflict"
+        and issue.get("severity") == "error"
+    ]
+    if policy_conflicts:
+        merged_issues = policy_conflicts + issues
+        assessment["value"] = empty_value()
+        assessment["issues"] = merged_issues
+        assessment["model_eligibility"] = _empty_eligibility(
+            ERROR, ["arbitration_policy_conflict"]
+        )
+        return {
+            "subject_id": sid,
+            "status": STATUS_FAILED,
+            "value": empty_value(),
+            "unit": request_spec.get("target_unit"),
+            "validation": assessment.get("normative"),
+            "pendencias": merged_issues,
             "version_link": _version_link(frozen, reuse_key),
             "assessment": assessment,
         }

@@ -738,14 +738,20 @@ def interval_roles(
         "status": "verified",
     }
     central = as_float(central_estimate)
+    reasons: List[str] = []
     arbitration = None
-    if central is not None:
+    if central is not None and central > 0.0:
         arbitration = {
             "lower": central * (1.0 - campo_arbitrio),
             "upper": central * (1.0 + campo_arbitrio),
             "amplitude": campo_arbitrio,
             "source": source_campo,
         }
+    elif central is not None:
+        reasons.append(
+            "central_estimate_non_positive: campo de arbítrio não emitido para "
+            "estimativa de valor de mercado menor ou igual a zero."
+        )
 
     def _pair(interval: Optional[Mapping[str, Any]]) -> Optional[Dict[str, float]]:
         if not interval:
@@ -769,8 +775,6 @@ def interval_roles(
 
     admissible = None
     admissible_status = EVIDENCE_PENDING
-    reasons: List[str] = []
-
     if adopted_norm in arb_tokens:
         reasons.append(
             "A.10.1.2 (valor arbitrado) não é calculado automaticamente nesta campanha; "

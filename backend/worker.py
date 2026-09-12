@@ -58,7 +58,7 @@ MP1_PEERS: Dict[str, Tuple[str, str]] = {
     "transform_subject": ("modules.preprocessing", "transform_subject"),
     "search_models": ("modules.optimal_combination", "search_models"),
     "fit_candidate": ("modules.model_builder", "fit_candidate"),
-    "evaluate_fitted": ("modules.model_builder", "evaluate_fitted"),
+    "evaluate_fitted": ("modules.valuation_batch", "evaluate_fitted"),
     "assess_normative": ("modules.nbr14653_validation", "assess_normative"),
     "evaluate_procedure": ("modules.model_evaluation", "evaluate_procedure"),
     "render_report": ("modules.results_generator", "render_report"),
@@ -519,6 +519,7 @@ def build_frozen_project(
     sample_ledger: Any,
     search_audit: Any = None,
     value: Any = None,
+    value_policy: Any = None,
 ) -> dict:
     candidate_spec = _as_dict(_get(winner_fit, "candidate_spec")) or {}
     feature_schema = _as_dict(_get(prepared_dataset, "feature_schema")) or _as_dict(
@@ -634,6 +635,7 @@ def build_frozen_project(
         "calculation_version": CALCULATION_VERSION,
         "residual_state": residual_state,
         "value": dict(value) if isinstance(value, Mapping) else None,
+        "value_policy": dict(value_policy) if isinstance(value_policy, Mapping) else {},
     }
 
 
@@ -1765,6 +1767,7 @@ def compose_valuation_job(
     snapshot_issues.extend(_issue_list(procedure))
 
     value_block = _value_from_assessment(assessment, snapshot_issues)
+    value_policy_used = _as_dict(_get(assessment, "value_policy")) or {}
     # Map normativa/estatística; do not recompute classifications.
     mapped_validation = _map_validation(
         normative,
@@ -2025,6 +2028,10 @@ def compose_valuation_job(
             pack.setdefault("outlier_policy", spec.get("outlier_policy"))
             pack.setdefault("search_policy", spec.get("search_policy"))
             pack.setdefault("evaluation_policy", spec.get("evaluation_policy"))
+            # The bundle records the policy actually used by evaluation.  The
+            # request remains available separately and cannot replace this
+            # catalog-resolved rule with a client declaration.
+            pack["value_policy"] = value_policy_used
             pack.setdefault("source_bytes", file_bytes)
             manifest = builder(
                 snapshot, bundle, prepared, pack, output_dir
@@ -2086,6 +2093,7 @@ def compose_valuation_job(
         sample_ledger=sample_ledger,
         search_audit=search_audit,
         value=snapshot.get("value") if isinstance(snapshot, Mapping) else None,
+        value_policy=value_policy_used,
     )
     try:
         frozen_bytes = dumps_strict(frozen_project).encode("utf-8")
