@@ -229,19 +229,25 @@ def _wait_ready(api: str, ui: str, timeout: float = 120.0) -> tuple[dict, int]:
 
 
 def _start(executable: Path, log_path: Path) -> tuple[subprocess.Popen, Any]:
+    if not executable.is_file():
+        raise VerificationError(f"installed executable is absent: {executable}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log = log_path.open("wb")
-    process = subprocess.Popen(
-        [str(executable), "--health-timeout", "120"],
-        env=os.environ.copy(),
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        creationflags=(
-            subprocess.CREATE_NEW_PROCESS_GROUP
-            if os.name == "nt"
-            else 0
-        ),
-    )
+    try:
+        process = subprocess.Popen(
+            [str(executable), "--health-timeout", "120"],
+            env=os.environ.copy(),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=(
+                subprocess.CREATE_NEW_PROCESS_GROUP
+                if os.name == "nt"
+                else 0
+            ),
+        )
+    except BaseException:
+        log.close()
+        raise
     return process, log
 
 
@@ -427,8 +433,20 @@ def verify(args: argparse.Namespace) -> dict:
         "status": "RUNNING",
         "checks": {},
     }
-    process, log = _start(args.executable.resolve(), evidence_dir / f"{args.phase}-product.log")
+    process = None
+    log = None
     try:
+        executable = args.executable.resolve()
+        if not executable.is_file():
+            raise VerificationError(f"installed executable is absent: {executable}")
+        executable_bytes = executable.read_bytes()
+        result["checks"]["installed_executable"] = {
+            "status": "PASSED",
+            "path": str(executable),
+            "size": len(executable_bytes),
+            "sha256": hashlib.sha256(executable_bytes).hexdigest(),
+        }
+        process, log = _start(executable, evidence_dir / f"{args.phase}-product.log")
         health, ui_size = _wait_ready(api, ui)
         result["checks"]["backend_and_ui"] = {"status": "PASSED", "health": health, "ui_bytes": ui_size}
         browser_result = _browser_probe(args.browser_python.resolve(), ui, evidence_dir, args.phase)
@@ -482,7 +500,8 @@ def verify(args: argparse.Namespace) -> dict:
         result["error"] = {"type": type(exc).__name__, "detail": str(exc)}
         raise
     finally:
-        _stop(process, log)
+        if process is not None and log is not None:
+            _stop(process, log)
         (evidence_dir / f"{args.phase}.json").write_text(
             json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",

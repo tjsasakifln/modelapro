@@ -398,25 +398,41 @@ jobs:
         run: |
           $install = Join-Path $env:RUNNER_TEMP "clean-user\MODELA-PRO"
           New-Item -ItemType Directory -Path (Split-Path $install) -Force | Out-Null
-          & $env:C06_PRIOR_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$install"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path (Join-Path $install "MODELA-PRO.exe"))) { throw "installed executable absent" }
+          $installProcess = Start-Process -FilePath $env:C06_PRIOR_INSTALLER `
+            -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$install") `
+            -Wait -PassThru
+          if ($installProcess.ExitCode -ne 0) { exit $installProcess.ExitCode }
+          $installedExecutable = Join-Path $install "MODELA-PRO.exe"
+          if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) { throw "installed executable absent" }
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
           $env:MODELA_LICENSE_PATH = $env:C06_PRIOR_LICENSE
-          & "$install\MODELA-PRO.exe" --check-pdf
-          if ($LASTEXITCODE -ne 0) { throw "installed A cannot render PDF with its bundled native runtime" }
-          "C06_INSTALL=$install" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $probe = Start-Process -FilePath $installedExecutable -ArgumentList @("--check-pdf") -Wait -PassThru
+          if ($probe.ExitCode -ne 0) { throw "installed A cannot render PDF with its bundled native runtime" }
+          if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) {
+            throw "installed executable disappeared after the native PDF probe"
+          }
+          $installedFile = Get-Item -LiteralPath $installedExecutable
+          [ordered]@{
+            schema_version = "MP-COM-WINDOWS-INSTALLED-PREFLIGHT/1"
+            status = "PASSED"
+            phase = "initial"
+            path = $installedFile.FullName
+            size = $installedFile.Length
+            sha256 = (Get-FileHash -LiteralPath $installedExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json | Set-Content "$env:C06_EVIDENCE\initial-installed-preflight.json" -Encoding utf8
 
       - name: Calculate, emit documents, save, reopen and back up on A
         shell: pwsh
         run: |
+          $install = Join-Path $env:RUNNER_TEMP "clean-user\MODELA-PRO"
+          $installedExecutable = Join-Path $install "MODELA-PRO.exe"
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
           $env:MODELA_LICENSE_PATH = $env:C06_PRIOR_LICENSE
           $backup = Join-Path $env:C06_EVIDENCE "modelapro-backup.zip"
           & $env:BUILD_PYTHON -m scripts.comercial.operacao.verify_windows_install `
-            --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
+            --executable $installedExecutable `
             --evidence $env:C06_EVIDENCE `
             --backup $backup `
             --browser-python $env:C06_BROWSER_PYTHON `
@@ -425,15 +441,20 @@ jobs:
       - name: Update installed product to B and verify saved state
         shell: pwsh
         run: |
-          & $env:C06_CURRENT_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $install = Join-Path $env:RUNNER_TEMP "clean-user\MODELA-PRO"
+          $installProcess = Start-Process -FilePath $env:C06_CURRENT_INSTALLER `
+            -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$install") `
+            -Wait -PassThru
+          if ($installProcess.ExitCode -ne 0) { exit $installProcess.ExitCode }
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
           $env:MODELA_LICENSE_PATH = $env:C06_CURRENT_LICENSE
-          & "$env:C06_INSTALL\MODELA-PRO.exe" --check-pdf
-          if ($LASTEXITCODE -ne 0) { throw "installed B cannot render PDF with its bundled native runtime" }
+          $installedExecutable = Join-Path $install "MODELA-PRO.exe"
+          if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) { throw "updated executable absent" }
+          $probe = Start-Process -FilePath $installedExecutable -ArgumentList @("--check-pdf") -Wait -PassThru
+          if ($probe.ExitCode -ne 0) { throw "installed B cannot render PDF with its bundled native runtime" }
           & $env:BUILD_PYTHON -m scripts.comercial.operacao.verify_windows_install `
-            --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
+            --executable $installedExecutable `
             --evidence $env:C06_EVIDENCE `
             --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
             --browser-python $env:C06_BROWSER_PYTHON `
@@ -442,15 +463,20 @@ jobs:
       - name: Return to A and restore the verified backup in a clean profile
         shell: pwsh
         run: |
-          & $env:C06_PRIOR_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $install = Join-Path $env:RUNNER_TEMP "clean-user\MODELA-PRO"
+          $installProcess = Start-Process -FilePath $env:C06_PRIOR_INSTALLER `
+            -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$install") `
+            -Wait -PassThru
+          if ($installProcess.ExitCode -ne 0) { exit $installProcess.ExitCode }
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-restored"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
           $env:MODELA_LICENSE_PATH = $env:C06_PRIOR_LICENSE
-          & "$env:C06_INSTALL\MODELA-PRO.exe" --check-pdf
-          if ($LASTEXITCODE -ne 0) { throw "restored A cannot render PDF with its bundled native runtime" }
+          $installedExecutable = Join-Path $install "MODELA-PRO.exe"
+          if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) { throw "rolled-back executable absent" }
+          $probe = Start-Process -FilePath $installedExecutable -ArgumentList @("--check-pdf") -Wait -PassThru
+          if ($probe.ExitCode -ne 0) { throw "restored A cannot render PDF with its bundled native runtime" }
           & $env:BUILD_PYTHON -m scripts.comercial.operacao.verify_windows_install `
-            --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
+            --executable $installedExecutable `
             --evidence $env:C06_EVIDENCE `
             --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
             --browser-python $env:C06_BROWSER_PYTHON `
@@ -547,7 +573,8 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          if (-not $env:C06_INSTALL) {
+          $install = Join-Path $env:RUNNER_TEMP "clean-user\MODELA-PRO"
+          if (-not (Test-Path -LiteralPath $install -PathType Container)) {
             $evidence = if ($env:C06_EVIDENCE) {
               $env:C06_EVIDENCE
             } else {
@@ -561,11 +588,13 @@ jobs:
             } | ConvertTo-Json | Set-Content (Join-Path $evidence "uninstall.json") -Encoding utf8
             exit 0
           }
-          $uninstaller = Join-Path $env:C06_INSTALL "unins000.exe"
+          $uninstaller = Join-Path $install "unins000.exe"
           if (-not (Test-Path $uninstaller)) { throw "Inno Setup uninstaller absent" }
-          & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (Test-Path (Join-Path $env:C06_INSTALL "MODELA-PRO.exe")) { throw "installed executable survived uninstall" }
+          $uninstallProcess = Start-Process -FilePath $uninstaller `
+            -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") `
+            -Wait -PassThru
+          if ($uninstallProcess.ExitCode -ne 0) { exit $uninstallProcess.ExitCode }
+          if (Test-Path (Join-Path $install "MODELA-PRO.exe")) { throw "installed executable survived uninstall" }
           if (-not (Test-Path (Join-Path $env:RUNNER_TEMP "profile-restored"))) { throw "uninstall removed user evidence profile" }
           [ordered]@{
             schema_version = "MP-COM-WINDOWS-UNINSTALL/1"

@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import zipfile
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -262,6 +263,35 @@ def test_windows_bundle_requires_native_runtime_and_hardens_distribution_evidenc
     assert "installed A cannot render PDF" in workflow
     assert '"playwright==1.62.0"' in workflow
     assert "--browser-python $env:C06_BROWSER_PYTHON" in workflow
+    assert "Start-Process -FilePath $env:C06_PRIOR_INSTALLER" in workflow
+    assert "initial-installed-preflight.json" in workflow
+
+
+def test_windows_verifier_preserves_evidence_when_installed_executable_is_absent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        verify_windows_install,
+        "_provision_ephemeral_test_controls",
+        lambda _path: None,
+    )
+    evidence = tmp_path / "evidence"
+    args = Namespace(
+        executable=tmp_path / "missing" / "MODELA-PRO.exe",
+        evidence=evidence,
+        backup=evidence / "backup.zip",
+        browser_python=tmp_path / "browser-python.exe",
+        phase="initial",
+    )
+    with pytest.raises(
+        verify_windows_install.VerificationError,
+        match="installed executable is absent",
+    ):
+        verify_windows_install.verify(args)
+    result = json.loads((evidence / "initial.json").read_text(encoding="utf-8"))
+    assert result["status"] == "FAILED"
+    assert result["error"]["type"] == "VerificationError"
+    assert "installed executable is absent" in result["error"]["detail"]
 
 
 def test_installed_ui_probe_uses_six_profiles_and_labels_only_synthetic_data() -> None:
