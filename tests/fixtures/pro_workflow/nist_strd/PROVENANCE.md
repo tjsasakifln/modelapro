@@ -316,6 +316,66 @@ fit the computed residual is pure roundoff, bounded by roughly
 `u * kappa_eq * ||y|| ≈ 2.2e-16 * 2.2e3` relative, i.e. ~5e-13 — so 1e-9 leaves more than
 three orders of margin while remaining a real constraint.
 
+### 4.0.3 Post-incident portable QR budget — documented before revalidation
+
+This section was frozen on **2026-09-12 before the candidate was revalidated with the
+new rule**. It is necessarily post-incident, and therefore is **not pre-registered**:
+GitHub Actions run `34670111908`, tested commit
+`f537826a72c95381c53af32ccf2200c7e71d5cf5`, had already shown two Pontius failures:
+
+- residual standard deviation: relative error `1.9194920734023983e-13`;
+- `sd(B0)`: relative error `1.930e-13` (as printed in the retained job log).
+
+The old binding floor was `1.845e-13` in both cases. It remains unchanged in
+`datasets.py`; it is part of the historical pre-registration and is not rewritten to
+fit either observation.
+
+The missing term in that floor is now explicit. Residual standard deviation is derived
+from `r = y - X beta_hat`. Even when the orthogonal projection is backward stable, a
+relative bound for the small residual must include cancellation in that subtraction.
+For every dataset with non-zero certified residual sum of squares define, using only
+the NIST input and certified values:
+
+```
+u       = 2**-53
+gamma   = (n*p*u) / (1 - n*p*u)
+C_r     = (||y||_2 + ||X*beta_cert||_2) / sqrt(SSE_cert)
+delta15(z) = 0.5 * 10**(floor(log10(abs(z))) - 14) / abs(z)
+
+portable_sigma_floor(z) = gamma * (C_r + kappa_eq)     + delta15(z)
+portable_sd_floor(z)    = gamma * (C_r + 2*kappa_eq)   + delta15(z)
+```
+
+`gamma` is the standard floating-point accumulation quantity `gamma_k = ku/(1-ku)`,
+with `k=n*p`, the number of input/design interactions in the dense QR problem. `C_r`
+budgets the cancellation in reconstructing the residual. The first `kappa_eq` term
+budgets the QR solve/projector; coefficient standard deviations add the second term for
+the triangular inverse and row norm. `delta15` is not a software allowance: it is half
+one unit in the last of the 15 significant digits printed by NIST, so the comparison
+does not claim knowledge below the reference's published resolution.
+
+The asserted floor is the maximum of this portable budget and the existing frozen
+floor. No Pontius measurement appears in the formula, and no dataset-specific constant
+was introduced. Exact-fit Wampler1/Wampler2 keep the absolute checks from section
+4.0.2 because no relative residual condition number exists for a certified zero.
+
+This is intentionally a forward error budget rather than a claim of bitwise
+reproducibility. NumPy documents that `numpy.linalg.qr` is an interface to LAPACK
+`dgeqrf`/`dorgqr`; LAPACK's `dgeqrf` selects blocked or unblocked reflector paths based
+on its environment/workspace; and OpenBLAS documents runtime kernel selection for
+`DYNAMIC_ARCH` builds through `OPENBLAS_CORETYPE`. Those implementation choices may
+change reduction order while remaining valid binary64 QR implementations:
+
+- <https://numpy.org/doc/stable/reference/generated/numpy.linalg.qr.html>
+- <https://netlib.org/lapack/explore-html/d0/da1/group__geqrf_gade26961283814bb4e62183d9133d8bf5.html>
+- <https://github.com/OpenMathLib/OpenBLAS/blob/develop/USAGE.md#how-to-choose-target-manually-at-runtime-when-compiled-with-dynamic_arch>
+
+The portable budget is paired with two sharper controls. A Decimal high-precision
+reconstruction checks the certified results independently of NumPy/BLAS, and deliberate
+1% mutations must fail every applicable portable comparison. Thus portability cannot
+turn the test into a ceremonial pass: errors large enough to be material to a reported
+standard deviation remain rejected on every dataset and quantity exercised.
+
 ## 4.1 A correction to the METRIC, with the floors left untouched
 
 This must be on the record, because a reader has to be able to check that no tolerance

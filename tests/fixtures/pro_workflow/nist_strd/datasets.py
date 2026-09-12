@@ -64,6 +64,28 @@ DOUBLE_PRECISION_DIGITS = 15.0
 MARGIN_DIGITS = 1.0
 MAX_MEANINGFUL_RELATIVE_FLOOR = 1.0
 
+# --- post-incident portable QR error budget (2026-09-12; NOT pre-registered) ---
+# The frozen floors above are retained byte-for-byte.  A GitHub-hosted runner showed
+# that the kappa-only projection floor was not portable across LAPACK/OpenBLAS kernels
+# for Pontius' residual sigma and coefficient standard deviations.  The portable
+# comparison therefore also accounts for:
+#
+#   u              = IEEE-754 binary64 unit roundoff = 2**-53
+#   gamma_np       = (n*p*u) / (1 - n*p*u)
+#   cancellation   = (||y||_2 + ||X*beta_cert||_2) / sqrt(SSE_cert)
+#   ref_round(z)   = half of one unit in the last of the 15 significant digits
+#                    published for the non-zero StRD certified value z
+#
+# The sigma budget is gamma_np*(cancellation + kappa_eq) + ref_round(sigma).
+# A coefficient-sd budget adds one more gamma_np*kappa_eq term for the triangular
+# inverse/norm used after QR.  These are operation/conditioning budgets, not numbers
+# fitted to the observed Pontius error.  Exact-fit datasets retain their separately
+# pre-registered absolute checks.  See PROVENANCE.md section 4.0.3.
+BINARY64_UNIT_ROUNDOFF = 1.1102230246251565e-16
+NIST_CERTIFIED_SIGNIFICANT_DIGITS = 15
+PORTABLE_BUDGET_DOCUMENTED_ON = "2026-09-12"
+MATERIAL_RELATIVE_MUTATION = 1.0e-2
+
 DATASETS = {
     "Norris": {
         "name": "Norris",
