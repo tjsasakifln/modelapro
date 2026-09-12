@@ -18,7 +18,7 @@ autorreferência neste documento.
 | comando/ensaio | ambiente | exit code/resultado |
 | --- | --- | --- |
 | `pytest -q tests/comercial/c04 tests/c11_persistence tests/c15_packaging` | ambiente global inicial | falhou: 2 testes de `.xls` sem `xlrd`; essa ausência do ambiente não foi aceita como prova de pacote |
-| mesma matriz no venv criado dos locks C04 | venv limpo Python 3.12 | exit `0`: 122 passaram, 1 ignorado por condição explícita, 5 avisos |
+| mesma matriz após reconciliar o alvo remoto `2a8009b` | venv limpo Python 3.12 | exit `0`: 169 passaram, 1 ignorado por condição explícita, 5 avisos |
 | `C15_INSTALL_SMOKE=1 ... test_wheel_install_smoke.py` | venv externo criado pelo teste, sem `PYTHONPATH`/checkout | exit `0`: 1 teste passou em 91,89 s; wheel instalado, recursos importados e API respondeu `/health` |
 | harness operacional com navegador | Linux de referência | exit `1`; fila/cancelamento, backup/restore, disco e PDF passaram; corpus falhou por Chromium sem `libnspr4.so` e extensão de grau ausente na execução agregada |
 | harness operacional sem navegador | Linux de referência | exit `1`; checks operacionais passaram; corpus técnico teve 27/28 testes e falhou na extensão de grau |
