@@ -251,6 +251,8 @@ def _review_to_signature_request(store, job_id):
     )
     assert reviewed["case_release_status"] == "ready_for_professional_signoff"
     assert reviewed["document_state"]["is_final"] is True
+    with pytest.raises(DocumentWorkflowError, match="current approved review"):
+        create_signature_request(store, job_id, revision_id="REVISION-NEVER-REVIEWED-TEST")
     request = create_signature_request(store, job_id, revision_id="C06-TEST-1")
     return request, store.get_artifact(job_id, "report.pdf")
 

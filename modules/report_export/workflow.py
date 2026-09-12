@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 
 from ..digital_signatures import prepare_signature_request, record_external_signature
 from ..evidence_bundle import refresh_evidence_bundle_archive
-from ..pro_workflow.report_context import build_output_manifest, complete_report_context
+from ..pro_workflow.report_context import build_output_manifest, complete_report_context, _json_value
 from ..provenance import canonical_json
 from ..report_presenter.qualification import (
     assess_document_state,
@@ -80,6 +80,8 @@ def _report_context(store: Any, job_id: str) -> Dict[str, Any]:
             item["bytes"] = raw
             item["attachment_state"] = "available"
         files.append(item)
+    if any(item.get("synthetic_test_only") for item in files):
+        context["synthetic_test_only"] = True
     if files:
         context["documentary_files"] = files
         context["documents"] = [
@@ -302,7 +304,7 @@ def generate_documents(
     store.save_snapshot(job_id, snapshot)
     # Persist only JSON-safe metadata. Exact attachment bytes stay in their
     # own immutable artifact and are reloaded by digest for later stages.
-    _save_json(store, job_id, "report_context.json", context)
+    _save_json(store, job_id, "report_context.json", _json_value(context))
     _save_json(store, job_id, "output_manifest.json", output_manifest)
     store.save_artifact(job_id, "report.pdf", pdf)
     store.save_artifact(job_id, "report.docx", docx)
@@ -350,6 +352,8 @@ def record_review(
         )
     job, snapshot, normative = _job_inputs(store, job_id)
     context = _report_context(store, job_id)
+    if synthetic_test_only:
+        context["synthetic_test_only"] = True
     output_manifest = _load_json_artifact(store, job_id, "output_manifest.json")
     qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
     result_fp = str(qctx.get("result_fingerprint") or "")
@@ -383,6 +387,7 @@ def record_review(
     )
     pdf, docx = _render_and_verify(snapshot, context)
     store.save_snapshot(job_id, snapshot)
+    _save_json(store, job_id, "report_context.json", _json_value(context))
     store.save_artifact(job_id, "report.pdf", pdf)
     store.save_artifact(job_id, "report.docx", docx)
     _refresh_dossier(
@@ -415,6 +420,10 @@ def create_signature_request(store: Any, job_id: str, *, revision_id: str) -> Di
     state = assess_document_state(snapshot, context)
     if state.get("case_release_status") != "ready_for_professional_signoff" or not state.get("is_final"):
         raise DocumentWorkflowError("DOCUMENT_NOT_READY_FOR_SIGNATURE", "document is not ready for signature")
+    reviews = state.get("approved_review_events") or []
+    latest = reviews[-1] if reviews else {}
+    if not revision_id or revision_id != latest.get("version"):
+        raise DocumentWorkflowError("SIGNATURE_REVISION_MISMATCH", "signature must reference the current approved review")
     profile_id = str((state.get("profile") or {}).get("id") or "")
     request = prepare_signature_request(
         pdf,

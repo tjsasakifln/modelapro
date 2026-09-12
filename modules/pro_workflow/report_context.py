@@ -322,9 +322,9 @@ def complete_report_context(
             ),
             "annexes": _first(spec.get("annexes"), supplied.get("annexes"), base.get("annexes")),
             "professional_identity": professional or base.get("professional_identity") or None,
-            "synthetic_test_only": bool(_first(
+            "synthetic_test_only": any(bool(value) for value in (
                 spec.get("synthetic_test_only"), supplied.get("synthetic_test_only"),
-                base.get("synthetic_test_only"), False
+                base.get("synthetic_test_only"),
             )),
         }
     )

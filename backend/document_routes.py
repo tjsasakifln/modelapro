@@ -7,6 +7,7 @@ document bytes or professional-review data are read or changed.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -168,7 +169,8 @@ async def document_attachment_upload(
     """Store exact documentary bytes; mere JSON references are not evidence."""
     store = _authorized_store(job_id, x_job_token)
     try:
-        return store_document_attachment(
+        return await asyncio.to_thread(
+            store_document_attachment,
             store,
             job_id,
             filename=file.filename or "document.bin",
@@ -192,7 +194,8 @@ async def document_signature_import(
 ):
     store = _authorized_store(job_id, x_job_token)
     try:
-        return import_signed_report(
+        return await asyncio.to_thread(
+            import_signed_report,
             store,
             job_id,
             signed_pdf=await file.read(),
