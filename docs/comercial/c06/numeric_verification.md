@@ -80,3 +80,22 @@ one-percent negative mutations and invocation of the Decimal checker from an arb
 working directory. A new candidate CI run is still required to turn the retained
 GitHub-run failure into cross-platform execution evidence; local success is not recorded
 as a hosted-run success.
+
+## Documentary consumption boundary — 2026-09-12
+
+The output layer consumes the frozen numerical disclosures; it does not recompute them.
+`test_real_worker_numeric_disclosure_reaches_verified_pdf_docx_xlsx_bytes` runs the real
+BB worker and requires its `model.metrics`, p-values, correlation matrix, standardized
+residuals, normal-frequency comparison, elasticities and outlier counts to reach verified
+PDF, DOCX and XLSX bytes. It also compares the value block's arbitration bounds with the
+verified bounds in `provenance.normative_assessment.intervals.arbitration_interval`.
+
+Availability labels alone do not create documentary evidence. The manifest requires
+finite metrics and complete producer coverage/status, while
+`test_manifest_rejects_labels_missing_diagnostics_and_tampered_bytes` makes an unavailable
+diagnostic and mutated representation fail. The real-worker test accounts for all 40 BB
+output IDs: 28 pre-signature `emitted` representations must be present, the ICP-Brasil
+signature remains an explicit post-review pending stage, and every one of the 11 human
+requirements is present, pending or conditionally not applicable. These are local
+documentary tests, not an additional numerical oracle, hosted-CI evidence or an
+institutional acceptance claim.
