@@ -35,6 +35,22 @@ comprador habilita funcionalidades, não qualifica casos nem assina laudos.
 5. Salve o projeto e anote seu identificador para reabertura. Lotes e reprodução
    conservam suas políticas; revise individualmente itens inválidos ou pendentes.
 
+### Quantificação de custo
+
+No seletor **Percurso de cálculo**, escolha **Quantificação de custo**. Não é
+necessário inventar uma amostra de mercado. Informe localidade, data-base, moeda,
+orçamento e fontes por item; discrimine componentes, despesas adicionais, terreno
+e exclusões. Declare método, memória e fonte do BDI e da depreciação. Taxas são
+frações (0,10 = 10%); o BDI calculado deve conferir com a soma ou composição dos
+componentes informados. Campo ausente não vale zero, e taxa inválida não autoriza
+usar o custo bruto como resultado líquido.
+
+“Orçamento sintético” descreve o nível de detalhamento do orçamento; não significa
+dado fictício. Marque **SINTÉTICO DE TESTE** somente quando os insumos forem de
+teste. O programa deriva o enquadramento dos insumos e conserva suas limitações;
+o usuário não escolhe pontos normativos. Custo não é preço de mercado nem limite
+contratual de garantia. As condições do destinatário concreto continuam aplicáveis.
+
 ## Documentos, revisão e assinatura externa
 
 Após calcular ou reabrir um trabalho, use **Conteúdo do laudo, revisão e
@@ -42,6 +58,15 @@ assinatura**. Complete identificação, caracterização, justificativa do méto
 pressupostos e limitações. Envie documentos e anexos integrais somente com
 procedência e autorização. O serviço registra seus bytes e hashes; escrever
 uma referência sem o arquivo não comprova completude.
+No campo **Requisitos comprovados pelo arquivo**, vincule somente os requisitos
+que aquele documento realmente evidencia. Os hashes e bytes são conferidos pelo
+serviço; a veracidade técnica do conteúdo continua sob responsabilidade profissional.
+
+Adicionar documentos ou alterar conteúdo invalida a emissão anterior. Gere os
+documentos novamente e repita revisão e assinatura aplicáveis. Os bytes anteriores
+ficam em **document_history.zip**, com gerações identificadas por hash; não são
+oferecidos como PDF assinado ou pacote corrente. Esse histórico também integra o
+backup. Não confunda recuperar um arquivo histórico com aprovar o caso atual.
 
 Gere PDF, DOCX e dossiê e examine as representações disponíveis, tabelas,
 legibilidade e anexos integrais. Geração de arquivo não é aprovação. Consulte
