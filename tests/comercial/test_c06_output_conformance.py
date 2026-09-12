@@ -660,6 +660,8 @@ def test_sample_panel_verifier_binds_each_value_to_row_and_panel():
         assert check["ok"] is False
         assert any(item["code"] == "MUTATED_SAMPLE_CELL"
                    for item in check["findings"])
+        assert any(item["code"] == "MUTATED_SAMPLE_ROW"
+                   for item in check["findings"])
     panel = view["used_value_panels"][0]
     first_header = f"{panel['columns'][0]}\n{panel['header_tokens'][0]}"
     second_header = f"{panel['columns'][1]}\n{panel['header_tokens'][1]}"

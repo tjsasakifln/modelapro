@@ -595,4 +595,31 @@ def verify_report_consistency(
                 )
             )
 
+    # C03 consumers historically use MUTATED_SAMPLE_ROW as the aggregate
+    # contract.  Keep the newer cell/panel findings because they identify the
+    # exact broken binding, and retain the aggregate code as a compatibility
+    # finding whenever those stronger checks detect sample-row corruption.
+    sample_detail_codes = {
+        "OMITTED_ANNEX_LINE",
+        "MUTATED_SAMPLE_CELL",
+        "MUTATED_SAMPLE_PANEL_HEADER",
+        "MUTATED_SAMPLE_PANEL_ROW_ID",
+    }
+    sample_details = [
+        finding for finding in findings
+        if finding.get("code") in sample_detail_codes
+    ]
+    if sample_details and not any(
+        finding.get("code") == "MUTATED_SAMPLE_ROW" for finding in findings
+    ):
+        findings.append(
+            _finding(
+                "MUTATED_SAMPLE_ROW",
+                "report_context.used_rows/excluded_rows",
+                "amostra integral vinculada por row_id, painel e campo",
+                [finding.get("field") for finding in sample_details],
+                "Uma ou mais linhas da amostra divergem da representação controlada.",
+            )
+        )
+
     return {"ok": not findings, "findings": findings, "frozen": frozen}
