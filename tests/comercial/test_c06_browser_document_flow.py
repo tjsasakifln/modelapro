@@ -499,3 +499,5 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
+            from tests.comercial.browser_evidence import collect_browser_evidence
+            collect_browser_evidence(tmp_path, namespace="c06-document-flow")

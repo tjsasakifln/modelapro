@@ -320,3 +320,5 @@ def test_browser_cost_calculation_without_market_file_can_be_saved_and_reopened(
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
+            from tests.comercial.browser_evidence import collect_browser_evidence
+            collect_browser_evidence(tmp_path, namespace="c06-cost-flow")
