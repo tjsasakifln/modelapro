@@ -11,6 +11,7 @@ graft frontend/assets
 graft scripts/c15_local
 graft packaging/comercial
 graft scripts/comercial
+graft profiles
 include THIRD_PARTY_NOTICES.md
 include third_party/reuse_manifest.json
 recursive-include backend *.py

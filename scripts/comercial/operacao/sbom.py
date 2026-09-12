@@ -68,13 +68,47 @@ def _pip_report(python: str) -> list[dict]:
 
 
 def _metadata(python: str, name: str) -> dict:
-    script = (
-        "import importlib.metadata,json,sys; "
-        "d=importlib.metadata.metadata(sys.argv[1]); "
-        "print(json.dumps({'license':d.get('License') or '',"
-        "'license_expression':d.get('License-Expression') or '',"
-        "'home_page':d.get('Home-page') or '', 'summary':d.get('Summary') or ''}))"
-    )
+    script = r"""
+import hashlib
+import importlib.metadata
+import json
+import pathlib
+import sys
+
+dist = importlib.metadata.distribution(sys.argv[1])
+metadata = dist.metadata
+license_files = []
+native_files = []
+for entry in dist.files or ():
+    relative = str(entry).replace('\\', '/')
+    basename = pathlib.PurePosixPath(relative).name.lower()
+    located = pathlib.Path(dist.locate_file(entry))
+    if not located.is_file():
+        continue
+    if basename.startswith(('license', 'copying', 'notice', 'authors')):
+        payload = located.read_bytes()
+        license_files.append({
+            'path': relative,
+            'sha256': hashlib.sha256(payload).hexdigest(),
+            'size': len(payload),
+        })
+    if located.suffix.lower() in {'.dll', '.dylib', '.pyd', '.so'} or '.so.' in basename:
+        payload = located.read_bytes()
+        native_files.append({
+            'path': relative,
+            'sha256': hashlib.sha256(payload).hexdigest(),
+            'size': len(payload),
+        })
+print(json.dumps({
+    'license': metadata.get('License') or '',
+    'license_expression': metadata.get('License-Expression') or '',
+    'home_page': metadata.get('Home-page') or '',
+    'project_urls': metadata.get_all('Project-URL') or [],
+    'summary': metadata.get('Summary') or '',
+    'license_files': sorted(license_files, key=lambda item: item['path']),
+    'native_files': sorted(native_files, key=lambda item: item['path']),
+}))
+"""
     result = subprocess.run([python, "-c", script, name], check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -99,6 +133,12 @@ def build_sbom(
                     {"name": "modelapro:home_page", "value": meta["home_page"]},
                     {"name": "modelapro:summary", "value": meta["summary"]},
                 ],
+                "evidence": {
+                    "identity_source": "installed-distribution-metadata",
+                    "project_urls": list(meta.get("project_urls") or []),
+                    "license_files": list(meta.get("license_files") or []),
+                    "native_files": list(meta.get("native_files") or []),
+                },
             }
         )
     component_bytes = json.dumps(components, sort_keys=True, separators=(",", ":")).encode()
@@ -120,6 +160,15 @@ def build_sbom(
         "version": 1,
         "metadata": metadata,
         "components": components,
+        "review_queue": [
+            {
+                "name": component["name"],
+                "version": component["version"],
+                "reason": "license_metadata_missing",
+            }
+            for component in components
+            if component["licenses"][0]["license"]["name"] == "NOASSERTION"
+        ],
     }
     return payload
 

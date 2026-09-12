@@ -44,6 +44,23 @@ def _source_identity(root: Path) -> str:
     return result.stdout.strip()
 
 
+def _git_identity(root: Path, ref: str) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", ref],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise RuntimeError(f"release build git identity could not resolve {ref!r}")
+    return result.stdout.strip()
+
+
+def _write_status(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def build(
     root: Path,
     output: Path,
@@ -60,51 +77,96 @@ def build(
         raise FileNotFoundError("commercial build specifications are missing")
     source_sha = _source_identity(root)
     lock = lock or root / "constraints" / "windows-py312-x64.txt"
-    sbom.assert_environment_matches_lock(sys.executable, lock)
     if output.exists() and any(output.iterdir()):
         raise RuntimeError("output must be a new or empty staging directory; refusing stale artifacts")
     output.mkdir(parents=True, exist_ok=True)
     evidence = output / "qualification-evidence"
     evidence.mkdir()
-    audit_path = evidence / "pip-audit.json"
-    audit_exit = audit.audit(sys.executable, audit_path)
-    if audit_exit != 0:
-        raise RuntimeError(
-            f"pip-audit blocked the Windows build (exit {audit_exit}); "
-            "review the preserved report before rebuilding"
+    status_path = evidence / "build-status.json"
+    status = {
+        "schema_version": "MP-COM-WINDOWS-BUILD/1",
+        "version": version,
+        "source_sha": source_sha,
+        "tree_sha": _git_identity(root, "HEAD^{tree}"),
+        "platform": "windows-x64",
+        "status": "RUNNING",
+        "commercial_release_ready": False,
+        "stages": {},
+    }
+
+    def stage(name: str, value: str, detail: str | None = None) -> None:
+        status["stages"][name] = {"status": value}
+        if detail:
+            status["stages"][name]["detail"] = detail
+        _write_status(status_path, status)
+
+    current_stage = "environment_lock"
+    try:
+        stage(current_stage, "RUNNING")
+        sbom.assert_environment_matches_lock(sys.executable, lock)
+        stage(current_stage, "PASSED")
+        current_stage = "vulnerability_audit"
+        stage(current_stage, "RUNNING")
+        audit_path = evidence / "pip-audit.json"
+        audit_exit = audit.audit(sys.executable, audit_path)
+        if audit_exit != 0:
+            raise RuntimeError(
+                f"pip-audit blocked the Windows build (exit {audit_exit}); "
+                "review the preserved report before rebuilding"
+            )
+        stage(current_stage, "PASSED")
+        current_stage = "sbom"
+        stage(current_stage, "RUNNING")
+        timestamp = generated_at or datetime.now(timezone.utc).isoformat()
+        sbom_payload = sbom.build_sbom(
+            sys.executable,
+            generated_at=timestamp,
+            lock=lock,
         )
-    timestamp = generated_at or datetime.now(timezone.utc).isoformat()
-    sbom_payload = sbom.build_sbom(
-        sys.executable,
-        generated_at=timestamp,
-        lock=lock,
-    )
-    sbom_path = evidence / "SBOM.modelapro.json"
-    sbom_path.write_text(
-        json.dumps(sbom_payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    subprocess.run(
-        [sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(output), str(spec)],
-        cwd=root,
-        check=True,
-    )
-    bundle = output / "MODELA-PRO"
-    if not bundle.is_dir() or not (bundle / "MODELA-PRO.exe").is_file():
-        raise RuntimeError("PyInstaller did not produce the expected Windows onedir bundle")
-    shutil.copy2(sbom_path, bundle / sbom_path.name)
-    shutil.copy2(audit_path, bundle / audit_path.name)
-    iscc = "iscc.exe"
-    subprocess.run(
-        [iscc, f"/O{output}", f"/DAppVersion={version}", f"/DBundleDir={bundle}", str(iss)],
-        cwd=root,
-        check=True,
-    )
+        sbom_path = evidence / "SBOM.modelapro.json"
+        sbom_path.write_text(
+            json.dumps(sbom_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        stage(current_stage, "PASSED")
+        current_stage = "pyinstaller"
+        stage(current_stage, "RUNNING")
+        subprocess.run(
+            [sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(output), str(spec)],
+            cwd=root,
+            check=True,
+        )
+        bundle = output / "MODELA-PRO"
+        if not bundle.is_dir() or not (bundle / "MODELA-PRO.exe").is_file():
+            raise RuntimeError("PyInstaller did not produce the expected Windows onedir bundle")
+        shutil.copy2(sbom_path, bundle / sbom_path.name)
+        shutil.copy2(audit_path, bundle / audit_path.name)
+        stage(current_stage, "PASSED")
+        current_stage = "installer"
+        stage(current_stage, "RUNNING")
+        iscc = "iscc.exe"
+        subprocess.run(
+            [iscc, f"/O{output}", f"/DAppVersion={version}", f"/DBundleDir={bundle}", str(iss)],
+            cwd=root,
+            check=True,
+        )
+        installer = output / f"MODELA-PRO-{version}-win64.exe"
+        if not installer.is_file():
+            raise RuntimeError(f"Inno Setup did not produce expected installer: {installer.name}")
+        stage(current_stage, "PASSED")
+    except BaseException as exc:
+        stage(current_stage, "FAILED", f"{type(exc).__name__}: {exc}")
+        status["status"] = "FAILED"
+        _write_status(status_path, status)
+        raise
+    status["status"] = "BUILT_NOT_VERIFIED"
+    _write_status(status_path, status)
     files = sorted(path for path in output.rglob("*") if path.is_file())
     manifest = {
         "schema_version": "MP-COM-RELEASE/1",
         "version": version,
         "source_sha": source_sha,
+        "tree_sha": status["tree_sha"],
         "platform": "windows-x64",
         "generated_at": timestamp,
         "signing_status": "UNSIGNED",

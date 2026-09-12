@@ -1,0 +1,1 @@
+"""Normative qualification-profile resources."""

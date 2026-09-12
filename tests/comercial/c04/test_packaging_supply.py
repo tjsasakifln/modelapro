@@ -43,13 +43,40 @@ def test_sbom_is_sorted_and_uses_noassertion_for_absent_license(monkeypatch) -> 
             "license_expression": "",
             "home_page": "",
             "summary": "",
+            "project_urls": [],
+            "license_files": [],
+            "native_files": [],
         },
     )
     first = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")
     second = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")
     assert [item["name"] for item in first["components"]] == ["Alpha", "zeta"]
     assert first["components"][1]["licenses"][0]["license"]["name"] == "NOASSERTION"
+    assert first["review_queue"] == [
+        {"name": "zeta", "version": "1", "reason": "license_metadata_missing"}
+    ]
     assert first["metadata"]["component_hash_sha256"] == second["metadata"]["component_hash_sha256"]
+
+
+def test_sbom_preserves_hashed_license_and_native_binary_evidence(monkeypatch) -> None:
+    monkeypatch.setattr(sbom, "_pip_report", lambda _python: [{"name": "binary-lib", "version": "4.2"}])
+    monkeypatch.setattr(
+        sbom,
+        "_metadata",
+        lambda _python, _name: {
+            "license": "BSD-3-Clause",
+            "license_expression": "BSD-3-Clause",
+            "home_page": "https://example.invalid/binary-lib",
+            "project_urls": ["Source, https://example.invalid/binary-lib/source"],
+            "summary": "fixture",
+            "license_files": [{"path": "dist-info/LICENSE", "sha256": "a" * 64, "size": 123}],
+            "native_files": [{"path": "binary_lib/core.pyd", "sha256": "b" * 64, "size": 456}],
+        },
+    )
+    component = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")["components"][0]
+    assert component["version"] == "4.2"
+    assert component["evidence"]["license_files"][0]["sha256"] == "a" * 64
+    assert component["evidence"]["native_files"][0]["sha256"] == "b" * 64
 
 
 def test_sbom_cli_requires_fixed_timestamp(tmp_path: Path) -> None:
@@ -147,6 +174,41 @@ def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
     assert (output / "MODELA-PRO" / "pip-audit.json").is_file()
 
 
+def test_windows_build_preserves_failed_stage_evidence(tmp_path: Path, monkeypatch) -> None:
+    root = Path(__file__).resolve().parents[3]
+    output = tmp_path / "failed-dist"
+    monkeypatch.setattr(build_windows.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(build_windows.platform, "machine", lambda: "AMD64")
+    monkeypatch.setattr(build_windows, "_source_identity", lambda _root: "source-sha")
+    monkeypatch.setattr(build_windows, "_git_identity", lambda _root, _ref: "tree-sha")
+    monkeypatch.setattr(
+        build_windows.sbom,
+        "assert_environment_matches_lock",
+        lambda *_args, **_kwargs: {"matches": True},
+    )
+
+    def failed_audit(_python, path):
+        path.write_text('{"dependencies": [{"name": "synthetic-blocker"}]}', encoding="utf-8")
+        return 7
+
+    monkeypatch.setattr(build_windows.audit, "audit", failed_audit)
+    with pytest.raises(RuntimeError, match="pip-audit blocked"):
+        build_windows.build(
+            root,
+            output,
+            "1.0",
+            generated_at="2026-09-12T00:00:00Z",
+            lock=root / "constraints" / "commercial-build.txt",
+        )
+    status = json.loads(
+        (output / "qualification-evidence" / "build-status.json").read_text(encoding="utf-8")
+    )
+    assert status["status"] == "FAILED"
+    assert status["stages"]["environment_lock"]["status"] == "PASSED"
+    assert status["stages"]["vulnerability_audit"]["status"] == "FAILED"
+    assert (output / "qualification-evidence" / "pip-audit.json").is_file()
+
+
 def test_reuse_manifest_is_explicit_about_unresolved_rights() -> None:
     root = Path(__file__).resolve().parents[3]
     payload = json.loads((root / "third_party" / "reuse_manifest.json").read_text(encoding="utf-8"))
@@ -189,6 +251,8 @@ def test_wheel_contains_runtime_components_but_not_release_tooling(tmp_path: Pat
         names = archive.namelist()
     assert any(name.startswith("modules/operacao_local/") for name in names)
     assert any(name.startswith("modules/commercial_license/") for name in names)
+    assert any(name.startswith("profiles/normative/") and name.endswith(".json") for name in names)
+    assert any(name.startswith("profiles/institutions/") and name.endswith(".json") for name in names)
     assert not any(name.startswith("scripts/comercial/") for name in names)
     assert not any(name.startswith("packaging/comercial/") for name in names)
     assert not any(name.startswith("tests/") or name.lower().endswith((".pdf", ".ttf", ".otf")) for name in names)
@@ -198,6 +262,9 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir() -> None:
     root = Path(__file__).resolve().parents[3]
     spec = (root / "packaging" / "comercial" / "modelapro.spec").read_text(encoding="utf-8")
     assert 'rglob("*.py")' in spec
+    assert 'collect_data_files("profiles")' in spec
+    assert 'collect_submodules("pyhanko")' in spec
+    assert 'collect_submodules("pyhanko_certvalidator")' in spec
     assert "exclude_binaries=True" in spec
     assert "COLLECT(" in spec
     for buyer_document in (

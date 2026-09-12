@@ -36,6 +36,12 @@
       "purpose": "release vulnerability inventory",
       "runtime": false,
       "decision": "release build tool; nonzero result blocks unattended release"
+    },
+    {
+      "name": "pyHanko",
+      "purpose": "verification of embedded PDF signatures emitted/imported by the C03 document flow",
+      "runtime": true,
+      "decision": "C06 accepted the C03 dependency proposal at >=0.37.0,<0.38.0; exact platform pins and licence/native-file evidence are generated per artifact"
     }
   ],
   "other_fronts": {

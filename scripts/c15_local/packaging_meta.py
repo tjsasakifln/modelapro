@@ -35,6 +35,7 @@ REQUIRED_RUNTIME_IMPORTS = frozenset(
         "openpyxl",
         "xlrd",
         "cryptography",
+        "pyhanko",
     }
 )
 ANNOUNCED_FORMAT_ENGINES = {

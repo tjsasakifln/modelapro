@@ -37,6 +37,7 @@ dependencies = [
     "openpyxl>=3.1.2",
     "xlrd>=2.0.1",
     "cryptography>=42.0.0",
+    "pyHanko>=0.37.0,<0.38.0",
 ]
 
 [project.optional-dependencies]
@@ -78,6 +79,13 @@ packages = [
     "c15_local",
     "modules.operacao_local",
     "modules.commercial_license",
+    "modules.qualification_profile",
+    "modules.report_export",
+    "modules.report_presenter",
+    "modules.digital_signatures",
+    "profiles",
+    "profiles.normative",
+    "profiles.institutions",
 ]
 
 [tool.setuptools.package-dir]
@@ -86,6 +94,8 @@ c15_local = "scripts/c15_local"
 [tool.setuptools.package-data]
 modules = ["templates/*.html"]
 frontend = ["assets/*.css"]
+"profiles.normative" = ["*.json"]
+"profiles.institutions" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

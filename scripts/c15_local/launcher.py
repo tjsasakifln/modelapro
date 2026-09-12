@@ -289,6 +289,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, handle_signal)
 
     env = os.environ.copy()
     backend = subprocess.Popen(backend_cmd, env=env)

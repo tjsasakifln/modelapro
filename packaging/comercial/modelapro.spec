@@ -17,6 +17,7 @@ buyer_docs = (
 datas = (
     collect_data_files("frontend")
     + collect_data_files("modules")
+    + collect_data_files("profiles")
     + frontend_sources
     + [
         (str(root / "THIRD_PARTY_NOTICES.md"), "."),
@@ -31,6 +32,8 @@ hiddenimports = (
     collect_submodules("backend")
     + collect_submodules("frontend")
     + collect_submodules("modules")
+    + collect_submodules("pyhanko")
+    + collect_submodules("pyhanko_certvalidator")
     + ["c15_local.launcher"]
 )
 

@@ -51,7 +51,11 @@ def main(argv: list[str] | None = None) -> int:
             check=True,
         )
         freeze = _run([str(python), "-m", "pip", "freeze", "--all"])
-    direct_specs = commercial_build_specs(root) if args.commercial_build else runtime_dependency_specs(root)
+    direct_specs = (
+        runtime_dependency_specs(root) + commercial_build_specs(root)
+        if args.commercial_build
+        else runtime_dependency_specs(root)
+    )
     direct = ", ".join(sorted(requirement_name(spec) for spec in direct_specs))
     lines = [
         "# Locked from a clean venv. Update with:",

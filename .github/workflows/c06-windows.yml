@@ -1,0 +1,256 @@
+name: C06 Windows installed-product verification
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/c06-windows.yml"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "profiles/**"
+      - "modules/**"
+      - "backend/**"
+      - "frontend/**"
+      - "packaging/comercial/**"
+      - "scripts/c15_local/**"
+      - "scripts/comercial/operacao/**"
+      - "constraints/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c06-windows-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  installed-product:
+    name: Build, install, operate, update and restore (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      MODELA_SKIP_DOTENV: "1"
+      API_HOST: 127.0.0.1
+      API_PORT: "18765"
+      API_PUBLIC_URL: http://127.0.0.1:18765
+      FRONTEND_HOST: 127.0.0.1
+      FRONTEND_PORT: "18766"
+      CORS_ORIGINS: http://127.0.0.1:18766
+      MAX_CONCURRENT_JOBS: "1"
+      JOB_TIMEOUT_SECONDS: "360"
+
+    steps:
+      - name: Check out the commit selected by the event
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $inno = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6"
+          $inno | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Resolve an exact Windows build lock in a clean environment
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          $env:PYTHONPATH = "scripts"
+          $lock = Join-Path $env:RUNNER_TEMP "windows-py312-x64.txt"
+          python -m c15_local.update_constraints --commercial-build --output $lock
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "WINDOWS_LOCK=$lock" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install the exact build environment
+        shell: pwsh
+        run: |
+          python -m pip install -c $env:WINDOWS_LOCK ".[commercial-build]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "from scripts.comercial.operacao.sbom import assert_environment_matches_lock; import os,sys,pathlib; assert_environment_matches_lock(sys.executable, pathlib.Path(os.environ['WINDOWS_LOCK']))"
+
+      - name: Verify installed catalog and signature runtime before freezing
+        shell: pwsh
+        run: |
+          Push-Location $env:RUNNER_TEMP
+          try {
+            python -c "from modules.qualification_profile import known_profile_ids; from pyhanko.pdf_utils.reader import PdfFileReader; expected={'abnt-14653-2-custo-reedicao','abnt-14653-2-regressao-mercado','bb-meci-avaliacao-imovel-pf','bcb-res-4676-garantia-imobiliaria','caixa-cr-012-2026-avm-precificacao','susep-seguro-habitacional-dfi'}; actual=set(known_profile_ids()); assert actual == expected, (actual, expected)"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Record event and commit identities
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "c06-windows-evidence"
+          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+          $prHead = "${{ github.event.pull_request.head.sha }}"
+          if ([string]::IsNullOrWhiteSpace($prHead)) { $prHead = "${{ github.sha }}" }
+          $base = "${{ github.event.pull_request.base.sha }}"
+          if ([string]::IsNullOrWhiteSpace($base)) { $base = (git rev-parse HEAD^) }
+          $tree = (git rev-parse "HEAD^{tree}")
+          $parents = @((git show -s --format=%P HEAD).Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries))
+          $identity = [ordered]@{
+            schema_version = "MP-COM-CANDIDATE-IDENTITY/1"
+            event = "${{ github.event_name }}"
+            run_id = "${{ github.run_id }}"
+            run_attempt = "${{ github.run_attempt }}"
+            pr_head_sha = $prHead
+            base_sha = $base
+            tested_commit_sha = (git rev-parse HEAD)
+            tree_sha = $tree
+            tested_commit_parents = $parents
+            windows_lock_sha256 = (Get-FileHash $env:WINDOWS_LOCK -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          $identity | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $evidence "candidate-identity.json") -Encoding utf8
+          Copy-Item $env:WINDOWS_LOCK (Join-Path $evidence "windows-py312-x64.txt")
+          "C06_EVIDENCE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build the unsigned candidate bundle and installer
+        shell: pwsh
+        run: |
+          $build = Join-Path $env:RUNNER_TEMP "modelapro-build-b"
+          $generated = (Get-Date).ToUniversalTime().ToString("o")
+          python -m scripts.comercial.operacao.build_windows `
+            --root . `
+            --output $build `
+            --version "0.1.0-c06-b" `
+            --lock $env:WINDOWS_LOCK `
+            --generated-at $generated
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "C06_BUILD=$build" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build prior-label installer for update and rollback mechanics
+        shell: pwsh
+        run: |
+          $prior = Join-Path $env:RUNNER_TEMP "modelapro-installer-a"
+          New-Item -ItemType Directory -Path $prior -Force | Out-Null
+          iscc.exe "/O$prior" "/DAppVersion=0.1.0-c06-a" "/DBundleDir=$env:C06_BUILD\MODELA-PRO" "packaging\comercial\modelapro.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "C06_PRIOR=$prior" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install A into a clean per-user path
+        shell: pwsh
+        run: |
+          $install = Join-Path $env:RUNNER_TEMP "clean-user\MODELA-PRO"
+          New-Item -ItemType Directory -Path (Split-Path $install) -Force | Out-Null
+          $installer = Join-Path $env:C06_PRIOR "MODELA-PRO-0.1.0-c06-a-win64.exe"
+          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$install"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path (Join-Path $install "MODELA-PRO.exe"))) { throw "installed executable absent" }
+          "C06_INSTALL=$install" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Calculate, emit documents, save, reopen and back up on A
+        shell: pwsh
+        run: |
+          $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
+          $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
+          $backup = Join-Path $env:C06_EVIDENCE "modelapro-backup.zip"
+          python -m scripts.comercial.operacao.verify_windows_install `
+            --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
+            --evidence $env:C06_EVIDENCE `
+            --backup $backup `
+            --phase initial
+
+      - name: Update installed product to B and verify saved state
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:C06_BUILD "MODELA-PRO-0.1.0-c06-b-win64.exe"
+          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
+          $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
+          python -m scripts.comercial.operacao.verify_windows_install `
+            --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
+            --evidence $env:C06_EVIDENCE `
+            --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
+            --phase upgrade
+
+      - name: Return to A and restore the verified backup in a clean profile
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:C06_PRIOR "MODELA-PRO-0.1.0-c06-a-win64.exe"
+          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-restored"
+          $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
+          python -m scripts.comercial.operacao.verify_windows_install `
+            --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
+            --evidence $env:C06_EVIDENCE `
+            --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
+            --phase restore
+
+      - name: Uninstall without deleting the separate evidence profile
+        shell: pwsh
+        run: |
+          $uninstaller = Join-Path $env:C06_INSTALL "unins000.exe"
+          if (-not (Test-Path $uninstaller)) { throw "Inno Setup uninstaller absent" }
+          & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path (Join-Path $env:C06_INSTALL "MODELA-PRO.exe")) { throw "installed executable survived uninstall" }
+          if (-not (Test-Path (Join-Path $env:RUNNER_TEMP "profile-restored"))) { throw "uninstall removed user evidence profile" }
+          [ordered]@{
+            schema_version = "MP-COM-WINDOWS-UNINSTALL/1"
+            status = "PASSED"
+            installed_executable_removed = $true
+            separate_evidence_profile_preserved = $true
+          } | ConvertTo-Json | Set-Content (Join-Path $env:C06_EVIDENCE "uninstall.json") -Encoding utf8
+
+      - name: Record artifact hashes and scope limits
+        if: always()
+        shell: pwsh
+        run: |
+          $evidence = if ($env:C06_EVIDENCE) { $env:C06_EVIDENCE } else { Join-Path $env:RUNNER_TEMP "c06-windows-evidence" }
+          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+          if ($env:C06_BUILD -and (Test-Path $env:C06_BUILD)) { Copy-Item "$env:C06_BUILD\qualification-evidence\*" $evidence -Force }
+          $roots = @($env:C06_BUILD, $env:C06_PRIOR, $evidence) | Where-Object { $_ -and (Test-Path $_) }
+          $files = foreach ($root in $roots) {
+            Get-ChildItem $root -Recurse -File | ForEach-Object {
+              [ordered]@{
+                path = $_.FullName.Substring($root.Length).TrimStart('\')
+                root = (Split-Path $root -Leaf)
+                size = $_.Length
+                sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              }
+            }
+          }
+          $phasesPassed = $true
+          foreach ($phase in @("initial", "upgrade", "restore", "uninstall")) {
+            $phasePath = Join-Path $evidence "$phase.json"
+            if (-not (Test-Path $phasePath)) { $phasesPassed = $false; continue }
+            $phasePayload = Get-Content $phasePath -Raw | ConvertFrom-Json
+            if ($phasePayload.status -ne "PASSED") { $phasesPassed = $false }
+          }
+          [ordered]@{
+            schema_version = "MP-COM-WINDOWS-EVIDENCE/1"
+            workflow_conclusion = "derived_from_required_steps"
+            windows_distribution_verified = $phasesPassed
+            same_tree_version_transition = $true
+            migration_across_distinct_source_trees_verified = $false
+            installer_signing_status = "UNSIGNED"
+            synthetic_test_data = $true
+            professional_review = $false
+            institution_acceptance = $false
+            commercial_release_ready = $false
+            files = @($files)
+          } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $evidence "windows-evidence-index.json") -Encoding utf8
+
+      - name: Upload Windows evidence even when a required step fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c06-windows-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/c06-windows-evidence
+            ${{ runner.temp }}/modelapro-build-b/release-manifest.json
+            ${{ runner.temp }}/modelapro-build-b/MODELA-PRO-0.1.0-c06-b-win64.exe
+            ${{ runner.temp }}/modelapro-installer-a/MODELA-PRO-0.1.0-c06-a-win64.exe
+          if-no-files-found: warn
+          retention-days: 14

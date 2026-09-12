@@ -46,11 +46,27 @@
       "adaptations": "none",
       "update_owner": "C04 release maintenance",
       "verification": "non-zero audit exits block release pending reviewed mitigation"
+    },
+    {
+      "component": "pyHanko",
+      "origin_url": "https://github.com/MatthiasValvekens/pyHanko",
+      "tag_or_release": "v0.37.0",
+      "source_sha256": "79046d8057edec5fcc61aa66dc1041262f5248eec473c33a89905a0a661eed05 (PyPI wheel selected and inspected by C03)",
+      "selected_version_constraint": "pyproject.toml: pyHanko>=0.37.0,<0.38.0; exact platform version is recorded by the release lock/SBOM",
+      "spdx": "MIT (upstream LICENSE retained by installed-distribution SBOM hash)",
+      "use": "runtime verification of embedded PDF signatures; dependency, no copied source and no private signing key",
+      "files_or_functions": [
+        "pyhanko.pdf_utils.reader.PdfFileReader",
+        "pyhanko.sign.validation.validate_pdf_signature"
+      ],
+      "adaptations": "none",
+      "update_owner": "C06 composition / release maintenance",
+      "verification": "C03 signature/tamper tests plus final Windows installed-distribution and native-file SBOM evidence"
     }
   ],
   "blocked": [
     "Repository/contributor distribution rights require an authorised ownership/licence decision.",
-    "Linux build-environment SBOM/audit exist, but 16 metadata licences remain NOASSERTION and require review.",
+    "NOASSERTION metadata remains a review queue; the C06 SBOM now hashes installed LICENSE/NOTICE files and native binaries so each final-artifact unknown can be investigated without guessing.",
     "The actual Windows bundle/installer SBOM, hashes, signatures and notices do not exist until the authorised Windows build."
   ]
 }

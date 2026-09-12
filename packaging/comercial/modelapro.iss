@@ -10,6 +10,7 @@
 
 [Setup]
 AppName=MODELA PRO
+AppId={{20A84FBB-63D6-4FE1-AB36-EFE26C869C06}
 AppVersion={#AppVersion}
 AppPublisher=CONFENGE
 DefaultDirName={autopf}\MODELA PRO
@@ -20,6 +21,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 UninstallDisplayName=MODELA PRO
+CloseApplications=yes
+RestartApplications=no
 
 [Files]
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion

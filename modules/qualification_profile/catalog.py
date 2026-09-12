@@ -1,4 +1,4 @@
-"""Loader for the qualification-profile catalog (profiles/ on disk).
+"""Loader for the qualification-profile catalog shipped with the product.
 
 C05 owns the catalog and the rule; C01 validates/resolves the profile and
 composes the context; C02 only CHOOSES a known profile; C03 presents the
@@ -8,9 +8,10 @@ qualified result. No consumer writes rules here.
 from __future__ import annotations
 
 import hashlib
+import importlib.resources
 import json
-from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from importlib.resources.abc import Traversable
+from typing import Any, Dict, List, Mapping
 
 from .schema import (
     INSTITUTIONAL_ACTS,
@@ -19,19 +20,46 @@ from .schema import (
     REQUIRED_PROFILE_FIELDS,
 )
 
-#: Repository root, resolved from this file (modules/qualification_profile/).
-_ROOT = Path(__file__).resolve().parents[2]
-NORMATIVE_DIR = _ROOT / "profiles" / "normative"
-INSTITUTIONS_DIR = _ROOT / "profiles" / "institutions"
+CATALOG_PACKAGE = "profiles"
+CATALOG_GROUPS = ("normative", "institutions")
+REQUEST_IDENTITY_FIELDS = (
+    "version",
+    "source_set_sha256",
+    "purpose",
+    "value_basis",
+    "method",
+    "asset_scope",
+    "recipient_id",
+)
 
 
 class ProfileError(ValueError):
     """Structured error for a malformed or unknown profile."""
 
 
-def _read_json(path: Path) -> Dict[str, Any]:
-    with path.open(encoding="utf-8") as fh:
-        return json.load(fh)
+def _resource_root() -> Traversable:
+    """Return the installed catalog root, failing closed when it is absent."""
+    try:
+        root = importlib.resources.files(CATALOG_PACKAGE)
+    except (ModuleNotFoundError, TypeError) as exc:
+        raise ProfileError(
+            "catálogo de perfis não está instalado; emissão qualificada indisponível"
+        ) from exc
+    if not root.is_dir():
+        raise ProfileError(
+            "catálogo de perfis instalado é inválido; emissão qualificada indisponível"
+        )
+    return root
+
+
+def _read_json(resource: Traversable) -> Dict[str, Any]:
+    try:
+        payload = json.loads(resource.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ProfileError(f"perfil ilegível ou inválido: {resource}") from exc
+    if not isinstance(payload, dict):
+        raise ProfileError(f"perfil deve ser objeto JSON: {resource}")
+    return payload
 
 
 def source_set_sha256(sources: List[Mapping[str, Any]]) -> str:
@@ -54,20 +82,32 @@ def source_set_sha256(sources: List[Mapping[str, Any]]) -> str:
 
 
 def load_catalog() -> Dict[str, Dict[str, Any]]:
-    """Every profile on disk, keyed by id. Missing directories yield {}."""
+    """Load every packaged profile, keyed by id; absence is a hard error."""
     catalog: Dict[str, Dict[str, Any]] = {}
-    for directory in (NORMATIVE_DIR, INSTITUTIONS_DIR):
+    root = _resource_root()
+    for group in CATALOG_GROUPS:
+        directory = root.joinpath(group)
         if not directory.is_dir():
-            continue
-        for path in sorted(directory.glob("*.json")):
-            data = _read_json(path)
+            raise ProfileError(
+                f"grupo obrigatório do catálogo ausente: profiles/{group}"
+            )
+        resources = sorted(
+            (item for item in directory.iterdir() if item.is_file() and item.name.endswith(".json")),
+            key=lambda item: item.name,
+        )
+        if not resources:
+            raise ProfileError(f"grupo obrigatório do catálogo vazio: profiles/{group}")
+        for resource in resources:
+            data = _read_json(resource)
             pid = data.get("id")
             if not pid:
-                raise ProfileError(f"perfil sem id: {path}")
+                raise ProfileError(f"perfil sem id: profiles/{group}/{resource.name}")
             if pid in catalog:
                 raise ProfileError(f"id de perfil duplicado: {pid!r}")
-            data["_path"] = str(path.relative_to(_ROOT))
+            data["_path"] = f"profiles/{group}/{resource.name}"
             catalog[pid] = data
+    if not catalog:
+        raise ProfileError("catálogo de perfis instalado está vazio")
     return catalog
 
 
@@ -135,9 +175,30 @@ def resolve_profile(profile: Mapping[str, Any]) -> Dict[str, Any]:
             f"calculado {computed!r}; o conjunto de fontes mudou sem atualizar o perfil."
         )
 
+    mismatches = {}
+    for field in REQUEST_IDENTITY_FIELDS:
+        requested = profile.get(field)
+        if requested is None:
+            continue
+        expected = computed if field == "source_set_sha256" else known.get(field)
+        if requested != expected:
+            mismatches[field] = {"requested": requested, "catalog": expected}
+    if mismatches:
+        return {
+            "id": pid,
+            "state": PROFILE_UNKNOWN,
+            "resolved": False,
+            "catalog_version": catalog_version,
+            "mismatches": mismatches,
+            "detail": (
+                f"Referência do perfil {pid!r} diverge do catálogo nos campos "
+                f"{sorted(mismatches)}. Identidade normativa e semântica não é coercível."
+            ),
+        }
+
     resolved = dict(known)
     resolved["resolved"] = True
     resolved["state"] = state
     resolved["source_set_sha256"] = computed
-    resolved["recipient_id"] = profile.get("recipient_id") or known.get("recipient_id")
+    resolved["recipient_id"] = known.get("recipient_id")
     return resolved
