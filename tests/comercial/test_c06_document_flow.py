@@ -398,7 +398,8 @@ def test_bb_output_strings_and_test_certificate_cannot_claim_icp_conformance():
     assert manifest["items"] == {}
     assessed = assess_output_conformance(bb, manifest)
     by_id = {item["rule_id"]: item for item in assessed["rule_results"]}
-    assert by_id["bb.guiar.assinatura_icp"]["status"] == "unsupported"
+    assert by_id["bb.guiar.assinatura_icp"]["status"] == "pending_manual"
+    assert assessed["awaiting_signature"] == ["bb.guiar.assinatura_icp"]
     assert assessed["would_be_accepted_without_reservations"] is False
 
 

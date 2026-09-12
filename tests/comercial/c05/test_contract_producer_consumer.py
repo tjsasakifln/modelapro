@@ -289,6 +289,7 @@ def test_two_pass_protocol_review_then_signature(grau_iii_assessment):
             "motive": "revisao tecnica do modelo e do enquadramento",
             "version": "1.4.2",
             "fingerprint": fingerprint,
+            "report_content_fingerprint": "a" * 64,
         }],
     )
     second = assess_qualification(with_review, PROFILE_REF)
@@ -379,6 +380,7 @@ def test_consumer_renders_grade_and_release_from_the_block_alone(grau_iii_assess
                 "motive": "revisao tecnica",
                 "version": "1.4.2",
                 "fingerprint": fingerprint,
+                "report_content_fingerprint": "a" * 64,
             }],
         ),
         PROFILE_REF,

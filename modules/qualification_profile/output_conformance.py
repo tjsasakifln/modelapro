@@ -112,6 +112,7 @@ def assess_output_conformance(
     blocking: List[Dict[str, Any]] = []
     product_gaps: List[Dict[str, Any]] = []
     awaiting_human: List[str] = []
+    awaiting_signature: List[str] = []
     not_applicable: List[str] = []
 
     for req in requirements:
@@ -165,6 +166,23 @@ def assess_output_conformance(
         elif provided:
             status = RULE_PASSED
             explanation = req["requirement"]
+        elif rid == "bb.guiar.assinatura_icp" and baseline == STATE_EMITTED:
+            status = RULE_PENDING_MANUAL
+            explanation = (
+                f"{req['requirement']} — a via de importação e verificação existe, "
+                "mas os bytes assinados e a cadeia de confiança ainda não foram "
+                "fornecidos nesta etapa. A pendência permite preparar os bytes para "
+                "assinatura, mas impede o pacote final assinado."
+            )
+            awaiting_signature.append(rid)
+            blocking.append({
+                "code": "output_requirement_pending_signature",
+                "requirement_id": rid,
+                "clause": req["clause"],
+                "detail": explanation,
+                "owner": "profissional responsável / cadeia de confiança configurada",
+                "stage": "post_review_external_signature",
+            })
         elif baseline == STATE_HUMAN_INPUT or req["kind"] == KIND_HUMAN:
             status = RULE_PENDING_MANUAL
             explanation = (
@@ -225,6 +243,7 @@ def assess_output_conformance(
         "blocking": blocking,
         "product_gaps": product_gaps,
         "awaiting_human": awaiting_human,
+        "awaiting_signature": awaiting_signature,
         "not_applicable": not_applicable,
         "would_be_accepted_without_reservations": not blocking and applicable > 0,
         "note": (

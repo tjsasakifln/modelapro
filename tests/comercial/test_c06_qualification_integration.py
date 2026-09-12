@@ -270,6 +270,7 @@ def test_result_report_and_signed_byte_fingerprints_have_distinct_roles():
         "motive": "TESTE: revisão técnica sintética",
         "version": "C06/TEST",
         "fingerprint": result_fingerprint,
+        "report_content_fingerprint": report_fingerprint,
     }
     signature = {
         "integrity_verified": True,
@@ -299,7 +300,7 @@ def test_result_report_and_signed_byte_fingerprints_have_distinct_roles():
     )
     assert changed_report["result_fingerprint"] == result_fingerprint
     assert changed_report["case_release_status"] == "review_required"
-    assert "signature_stale" in {
+    assert "review_invalidated_by_material_change" in {
         blocker["code"] for blocker in changed_report["release_blockers"]
     }
 
@@ -328,6 +329,7 @@ def test_document_route_can_reassess_without_recalculating_the_normative_grade()
         "motive": "TESTE: revisão após composição documental",
         "version": "C06/TEST",
         "fingerprint": document_pass["result_fingerprint"],
+        "report_content_fingerprint": "a" * 64,
     }
     reviewed = reassess_qualification_context(
         snapshot=snapshot,
