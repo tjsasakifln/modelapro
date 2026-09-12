@@ -246,7 +246,8 @@ projects = ProjectStore(store.root)
 runner = LocalTaskRunner(store, max_workers=1, recover_abandoned=False)
 bind_runtime(job_store=store, project_store=projects, task_runner=runner, reset_submissions=True)
 frozen = json.loads(open(frozen_path, encoding="utf-8").read())
-client = TestClient(app)
+from modules.operacao_local.runtime import local_client_headers
+client = TestClient(app, headers=local_client_headers())
 saved = client.post(
     "/projects/p01-a02/revisions",
     content=dumps_strict(frozen),
@@ -279,7 +280,8 @@ store = JobStore.configure_default(root, recover_abandoned=True)
 projects = ProjectStore(store.root)
 runner = LocalTaskRunner(store, max_workers=1, recover_abandoned=False)
 bind_runtime(job_store=store, project_store=projects, task_runner=runner, reset_submissions=True)
-client = TestClient(app)
+from modules.operacao_local.runtime import local_client_headers
+client = TestClient(app, headers=local_client_headers())
 loaded = client.get("/projects/p01-a02")
 assert loaded.status_code == 200, loaded.text
 frozen = loaded.json()["revision"]

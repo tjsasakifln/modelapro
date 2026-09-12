@@ -123,7 +123,7 @@ def test_gold_job_twice_and_inapto_refusal(tmp_path):
     assert token_job.status_code == 202
     job_id = token_job.json()["job_id"]
     _wait(client, job_id)
-    bad_token = client.get(f"/jobs/{job_id}/result", params={"access_token": "not-the-token"})
+    bad_token = client.get(f"/jobs/{job_id}/result", headers={"X-Job-Token": "not-the-token"})
     log_lines.append(f"bad_token GET {bad_token.status_code}")
     assert bad_token.status_code == 403
     codes = {i.get("code") for i in (bad_token.json().get("issues") or [])}
