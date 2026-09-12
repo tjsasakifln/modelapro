@@ -211,8 +211,8 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
         timeout=45000
     )
     result_region = page.get_by_role("region", name="Valor da avaliação", exact=True)
-    current_job = page.get_by_text(
-        re.compile(r"^Identificador do trabalho: job_[a-f0-9]+$")
+    current_job = page.locator("p").filter(
+        has_text=re.compile(r"^Identificador do trabalho: job_[a-f0-9]+$")
     ).first
     previous_job_text = None
     try:
@@ -239,13 +239,23 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
     expect(execute).to_be_enabled(timeout=45000)
     execute.click()
 
-    expect(current_job).to_be_visible(timeout=90000)
-    if previous_job_text is not None:
-        expect(current_job).not_to_have_text(previous_job_text, timeout=90000)
-    current_job_text = current_job.inner_text()
-    current_job_match = re.search(r"(job_[a-f0-9]+)", current_job_text)
-    assert current_job_match is not None, current_job_text
-    job_id = current_job_match.group(1)
+    accepted = page.locator("p").filter(
+        has_text=re.compile(r"^Trabalho aceito: job_[a-f0-9]+\.")
+    ).first
+    try:
+        expect(accepted).to_be_visible(timeout=15000)
+        submission_text = accepted.inner_text()
+    except AssertionError:
+        expect(current_job).to_be_visible(timeout=90000)
+        if previous_job_text is not None:
+            expect(current_job).not_to_have_text(previous_job_text, timeout=90000)
+        submission_text = current_job.inner_text()
+    submitted_job_match = re.search(r"(job_[a-f0-9]+)", submission_text)
+    assert submitted_job_match is not None, submission_text
+    job_id = submitted_job_match.group(1)
+    current_job = page.locator("p").filter(
+        has_text=re.compile(rf"^Identificador do trabalho: {re.escape(job_id)}$")
+    ).first
     stale_result = page.get_by_text(
         "O arquivo mudou. O resultado abaixo pertence à versão anterior.", exact=True
     )
