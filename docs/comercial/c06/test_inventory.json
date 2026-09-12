@@ -12,7 +12,10 @@
     "correction_notice": "Revision 2. Revision 1 was stamped 65cb121 but described .github/workflows/c15-ci.yml as it stood at 65cb121's PARENT 8d66c79: the tests were re-collected against the new HEAD, the workflow file was not re-read. That produced a false high-severity finding (FIND-04) and two false statements about the p04-harness job. Every claim in this revision was re-derived against .github/workflows/c15-ci.yml, scripts/c15_local/aggregate_required.py and scripts/pro_workflow/run.py as they are at c9ab4dc, every line citation was re-derived with grep -n, and every node id was verified to collect with `PYTHONPATH= python3 -m pytest \"<nodeid>\" --collect-only -q`. Findings the tree has since fixed are marked status RESOLVED with the fixing commit; none was deleted.",
     "ci_claims_basis": "The CI statements in this file are read from the workflow FILE at c9ab4dc. No GitHub Actions run was observed and none is claimed; the workflow's own comment cites run 34667257642, which this document did not open.",
     "nodeid_convention": "Every node id in this file was verified to collect. Class-based tests carry their class segment, because a two-segment id inside a class collects zero. An entry written as a bare file path means the whole module; the parenthesised count is the number of cases that module collected at be464a2.",
-    "head_drift_during_authoring": "HEAD advanced 8d66c79 -> 65cb121 -> a331606 -> 815251f -> be464a2 -> d2efd11 -> 10e7c1d -> c9ab4dc while these two documents were written, by sibling C06 agents in this same worktree. Every line number here is as of c9ab4dc plus the working-tree modifications listed under collected_total.git_status_at_measurement."
+    "head_drift_during_authoring": "HEAD advanced 8d66c79 -> 65cb121 -> a331606 -> 815251f -> be464a2 -> d2efd11 -> 10e7c1d -> c9ab4dc while these two documents were written, by sibling C06 agents in this same worktree. Every line number here is as of c9ab4dc plus the working-tree modifications listed under collected_total.git_status_at_measurement.",
+    "historical_only": true,
+    "current_requirements": "integration-matrix.md",
+    "current_exact_obligations": "mandatory-test-nodeids.json"
   },
   "collected_total": {
     "value": 894,

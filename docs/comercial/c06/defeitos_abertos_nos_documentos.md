@@ -1,5 +1,13 @@
 # Registro de verificação adversarial de C06
 
+## Estado deste registro
+
+Este documento preserva descobertas e hipóteses históricas. As pendências
+atuais e os consumidores compostos estão em [integration-matrix.md](integration-matrix.md);
+as seções abaixo não reabrem defeitos já corrigidos nem aprovam a candidata.
+
+## Histórico
+
 **Este arquivo já disse o contrário. A correção está registrada, não apagada.**
 
 Uma revisão anterior deste documento afirmava que a remediação de quatro

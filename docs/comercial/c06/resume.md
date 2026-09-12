@@ -1,6 +1,15 @@
 # C06 — handoff retomável
 
-## Estado corrente da retomada — 2026-09-12
+## Retomada em nova sessão — checkpoint 2026-09-12 20:30 UTC
+
+**Leia primeiro [handoff-session-20260912.md](handoff-session-20260912.md).**
+Ele registra HEAD técnico local `cff68a2`, HEAD publicado `c60fbeb`, commits e
+patches isolados ainda pendentes, falha Windows e roteiro verificável de continuidade.
+Este é o ponto de retomada atual; as seções abaixo são histórico e não devem
+reativar bloqueios de produtores não commitados nem reutilizar runs antigos como aceite.
+O handoff foi solicitado pelo usuário; a integração e a liberação não foram declaradas concluídas.
+
+## Histórico intermediário da retomada — 2026-09-12
 
 As cinco frentes C01–C05 publicadas já foram incorporadas nesta mesma PR #20.
 Ancestralidade/propriedade: [composition-20260912.md](composition-20260912.md).

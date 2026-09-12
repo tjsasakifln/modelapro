@@ -1,5 +1,23 @@
 # MP-COM-20260912/C06 — Inventory of applicable requirements and covering tests
 
+## Inventário da composição corrente
+
+O mapeamento de requisitos é [integration-matrix.md](integration-matrix.md).
+A lista exata de obrigações é `mandatory-test-nodeids.json`, gerada por
+`python -m c15_local.test_inventory --write` no ambiente Linux com o lock dev.
+`python -m c15_local.test_inventory` recoleta e compara a lista integral; o CI
+executa a comparação antes da suíte e o agregador compara novamente com
+`collection.json` e JUnit. Remoção, adição sem registro, troca com mesma contagem
+e duplicação reprovam. Atualizações exigem revisão do diff versionado.
+A coleta prova seleção, não execução: somente os artefatos da candidata
+identificada na matriz podem demonstrar os resultados.
+
+## Inventário histórico anterior à composição
+
+As contagens, ausências, findings e HEAD abaixo são o registro histórico
+medido em `c9ab4dc`; não descrevem o produto composto atual.
+
+
 Item A of the C06 implementation. Read-only analysis of the worktree; no test was
 modified to produce this document.
 
