@@ -14,6 +14,10 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
     if not client.job_id or snapshot is None:
         st.info("Calcule ou reabra um trabalho para preparar os documentos.")
         return {}
+    dossier_state = ((client.last_status or {}).get("artifact_states") or {}).get("evidence_bundle.zip") or {}
+    if dossier_state.get("state") in {"pending", "running"}:
+        st.info("O cálculo está disponível; a preparação do dossiê ainda está em andamento. Use Atualizar estado.")
+        return {}
     st.caption("As decisões são persistidas no trabalho e vinculadas ao cálculo e ao conteúdo. Nenhum ato institucional é executado aqui.")
     namespace = f"documents_{client.job_id}"
     try:
@@ -43,6 +47,7 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
                                                     "authorized_for_report": "true",
                                                     "requirement_ids": json.dumps(requirement_ids)})
                     st.session_state.pop(f"{namespace}_signing_request", None)
+                    client.get_result()
                     st.json(stored)
                     st.info("Bytes arquivados com hash. Gere novamente os documentos para incorporar o conteúdo e revalidar revisões.")
         with st.expander("Completar conteúdo e anexos do laudo"), st.form(f"{namespace}_content_form"):
@@ -100,7 +105,8 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
                 client.get_result()
                 st.info("Verificação concluída pelo serviço. Consulte o resultado; integridade não é aprovação técnica.")
         st.json(state)
-        for artifact in state.get("artifacts") or []:
+        artifact_names = set(status.get("artifacts") or {}) | set(state.get("artifacts") or {})
+        for artifact in sorted(artifact_names):
             name = artifact.get("name") if isinstance(artifact, dict) else str(artifact)
             if name and st.button(f"Preparar download: {name}", key=f"{namespace}_prepare_{name}"):
                 st.download_button(f"Baixar {name}", client.get_artifact(name), name,

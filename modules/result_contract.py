@@ -94,6 +94,7 @@ ALLOWED_ARTIFACT_NAMES = frozenset(
         "signature_request.json",
         "signed_report.pdf",
         "submission.zip",
+        "document_history.zip",
     }
 )
 

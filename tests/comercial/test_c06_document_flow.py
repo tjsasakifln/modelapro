@@ -241,6 +241,9 @@ def _review_to_signature_request(store, job_id):
     _attach_test_document(store, job_id)
     generated = generate_documents(store, job_id)
     assert generated["case_release_status"] == "review_required"
+    with zipfile.ZipFile(io.BytesIO(store.get_artifact(job_id, "evidence_bundle.zip"))) as dossier:
+        assert any(dossier.read(name) == b"DOCUMENTO SINTETICO DE TESTE - SEM VALIDADE EXTERNA"
+                   for name in dossier.namelist() if name.startswith("artifacts/documents/"))
     reviewed = record_review(
         store,
         job_id,
@@ -303,6 +306,34 @@ def test_real_product_emits_equivalent_documents_dossier_and_test_signature(
         assert manifest["completeness_status"] == "complete"
     submission = store.get_artifact(job_id, "submission.zip")
     assert verify_submission_package(submission)["ok"] is True
+    regenerated = generate_documents(store, job_id, report_fields={
+        "property_characterization": "TESTE: conteúdo material alterado após a assinatura",
+        "synthetic_test_only": False,
+    })
+    assert regenerated["document_state"]["is_final"] is False
+    assert regenerated["document_state"]["synthetic_test_only"] is True
+    assert store.get_artifact(job_id, "signed_report.pdf") is None
+    assert store.get_artifact(job_id, "signature_request.json") is None
+    assert store.get_artifact(job_id, "submission.zip") is None
+    with zipfile.ZipFile(io.BytesIO(store.get_artifact(job_id, "document_history.zip"))) as history:
+        assert any(history.read(name) == signed for name in history.namelist() if name.endswith("/signed_report.pdf"))
+        assert any(history.read(name) == submission for name in history.namelist() if name.endswith("/submission.zip"))
+
+
+def test_signature_validation_failure_does_not_publish_partial_state(tmp_path, real_worker_product):
+    store, jid = _clone_product(tmp_path, real_worker_product)
+    _request, unsigned = _review_to_signature_request(store, jid)
+    signed, validation = _sign_with_test_certificate(unsigned)
+    store.save_artifact(jid, "report.docx", b"TESTE: arquivo adulterado, nao e DOCX")
+    before_snapshot = store.get_snapshot(jid)
+    names = ["report.pdf", "report.docx", "document_state.json", "evidence_bundle.zip", "signature_request.json"]
+    before = {name: store.get_artifact(jid, name) for name in names}
+    with pytest.raises((DocumentWorkflowError, ValueError)):
+        import_signed_report(store, jid, signed_pdf=signed, validation_context=validation)
+    assert store.get_snapshot(jid) == before_snapshot
+    assert {name: store.get_artifact(jid, name) for name in names} == before
+    assert store.get_artifact(jid, "signed_report.pdf") is None
+    assert store.get_artifact(jid, "submission.zip") is None
 
 
 def test_missing_document_and_violated_rule_remain_blocking(tmp_path, real_worker_product):

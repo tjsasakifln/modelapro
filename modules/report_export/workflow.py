@@ -11,6 +11,8 @@ import hashlib
 import copy
 import json
 import re
+import io
+import zipfile
 from functools import wraps
 from collections.abc import Mapping
 from typing import Any, Dict, Optional
@@ -49,6 +51,31 @@ def _serialized(operation):
         with store._lock:
             return operation(store, *args, **kwargs)
     return run
+
+
+def _archive_current_documents(store, job_id, *, retire_unsigned=False):
+    """Retain a byte-exact historical generation before invalidating its names."""
+    names = ["report.pdf", "report.docx", "report_context.json", "document_state.json",
+             "signature_request.json", "signed_report.pdf", "submission.zip", "evidence_bundle.zip"]
+    current = {name: raw for name in names if (raw := store.get_artifact(job_id, name)) is not None}
+    if not current:
+        return
+    current["snapshot.json"] = canonical_json(store.get_snapshot(job_id)).encode("utf-8")
+    generation = _sha(canonical_json({name: _sha(raw) for name, raw in current.items()}).encode())
+    previous = store.get_artifact(job_id, "document_history.zip")
+    output = io.BytesIO(previous or b"")
+    with zipfile.ZipFile(output, "a" if previous else "w", zipfile.ZIP_DEFLATED) as history:
+        existing = set(history.namelist())
+        for name, raw in current.items():
+            target = f"{generation}/{name}"
+            if target not in existing:
+                history.writestr(target, raw)
+    store.save_artifact(job_id, "document_history.zip", output.getvalue())
+    retired = ["signature_request.json", "signed_report.pdf", "submission.zip"]
+    if retire_unsigned:
+        retired += ["report.pdf", "report.docx"]
+    for name in retired:
+        store.retire_artifact(job_id, name)
 
 
 def _load_json_artifact(store: Any, job_id: str, name: str, *, required: bool = True) -> Dict[str, Any]:
@@ -92,6 +119,7 @@ def _report_context(store: Any, job_id: str) -> Dict[str, Any]:
         files.append(item)
     if any(item.get("synthetic_test_only") for item in files):
         context["synthetic_test_only"] = True
+    context["documentary_files"] = files
     if files:
         context["documentary_files"] = files
         context["documents"] = [
@@ -161,6 +189,7 @@ def store_document_attachment(
             status_code=400,
         )
     stored_name = f"attachment-{digest[:20]}-{safe}"
+    _archive_current_documents(store, job_id, retire_unsigned=True)
     store.save_artifact(job_id, stored_name, content)
     registry = _load_json_artifact(store, job_id, "document_attachments.json", required=False)
     items = [dict(item) for item in registry.get("items") or [] if isinstance(item, Mapping)]
@@ -185,6 +214,21 @@ def store_document_attachment(
         "document_attachments.json",
         {"schema_version": "MP-DOCUMENT-ATTACHMENTS/1", "items": items},
     )
+    job, snapshot, normative = _job_inputs(store, job_id)
+    context = _report_context(store, job_id)
+    manifest = build_output_manifest(snapshot, context)
+    qctx = (snapshot.get("provenance") or {}).get("qualification_context") or {}
+    snapshot = _reassess(snapshot, job.get("request_spec") or {}, normative,
+                         report_context=context, output_manifest=manifest,
+                         review_events=list(qctx.get("review_events") or []), signature=None)
+    store.save_snapshot(job_id, snapshot)
+    _save_json(store, job_id, "output_manifest.json", manifest)
+    state = assess_document_state(snapshot, context)
+    _save_json(store, job_id, "document_state.json", {
+        "schema_version": "MP-DOCUMENTS/1", "job_id": job_id,
+        "case_release_status": state["case_release_status"], "document_state": state,
+        "regeneration_required": True,
+    })
     return {"schema_version": "MP-DOCUMENT-ATTACHMENT/1", **entry}
 
 
@@ -230,6 +274,8 @@ def _reassess(
         verified.pop(rid, None)
         matches = [item for item in report_context.get("documentary_files") or []
                    if item.get("authorized_for_report") and item.get("attachment_state") == "available"
+                   and isinstance(item.get("bytes"), (bytes, bytearray))
+                   and _sha(bytes(item["bytes"])) == item.get("sha256")
                    and (rid in (item.get("requirement_ids") or [])
                         or (isinstance(declared.get(rid), str) and declared[rid] == item.get("source")))]
         if matches:
@@ -332,6 +378,8 @@ def generate_documents(
         request_spec=request_spec,
         snapshot=snapshot,
     )
+    # JSON input cannot manufacture attachment bytes or replace the registry.
+    context["documentary_files"] = persisted_context.get("documentary_files") or []
     output_manifest = build_output_manifest(snapshot, context)
     current_qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
     snapshot = _reassess(
@@ -350,6 +398,7 @@ def generate_documents(
         store, job_id, snapshot=snapshot, pdf=pdf, docx=docx,
         documentary_files=context.get("documentary_files") or [], persist=False,
     )
+    _archive_current_documents(store, job_id)
     store.save_snapshot(job_id, snapshot)
     # Persist only JSON-safe metadata. Exact attachment bytes stay in their
     # own immutable artifact and are reloaded by digest for later stages.
@@ -433,6 +482,7 @@ def record_review(
         store, job_id, snapshot=snapshot, pdf=pdf, docx=docx,
         documentary_files=context.get("documentary_files") or [], persist=False,
     )
+    _archive_current_documents(store, job_id)
     store.save_snapshot(job_id, snapshot)
     _save_json(store, job_id, "report_context.json", _json_value(context))
     store.save_artifact(job_id, "report.pdf", pdf)
@@ -467,6 +517,20 @@ def create_signature_request(store: Any, job_id: str, *, revision_id: str) -> Di
     latest = reviews[-1] if reviews else {}
     if not revision_id or revision_id != latest.get("version"):
         raise DocumentWorkflowError("SIGNATURE_REVISION_MISMATCH", "signature must reference the current approved review")
+    docx = store.get_artifact(job_id, "report.docx")
+    if docx is None:
+        raise DocumentWorkflowError("DOCUMENT_ARTIFACT_MISSING", "controlled DOCX is required before signature export")
+    try:
+        preflight = build_submission_package(
+            snapshot, context, pdf_bytes=pdf,
+            docx_bytes=docx,
+            dossier_bytes=store.get_artifact(job_id, "evidence_bundle.zip"),
+            requirement_map=_requirement_map(snapshot),
+        )
+        if not verify_submission_package(preflight).get("ok"):
+            raise ValueError("unsigned package consistency failed")
+    except ValueError as exc:
+        raise DocumentWorkflowError("SIGNATURE_EXPORT_INCONSISTENT", str(exc)) from exc
     profile_id = str((state.get("profile") or {}).get("id") or "")
     request = prepare_signature_request(
         pdf,
@@ -623,6 +687,7 @@ def get_document_status(store: Any, job_id: str) -> Dict[str, Any]:
                 "signature_request.json",
                 "signed_report.pdf",
                 "submission.zip",
+                "document_history.zip",
             ],
         ),
     }

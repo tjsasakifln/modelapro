@@ -1213,6 +1213,10 @@ class JobStore:
         return relpath
 
     def get_artifact(self, job_id: str, name: str) -> Optional[bytes]:
+        with self._lock:
+            return self._get_artifact_locked(job_id, name)
+
+    def _get_artifact_locked(self, job_id: str, name: str) -> Optional[bytes]:
         job = self.get(job_id)
         if job is None:
             return None
@@ -1228,6 +1232,24 @@ class JobStore:
         except ValueError as exc:
             raise PathEscapeError("artifact path escapes job directory") from exc
         return path.read_bytes()
+
+    def retire_artifact(self, job_id: str, name: str) -> None:
+        """Recoverably move superseded bytes out of the current artifact name."""
+        with self._lock:
+            raw = self.get_artifact(job_id, name)
+            if raw is None:
+                return
+            import hashlib
+            digest = hashlib.sha256(raw).hexdigest()
+            archived_name = f"history-{digest}-{name}"
+            self.save_artifact(job_id, archived_name, raw)
+            source = self.root / "jobs" / safe_id_component(job_id, label="job_id") / "artifacts" / name
+            destination = source.parent / archived_name
+            source.replace(destination)
+            self.patch_record(job_id, {"artifact_states": {name: {"state": "failed", "error": {
+                "code": "DOCUMENT_SUPERSEDED", "message": "Historical bytes preserved in document_history.zip",
+                "severity": "warning", "origin": "c06.document_history",
+            }}}})
 
     def patch_record(
         self,
