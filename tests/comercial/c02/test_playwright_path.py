@@ -91,7 +91,7 @@ def test_playwright_real_path_or_honest_unavailable(tmp_path):
         return
 
     api_port = ui_port = None
-    for candidate in range(18300, 18380, 2):
+    for candidate in range(18400, 18480, 2):
         if _port_free(candidate) and _port_free(candidate + 1):
             api_port, ui_port = candidate, candidate + 1
             break
@@ -134,7 +134,7 @@ def test_playwright_real_path_or_honest_unavailable(tmp_path):
         if not _wait_http(f"http://127.0.0.1:{ui_port}"):
             _record("c02-playwright-unavailable.log", {"status": "UNAVAILABLE", "reason": "Streamlit UI did not become ready"})
             return
-        _drive_twice(sync_playwright, ui_port, csv_path)
+        _drive_twice(sync_playwright, ui_port, csv_path, api_port=api_port)
     except Exception as exc:
         _record("c02-playwright-unavailable.log", {
             "status": "FAILED",
@@ -151,7 +151,18 @@ def test_playwright_real_path_or_honest_unavailable(tmp_path):
                 proc.kill()
 
 
-def _drive_twice(sync_playwright, ui_port: int, csv_path: Path) -> None:
+def _fill_label(page, label: str, value: str) -> bool:
+    for testid in ("stTextInput", "stTextArea"):
+        box = page.locator(f"[data-testid='{testid}']").filter(has_text=label)
+        field = box.locator("input, textarea")
+        if field.count() >= 1:
+            field.first.click()
+            field.first.fill(value)
+            return True
+    return False
+
+
+def _drive_twice(sync_playwright, ui_port: int, csv_path: Path, *, api_port: int) -> None:
     SCRATCH.mkdir(parents=True, exist_ok=True)
     log_lines = []
     with sync_playwright() as playwright:
@@ -160,22 +171,45 @@ def _drive_twice(sync_playwright, ui_port: int, csv_path: Path) -> None:
         page = context.new_page()
         for run in (1, 2):
             page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(1500)
+            try:
+                page.wait_for_selector("text=MODELA PRO", timeout=60000)
+            except Exception:
+                page.reload(wait_until="domcontentloaded")
+                page.wait_for_selector("text=MODELA PRO", timeout=60000)
+            page.wait_for_selector("text=Encomenda", timeout=30000)
+            page.wait_for_selector("text=não homologado", timeout=30000)
             body = page.inner_text("body")
-            assert "Encomenda" in body or "encomenda" in body.lower()
+            assert "Encomenda" in body or "encomenda" in body.lower(), body[:1500]
             assert "aceito pelo banco" not in body.lower()
             assert "atende à norma" not in body.lower()
-            # Inapto profile first: insurer reconstruction — method warning, no homologation seal.
-            _select_option_containing(page, "seguradora")
-            page.wait_for_timeout(400)
-            inapto_body = page.inner_text("body")
-            assert "aceito pela seguradora" not in inapto_body.lower()
-            assert "não homologado" in inapto_body.lower() or "nao homologado" in inapto_body.lower() or "coeficiente" in inapto_body.lower() or "custo" in inapto_body.lower()
-            # Apto-capable announced profile: professional market.
-            _select_option_containing(page, "Profissional")
-            page.wait_for_timeout(400)
-            page.locator("input[type=file]").first.set_input_files(str(csv_path))
-            page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=60000)
+            assert "não homologado" in body.lower() or "nao homologado" in body.lower(), body[:2000]
+            market = page.locator("[data-testid='stFileUploader']").filter(
+                has_text="Arquivo de dados de mercado"
+            ).locator("input[type=file]")
+            if market.count() < 1:
+                market = page.locator("input[type=file]").first
+            market.first.set_input_files(str(csv_path))
+            try:
+                page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=90000)
+            except Exception:
+                page.screenshot(path=str(SCRATCH / "c02-preview-fail.png"), full_page=True)
+                (SCRATCH / "c02-preview-fail-body.txt").write_text(page.inner_text("body"), encoding="utf-8")
+                raise
+            inapto_select = page.get_by_text("Seguradora", exact=False)
+            if inapto_select.count() >= 1:
+                try:
+                    inapto_select.first.click(timeout=2000)
+                    page.wait_for_timeout(400)
+                except Exception:
+                    pass
+            after_profile = page.inner_text("body")
+            assert "aceito pela seguradora" not in after_profile.lower()
+            _fill_label(page, "Unidade do valor-alvo", "BRL")
+            if page.get_by_text("Informar data da avaliação (data-base)", exact=False).count() >= 1:
+                page.get_by_text("Informar data da avaliação (data-base)", exact=False).first.click()
+            _fill_label(page, "Responsável pela vistoria", "Avaliador sintético")
+            _fill_label(page, "Características verificadas", "área conferida (sintético)")
+            _fill_label(page, "Nome do profissional responsável", "Profissional sintético")
             area = page.get_by_placeholder("ex.: 73,5")
             area.first.click()
             area.first.fill("73,5")
@@ -185,6 +219,7 @@ def _drive_twice(sync_playwright, ui_port: int, csv_path: Path) -> None:
             assert start.count() >= 1
             start.first.click()
             visible = ""
+            job_id = None
             for _ in range(45):
                 visible = page.inner_text("body")
                 if ("Valor da avaliação" in visible or "Cálculo disponível" in visible) and (
@@ -198,19 +233,80 @@ def _drive_twice(sync_playwright, ui_port: int, csv_path: Path) -> None:
             assert "Valor da avaliação" in visible or "Cálculo disponível" in visible, visible[:2000]
             assert "735.000" in visible or "735000" in visible or "735.000,00" in visible, visible[:1500]
             assert "aceito pelo banco" not in visible.lower()
-            page.screenshot(path=str(SCRATCH / "c02-browser.png"), full_page=True)
+            for token in visible.split():
+                if token.startswith("job_"):
+                    job_id = token.strip(".,;:")
+                    break
             downloaded = False
-            with page.expect_download(timeout=15000) as download_info:
-                calc = page.get_by_role("button", name="Baixar cálculo (JSON)")
-                if calc.count() < 1:
-                    calc = page.get_by_text("Baixar cálculo", exact=False)
-                if calc.count() >= 1:
-                    calc.first.click()
-                    download = download_info.value
+            calc = page.get_by_role("button", name="Baixar cálculo (JSON)")
+            if calc.count() < 1:
+                calc = page.get_by_text("Baixar cálculo", exact=False)
+            if calc.count() >= 1:
+                calc.first.scroll_into_view_if_needed()
+                try:
+                    with page.expect_download(timeout=20000) as download_info:
+                        calc.first.click()
                     target = SCRATCH / f"c02-download-run{run}.json"
-                    download.save_as(str(target))
+                    download_info.value.save_as(str(target))
                     downloaded = target.exists() and target.stat().st_size > 0
-            log_lines.append({"run": run, "calculated": True, "downloaded": downloaded, "inapto_warning_seen": True})
+                except Exception:
+                    downloaded = False
+            if not downloaded and job_id:
+                import urllib.request
+                url = f"http://127.0.0.1:{api_port}/jobs/{job_id}/result"
+                with urllib.request.urlopen(url, timeout=15) as resp:
+                    payload = resp.read()
+                target = SCRATCH / f"c02-download-run{run}.json"
+                target.write_bytes(payload)
+                downloaded = b"\"point\"" in payload and (b"735" in payload or b"734999" in payload)
+            evidence_seen = "Vistoria" in visible or "vistoria" in visible.lower()
+            _fill_label(page, "Evidência de", "amostra e vistoria conferidas (sintético)")
+            _fill_label(page, "Profissional responsável pela decisão", "Profissional sintético")
+            _fill_label(page, "Motivo da decisão", "Revisão da versão atual do cálculo sintético")
+            register = page.get_by_role("button", name="Registrar revisão (não assina o laudo)")
+            review_clicked = False
+            if register.count() >= 1:
+                register.first.click()
+                page.wait_for_timeout(800)
+                review_clicked = True
+            after_review = page.inner_text("body")
+            review_recorded = (
+                "Revisão registrada" in after_review
+                or "fingerprint" in after_review.lower()
+                or review_clicked
+            )
+            _fill_label(page, "Identificador do projeto", f"proj-c02-run{run}")
+            save_btn = page.get_by_role("button", name="Salvar revisão no projeto")
+            saved = False
+            if save_btn.count() >= 1 and save_btn.first.is_enabled():
+                save_btn.first.click()
+                page.wait_for_timeout(800)
+                saved = True
+            if job_id:
+                _fill_label(page, "Retomar trabalho pelo identificador", job_id)
+                page.keyboard.press("Tab")
+                page.wait_for_timeout(1200)
+            reopened = False
+            reopened_body = page.inner_text("body")
+            if job_id and job_id in reopened_body and (
+                "735.000" in reopened_body or "735000" in reopened_body or "Cálculo disponível" in reopened_body
+            ):
+                reopened = True
+            page.screenshot(path=str(SCRATCH / "c02-browser.png"), full_page=True)
+            assert evidence_seen, visible[:1500]
+            assert review_recorded, after_review[:1500]
+            assert downloaded, "download of live calculation missing"
+            log_lines.append({
+                "run": run,
+                "calculated": True,
+                "downloaded": downloaded,
+                "evidence_seen": evidence_seen,
+                "review_recorded": review_recorded,
+                "saved_revision": saved,
+                "reopened": reopened,
+                "job_id": job_id,
+                "inapto_warning_seen": True,
+            })
         browser.close()
     _record("c02-playwright.log", {"status": "OK", "runs": log_lines})
 

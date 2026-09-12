@@ -1125,9 +1125,17 @@ def invalidate_review_events(
 
 
 def may_reuse_prior_consent(events: Sequence[Mapping[str, Any]], *, current_fingerprint: str) -> bool:
-    for event in events or []:
-        if event.get("fingerprint") == current_fingerprint and not event.get("stale"):
-            continue
+    """Refuse prior consent/signature when the fingerprint moved or an event is stale.
+
+    A previous fingerprint's decision never authorizes the current version.
+    """
+    if not current_fingerprint:
+        return False
+    if not events:
+        return False
+    for event in events:
+        if event.get("stale") or event.get("fingerprint") != current_fingerprint:
+            return False
         if event.get("consent_reusable") or event.get("signature_image_reused"):
             return False
     return True
@@ -1389,20 +1397,55 @@ def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def declared_fingerprint_from_imported(payload: bytes) -> Optional[str]:
+    """Read fingerprint declared in an imported original (JSON package). PDFs have none."""
+    if not payload:
+        return None
+    try:
+        text = payload.decode("utf-8")
+        data = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, Mapping):
+        return None
+    package = data.get("package") if isinstance(data.get("package"), Mapping) else data
+    declared = package.get("fingerprint") if isinstance(package, Mapping) else None
+    if declared:
+        return str(declared)
+    nested = data.get("fingerprint")
+    return str(nested) if nested else None
+
+
 def verify_imported_signature_link(
     *,
     fingerprint: str,
     imported_sha256: str,
     declared_fingerprint: Optional[str] = None,
 ) -> dict:
-    linked = declared_fingerprint == fingerprint if declared_fingerprint else False
+    if not imported_sha256:
+        return {
+            "linked": False,
+            "fingerprint": fingerprint,
+            "imported_sha256": imported_sha256,
+            "reused_old_image": False,
+            "signed_in_product_name": False,
+            "status": "unlinked",
+            "note": "Arquivo assinado original ausente — vínculo não verificado.",
+        }
+    linked = bool(declared_fingerprint) and declared_fingerprint == fingerprint
     return {
         "linked": linked,
         "fingerprint": fingerprint,
         "imported_sha256": imported_sha256,
+        "declared_fingerprint": declared_fingerprint,
         "reused_old_image": False,
         "signed_in_product_name": False,
         "status": "linked" if linked else "unlinked",
+        "note": (
+            "Arquivo original importado vinculado ao fingerprint atual."
+            if linked
+            else "Arquivo importado sem vínculo com o fingerprint atual — não reutiliza consentimento antigo."
+        ),
     }
 
 

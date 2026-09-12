@@ -33,11 +33,13 @@ from .professional import (
     empty_inspection_record,
     known_profiles,
     qualification_profile_wire,
+    record_justified_exclusion,
     select_qualification_profile,
 )
 from .workflow import (
     SUPPORTED_EVALUATION_METHODS,
     SUPPORTED_EVALUATION_METHOD_IDS,
+    merge_invalidation,
     canonical_evaluation_policy,
     canonical_search_policy,
     cost_estimate_from_payload,
@@ -354,6 +356,7 @@ def build_request_spec(
     value_basis: Optional[str] = None,
     asset_scope: Optional[str] = None,
     qualification_profile: Optional[Mapping[str, Any]] = None,
+    justified_exclusions: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> dict:
     """Monta RequestSpec MP/1. Não presume BRL, BRL/m² nem data de hoje.
 
@@ -436,6 +439,8 @@ def build_request_spec(
         spec["asset_scope"] = asset_scope
     if qualification_profile:
         spec["qualification_profile"] = qualification_profile_wire(qualification_profile)
+    if justified_exclusions:
+        spec["justified_exclusions"] = [dict(item) for item in justified_exclusions]
     return spec
 
 
@@ -1474,15 +1479,11 @@ def upload_form(
     if uploaded_file is not None:
         previous_token = st.session_state.get("p02_preview_token") or st.session_state.get("c09_preview_token")
         if previous_token != binding_token:
-            snapshot_now = st.session_state.get("c09_snapshot")
-            for key in ("c09_preview", "c09_preview_token", "p02_preview", "p02_preview_token", "p02_form_model"):
+            flags, dropped = merge_invalidation(dict(st.session_state), "file")
+            for key, value in flags.items():
+                st.session_state[key] = value
+            for key in dropped:
                 st.session_state.pop(key, None)
-            if snapshot_now is not None:
-                st.session_state["p02_result_stale"] = True
-                st.session_state["p02_result_stale_reason"] = (
-                    "O arquivo mudou. O resultado abaixo pertence à versão anterior."
-                )
-                st.session_state["p02_previous_snapshot"] = snapshot_now
             preview = None
         if preview is None:
             if preview_provider is None:
@@ -1717,6 +1718,7 @@ def upload_form(
     else:
         st.caption("Nenhuma coluna candidata ficou de fora sem razão visível.")
 
+    exclusions = list(st.session_state.get("c02_justified_exclusions") or [])
     with st.expander("Exclusões justificadas da amostra", expanded=False):
         st.caption("Exclusão não é automática para melhorar R²/grau. Motivo, responsável e efeito são obrigatórios.")
         excl_row = st.text_input("Identificador do registro excluído", value="", key=f"c02_{ns}_excl_row")
@@ -1724,7 +1726,38 @@ def upload_form(
         excl_who = st.text_input("Profissional que decide a exclusão", value="", key=f"c02_{ns}_excl_who")
         excl_effect = st.text_input("Efeito da exclusão (n, grau, etc.)", value="", key=f"c02_{ns}_excl_effect")
         if excl_row and excl_reason and excl_who:
-            st.caption(f"Exclusão de {excl_row} registrada com motivo explícito — não é filtro silencioso.")
+            try:
+                item = record_justified_exclusion(
+                    row_id=excl_row,
+                    reason=excl_reason,
+                    reviewer=excl_who,
+                    effect=excl_effect,
+                    fingerprint=st.session_state.get("p02_form_fingerprint"),
+                )
+                identity_key = (str(item["row_id"]), item["reason"], item["reviewer"])
+                seen = {(str(e.get("row_id")), e.get("reason"), e.get("reviewer")) for e in exclusions}
+                if identity_key not in seen:
+                    exclusions.append(item)
+                    st.session_state["c02_justified_exclusions"] = exclusions
+                st.caption(
+                    f"Exclusão de {excl_row} registrada com motivo, responsável e efeito — não é filtro silencioso."
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+        if exclusions:
+            st.dataframe(
+                [
+                    {
+                        "Registro": item.get("row_id"),
+                        "Motivo": item.get("reason"),
+                        "Profissional": item.get("reviewer"),
+                        "Efeito": item.get("effect"),
+                    }
+                    for item in exclusions
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
 
     target_unit = st.text_input(
         "Unidade do valor-alvo",
@@ -1838,6 +1871,7 @@ def upload_form(
         value_basis=encomenda_state.get("value_basis"),
         asset_scope=encomenda_state.get("asset_scope"),
         qualification_profile=encomenda_state.get("profile"),
+        justified_exclusions=exclusions,
     )
 
     policies = policies_on_the_wire(request_spec)
@@ -1992,6 +2026,7 @@ def upload_form(
         "qualification_profile": encomenda_state.get("profile"),
         "inspection": evidence_state.get("inspection") or empty_inspection_record(),
         "professional_identity": evidence_state.get("identity"),
+        "justified_exclusions": exclusions,
     }
 
 

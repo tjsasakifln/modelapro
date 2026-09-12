@@ -48,6 +48,7 @@ def _import_components():
         )
         from components.professional import (
             build_profile_checklist,
+            declared_fingerprint_from_imported,
             export_recipient_package_manifest,
             gate_ready_for_professional_signoff,
             invalidate_review_events,
@@ -59,6 +60,8 @@ def _import_components():
             verify_imported_signature_link,
         )
         from components.workflow import (
+            apply_invalidation,
+            merge_invalidation,
             present_batch_items,
             present_delivery_state,
             revision_recovery_plan,
@@ -99,6 +102,7 @@ def _import_components():
         )
         from frontend.components.professional import (
             build_profile_checklist,
+            declared_fingerprint_from_imported,
             export_recipient_package_manifest,
             gate_ready_for_professional_signoff,
             invalidate_review_events,
@@ -110,6 +114,8 @@ def _import_components():
             verify_imported_signature_link,
         )
         from frontend.components.workflow import (
+            apply_invalidation,
+            merge_invalidation,
             present_batch_items,
             present_delivery_state,
             revision_recovery_plan,
@@ -146,6 +152,7 @@ render_review_panel = _COMP["render_review_panel"]
 render_snapshot_panel = _COMP["render_snapshot_panel"]
 sidebar = _COMP["sidebar"]
 build_profile_checklist = _COMP["build_profile_checklist"]
+declared_fingerprint_from_imported = _COMP["declared_fingerprint_from_imported"]
 export_recipient_package_manifest = _COMP["export_recipient_package_manifest"]
 gate_ready_for_professional_signoff = _COMP["gate_ready_for_professional_signoff"]
 invalidate_review_events = _COMP["invalidate_review_events"]
@@ -155,6 +162,8 @@ record_review_event = _COMP["record_review_event"]
 redact_diagnostic = _COMP["redact_diagnostic"]
 sha256_bytes = _COMP["sha256_bytes"]
 verify_imported_signature_link = _COMP["verify_imported_signature_link"]
+apply_invalidation = _COMP["apply_invalidation"]
+merge_invalidation = _COMP["merge_invalidation"]
 render_charts = _COMP["render_charts"]
 render_snapshot_charts = _COMP["render_snapshot_charts"]
 present_batch_items = _COMP["present_batch_items"]
@@ -261,12 +270,15 @@ def main() -> None:
         st.session_state["p02_result_stale_reason"] = form["stale_reason"]
     current_fp = form.get("fingerprint")
     last_fp = st.session_state.get("p02_form_fingerprint")
-    if current_fp and last_fp and current_fp != last_fp and client.last_snapshot is not None:
-        st.session_state["p02_result_stale"] = True
-        st.session_state["p02_result_stale_reason"] = (
-            st.session_state.get("p02_result_stale_reason")
-            or "Há um resultado da versão anterior deste pedido."
-        )
+    if current_fp and last_fp and current_fp != last_fp:
+        change = "subject"
+        if form.get("stale_reason") and "arquivo" in str(form.get("stale_reason")).lower():
+            change = "file"
+        flags, dropped = merge_invalidation(dict(st.session_state), change)
+        for key, value in flags.items():
+            st.session_state[key] = value
+        for key in dropped:
+            st.session_state.pop(key, None)
     if current_fp:
         st.session_state["p02_form_fingerprint"] = current_fp
 
@@ -503,6 +515,9 @@ def main() -> None:
                         "job_id": client.job_id,
                         "snapshot_ref": {"job_id": client.job_id},
                         "request_spec": form.get("request_spec") or client.last_request_spec,
+                        "justified_exclusions": form.get("justified_exclusions") or [],
+                        "inspection": form.get("inspection"),
+                        "professional_identity": form.get("professional_identity"),
                     },
                 )
                 st.success(f"Nova revisão registrada: {saved.get('revision_id') or saved} (a anterior permanece).")
@@ -575,19 +590,26 @@ def main() -> None:
     )
     if review_actions.get("decision") == "reviewed":
         try:
+            item_evidence = review_actions.get("item_evidence") or {}
+            evidence_text = "; ".join(
+                f"{key}: {value}" for key, value in item_evidence.items() if str(value or "").strip()
+            ) or None
+            first_item = next((key for key, value in item_evidence.items() if str(value or "").strip()), None)
             event = record_review_event(
                 fingerprint=current_fp or "",
                 professional_id=review_actions.get("professional_id") or "",
                 decision="reviewed",
                 motive=review_actions.get("motive") or "",
                 version="C02/1",
+                checklist_item_id=first_item,
+                evidence=evidence_text,
                 reviewer_id=review_actions.get("reviewer_id") or None,
                 distinct_reviewer_required=bool(profile.get("requires_distinct_reviewer")),
             )
             stored_events.append(event)
             st.session_state.c02_review_events = stored_events
             st.session_state.c02_review_stale = False
-            st.info("Revisão registrada no fingerprint atual. Isso não assina o laudo.")
+            st.info("Revisão registrada no fingerprint atual, com evidência por item. Isso não assina o laudo.")
         except ValueError as exc:
             st.error(str(exc))
     if review_actions.get("export_for_external_signer") and snapshot is not None:
@@ -603,16 +625,25 @@ def main() -> None:
             mime="application/json",
         )
         st.caption("O produto não assina em nome do usuário. Importe o arquivo assinado original depois.")
-    if review_actions.get("import_signed") and current_fp:
-        link = verify_imported_signature_link(
-            fingerprint=current_fp,
-            imported_sha256="",
-            declared_fingerprint=None,
-        )
-        st.info(
-            "Importe o arquivo assinado original pelo painel de destinatário. "
-            f"Vínculo atual: {link['status']}."
-        )
+    signed_file = review_actions.get("signed_file")
+    if (review_actions.get("import_signed") or signed_file is not None) and current_fp:
+        if signed_file is None:
+            st.warning("Importe o arquivo assinado original para verificar o vínculo com o fingerprint.")
+        else:
+            payload = signed_file.getvalue()
+            imported_sha = sha256_bytes(payload)
+            declared = declared_fingerprint_from_imported(payload)
+            link = verify_imported_signature_link(
+                fingerprint=current_fp,
+                imported_sha256=imported_sha,
+                declared_fingerprint=declared,
+            )
+            st.session_state["c02_signature_link"] = link
+            if link.get("linked"):
+                st.info(link.get("note") or "Arquivo original vinculado ao fingerprint atual.")
+            else:
+                st.warning(link.get("note") or "Arquivo importado sem vínculo — consentimento antigo não reutilizado.")
+            st.caption(f"SHA-256 do arquivo importado: {imported_sha[:16]}…")
 
     submissions = list(st.session_state.get("c02_institution_events") or [])
     recipient_actions = render_recipient_panel(profile=profile, submissions=submissions)

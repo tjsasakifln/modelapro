@@ -8,7 +8,7 @@ from streamlit.testing.v1 import AppTest
 os.environ.setdefault("MODELA_API_TIMEOUT", "2")
 os.environ.setdefault("MODELA_DISABLE_WS", "1")
 
-from frontend.components.layout import FIXTURE_SCREEN_NOTICE, WORK_FLOW_HEADINGS
+from frontend.components.layout import FIXTURE_SCREEN_NOTICE
 
 APP = str(Path(__file__).resolve().parents[3] / "frontend" / "app.py")
 
@@ -31,16 +31,16 @@ def _run_once() -> str:
     if at.exception:
         raise AssertionError(at.exception)
     text = _collect_text(at)
-    joined = " ".join(WORK_FLOW_HEADINGS)
-    assert "Encomenda" in joined
-    assert "Amostra" in joined
-    assert "vistoria" in joined.lower()
-    assert "Modelagem" in joined
-    assert "Emissão" in joined
-    assert "MODELA PRO" in text or "Encomenda" in text or "amostra" in text.lower()
-    assert "R² Ajustado" not in text
-    assert "atende à norma" not in text.lower()
-    assert "aceito pelo banco" not in text.lower()
+    blob = text.lower()
+    assert "encomenda" in blob
+    assert "amostra" in blob
+    assert "vistoria" in blob
+    assert "modelagem" in blob
+    assert "emissão" in blob or "emissao" in blob
+    assert "modela pro" in blob or "amostra" in blob
+    assert "r² ajustado" not in blob
+    assert "atende à norma" not in blob
+    assert "aceito pelo banco" not in blob
     return text
 
 

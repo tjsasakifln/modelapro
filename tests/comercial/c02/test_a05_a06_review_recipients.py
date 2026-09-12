@@ -9,6 +9,7 @@ import threading
 from frontend.components.forms import JobClient, build_request_spec
 from frontend.components.professional import (
     case_release_to_issuance,
+    declared_fingerprint_from_imported,
     export_recipient_package_manifest,
     gate_ready_for_professional_signoff,
     invalidate_review_events,
@@ -42,7 +43,16 @@ def test_review_event_binds_to_fingerprint_and_material_change_invalidates():
     assert stale[0]["stale"] is True
     assert stale[0]["consent_reusable"] is False
     assert stale[0]["fingerprint"] == "fp-a"
-    assert may_reuse_prior_consent(stale, current_fingerprint="fp-b") is True
+    assert may_reuse_prior_consent(stale, current_fingerprint="fp-b") is False
+    assert may_reuse_prior_consent([], current_fingerprint="fp-b") is False
+    live = [record_review_event(
+        fingerprint="fp-b",
+        professional_id="prof-1",
+        decision="reviewed",
+        motive="versão atual",
+        version="C02/1",
+    )]
+    assert may_reuse_prior_consent(live, current_fingerprint="fp-b") is True
     session = apply_invalidation(
         {"c09_snapshot": {"value": {"point": 1}}, "c02_review_events": [event]},
         "document",
@@ -134,16 +144,26 @@ def test_seguro_mismatch_is_not_hidden():
 
 
 def test_imported_signature_must_link_fingerprint_and_product_does_not_sign():
+    missing = verify_imported_signature_link(
+        fingerprint="fp-1",
+        imported_sha256="",
+        declared_fingerprint=None,
+    )
+    assert missing["linked"] is False
+    assert missing["status"] == "unlinked"
+    package = json.dumps({"package": {"fingerprint": "fp-1"}}).encode("utf-8")
+    declared = declared_fingerprint_from_imported(package)
+    assert declared == "fp-1"
     linked = verify_imported_signature_link(
         fingerprint="fp-1",
-        imported_sha256="aaa",
-        declared_fingerprint="fp-1",
+        imported_sha256=sha256_bytes(package),
+        declared_fingerprint=declared,
     )
     assert linked["linked"] is True
     assert linked["signed_in_product_name"] is False
     unlinked = verify_imported_signature_link(
         fingerprint="fp-1",
-        imported_sha256="aaa",
+        imported_sha256=sha256_bytes(b"%PDF-old-consent"),
         declared_fingerprint="fp-old",
     )
     assert unlinked["linked"] is False

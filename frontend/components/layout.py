@@ -24,6 +24,7 @@ from .forms import (
 from .professional import (
     BACKUP_NOTICE,
     HOMOLOGATION_FORBIDDEN_BADGES,
+    feature_map_to_original,
     map_issuance_to_case_release,
     present_aptidao,
     present_calculated_vs_adopted,
@@ -318,6 +319,16 @@ def present_snapshot(
         calculated_point=point,
         c05_admits=None,
     )
+    feature_schema = None
+    if isinstance(model, Mapping):
+        feature_schema = model.get("feature_schema") or model.get("schema")
+    if feature_schema is None:
+        feature_schema = snapshot.get("feature_schema")
+    raw_coefficients = model.get("coefficients") if isinstance(model, Mapping) else None
+    coefficient_map = feature_map_to_original(
+        raw_coefficients if isinstance(raw_coefficients, Mapping) else None,
+        feature_schema if isinstance(feature_schema, Mapping) else None,
+    )
     grouped = group_issues(issues)
     comparable_alts = []
     for alt in alternatives:
@@ -399,6 +410,8 @@ def present_snapshot(
             "used_row_ids_total": len(used_ids),
         },
         "model": model,
+        "coefficient_map": coefficient_map,
+        "dummy_name_required": False,
         "search": search,
         "alternatives": comparable_alts,
         "alternatives_read_only": True,
@@ -789,8 +802,39 @@ def render_snapshot_panel(view: Mapping[str, Any], *, fixture: bool = False) -> 
         model = view.get("model") or {}
         if model.get("formula"):
             st.code(model.get("formula"))
-        if model.get("coefficients"):
-            st.write(model.get("coefficients"))
+        coefficient_map = view.get("coefficient_map")
+        if coefficient_map:
+            st.caption("Característica original — nomes dummy não são exigidos do profissional.")
+            st.dataframe(
+                [
+                    {
+                        "Característica original": row.get("original_characteristic"),
+                        "Termo do modelo": row.get("feature"),
+                        "Coeficiente": row.get("value"),
+                    }
+                    for row in coefficient_map
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        elif model.get("coefficients"):
+            mapped = feature_map_to_original(
+                model.get("coefficients") if isinstance(model.get("coefficients"), Mapping) else None,
+                (model.get("feature_schema") if isinstance(model.get("feature_schema"), Mapping) else None),
+            )
+            if mapped:
+                st.dataframe(
+                    [
+                        {
+                            "Característica original": row.get("original_characteristic"),
+                            "Termo do modelo": row.get("feature"),
+                            "Coeficiente": row.get("value"),
+                        }
+                        for row in mapped
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
         if model.get("diagnostics"):
             st.write(model.get("diagnostics"))
         if not view.get("diagnostics_available"):
@@ -1068,14 +1112,25 @@ def render_review_panel(
         "motive": "",
         "export_for_external_signer": False,
         "import_signed": False,
+        "item_evidence": {},
+        "signed_file": None,
     }
     items = list(checklist or [])
+    item_evidence: dict = {}
     if items:
         for item in items:
-            st.markdown(f"- **{item.get('label') or item.get('requirement_id')}** — {item.get('status') or 'pending'}")
-            st.caption(f"Evidência: {item.get('evidence') or 'não anexada neste item'}")
+            req_id = str(item.get("requirement_id") or item.get("label") or "item")
+            st.markdown(f"- **{item.get('label') or req_id}** — {item.get('status') or 'pending'}")
+            evidence = st.text_input(
+                f"Evidência de «{item.get('label') or req_id}»",
+                value=item.get("evidence") or "",
+                key=f"c02_evidence_{req_id}",
+                help="Evidência específica deste requisito. Vazio permanece pendente — não é atestado.",
+            )
+            item_evidence[req_id] = evidence
     else:
         st.caption("Nenhum item de checklist — perfil sem requisitos locais ou ainda não selecionado.")
+    pressed["item_evidence"] = item_evidence
     pressed["professional_id"] = st.text_input("Profissional responsável pela decisão", value="", key="c02_review_prof")
     if requires_distinct_reviewer:
         pressed["reviewer_id"] = st.text_input("Revisor distinto", value="", key="c02_review_other")
@@ -1087,7 +1142,13 @@ def render_review_panel(
     with col_b:
         pressed["export_for_external_signer"] = st.button("Exportar para assinador externo")
     with col_c:
-        pressed["import_signed"] = st.button("Registrar arquivo assinado importado")
+        pressed["import_signed"] = st.button("Verificar arquivo assinado importado")
+    pressed["signed_file"] = st.file_uploader(
+        "Arquivo assinado original",
+        type=["pdf", "json"],
+        key="c02_signed_import",
+        help="Importe o arquivo original assinado fora do produto. A campanha não assina em nome do usuário.",
+    )
     st.caption("Assinatura/autoria não valida o conteúdo técnico. O produto não assina em nome do usuário.")
     return pressed
 

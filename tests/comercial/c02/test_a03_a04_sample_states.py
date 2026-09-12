@@ -1,6 +1,7 @@
 """C02-A03 / C02-A04: sample/model review and apto/inapto/pendente — shipped helpers."""
 
 from frontend.components.forms import build_request_spec, preview_to_form_model
+from frontend.components.professional import record_justified_exclusion
 from frontend.components.layout import present_snapshot, snapshot_contains_forbidden_norma_banner
 from frontend.components.professional import (
     classify_limitation,
@@ -14,7 +15,7 @@ from frontend.components.professional import (
     record_justified_exclusion,
     select_qualification_profile,
 )
-from frontend.components.workflow import apply_invalidation, unused_columns_view
+from frontend.components.workflow import apply_invalidation, merge_invalidation, unused_columns_view
 from tests.c09_frontend.fixtures import PREVIEW_BAIRRO_FORMATTED, SNAPSHOT_CLASSIFIED
 
 
@@ -56,6 +57,15 @@ def test_justified_exclusion_requires_reason_and_reviewer():
     )
     assert item["automatic_to_improve_r2"] is False
     assert item["silent"] is False
+    spec = build_request_spec(
+        target_col="preco",
+        candidate_cols=["area"],
+        roles={"preco": "target", "area": "predictor"},
+        justified_exclusions=[item],
+    )
+    assert spec["justified_exclusions"][0]["row_id"] == "IM-01"
+    assert spec["justified_exclusions"][0]["reason"] == "duplicidade do mesmo bem"
+    assert spec["justified_exclusions"][0]["reviewer"] == "Profissional sintético"
     try:
         record_justified_exclusion(row_id="IM-02", reason="", reviewer="X", effect="")
         assert False, "expected ValueError"
@@ -79,6 +89,16 @@ def test_feature_map_uses_original_characteristic_not_required_dummy_names():
     assert labels["bairro_Centro"] == "bairro"
     assert labels["area"] in {"área", "area"}
     assert all(row["dummy_name_required"] is False for row in rows)
+    snap = dict(SNAPSHOT_CLASSIFIED)
+    snap["model"] = {
+        "coefficients": {"bairro_Centro": 0.12, "area": 850.0},
+        "feature_schema": schema,
+        "formula": "preco ~ area + bairro_Centro",
+    }
+    presented = present_snapshot(snap)
+    mapped_view = {row["feature"]: row["original_characteristic"] for row in presented["coefficient_map"]}
+    assert mapped_view["bairro_Centro"] == "bairro"
+    assert presented["dummy_name_required"] is False
 
 
 def test_independent_validation_coverage_does_not_present_train_as_external():
@@ -193,6 +213,17 @@ def test_profile_change_invalidates_result_and_review_without_erasing_history():
     assert session["c02_review_events"][0]["decision"] == "reviewed"
     sample = apply_invalidation(session, "sample")
     assert sample["p02_result_stale"] is True
+    file_change = apply_invalidation(session, "file")
+    assert file_change["c02_review_stale"] is True
+    assert file_change["c02_signature_stale"] is True
+    assert file_change["c02_consent_reusable"] is False
+    flags, dropped = merge_invalidation(
+        {"c09_preview": {"ok": True}, "c02_applicant": "widget-key", **session},
+        "file",
+    )
+    assert "c02_applicant" not in flags
+    assert flags["c02_review_stale"] is True
+    assert "c09_preview" in dropped
 
 
 def test_unverified_rule_is_not_passed_and_unknown_profile_blocks_signoff():

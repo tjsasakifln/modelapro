@@ -295,6 +295,41 @@ def apply_invalidation(session: Mapping[str, Any], change: str) -> dict:
     return out
 
 
+INVALIDATION_FLAG_KEYS = (
+    "p02_result_stale",
+    "p02_result_stale_reason",
+    "p02_previous_snapshot",
+    "p02_current_result_belongs_to",
+    "c02_review_stale",
+    "c02_signature_stale",
+    "c02_issuance_stale",
+    "c02_consent_reusable",
+    "c02_invalidation_reason",
+    "c02_review_events_history",
+)
+
+_DROPPED_ON_INVALIDATION = (
+    "c09_preview",
+    "c09_preview_token",
+    "p02_preview",
+    "p02_preview_token",
+    "p02_form_model",
+    "p02_mapping",
+    "p02_roles",
+    "p02_units",
+    "p02_subject",
+    "p02_raw_values",
+)
+
+
+def merge_invalidation(session: Mapping[str, Any], change: str) -> tuple:
+    """Flags to write after widgets exist. Never copies widget keys back."""
+    out = apply_invalidation(session, change)
+    flags = {key: out[key] for key in INVALIDATION_FLAG_KEYS if key in out}
+    dropped = [key for key in _DROPPED_ON_INVALIDATION if key in session and key not in out]
+    return flags, dropped
+
+
 def _stale_reason(change: str) -> str:
     labels = {
         "file": "O arquivo mudou. O resultado abaixo pertence à versão anterior.",
