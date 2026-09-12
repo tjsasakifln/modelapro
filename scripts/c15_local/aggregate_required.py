@@ -15,7 +15,9 @@ green job, is absent, is unparseable, or was produced from another SHA.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -95,10 +97,7 @@ def _sha_matches(recorded: str, expected: str) -> bool:
     a, b = (recorded or "").strip().lower(), (expected or "").strip().lower()
     if not a or not b:
         return False
-    shortest = min(len(a), len(b))
-    if shortest < 7:
-        return False
-    return a[:shortest] == b[:shortest]
+    return len(a) == 40 and a == b
 
 
 def _is_failure_finding(entry: object) -> bool:
@@ -154,6 +153,8 @@ def check_p04_run(path: Path, expected_sha: str | None = None, mode: str = CANDI
         names = {str(e.get("name")) for e in runs if isinstance(e, Mapping)}
         if "extensions" not in names:
             problems.append("p04 run.json: the strict extensions suite is absent from runs")
+        if names != {"core-1", "core-2", "extensions"} or len(runs) != 3:
+            problems.append("p04 run.json: expected core-1, core-2 and extensions exactly once")
 
     if payload.get("skip_xfail_count"):
         problems.append(f"p04 run.json: {payload.get('skip_xfail_count')} skip/xfail on applicable tests")
@@ -175,7 +176,8 @@ def check_p04_run(path: Path, expected_sha: str | None = None, mode: str = CANDI
     return problems
 
 
-def check_junit(path: Path, min_tests: int = 1, label: str = "junit", forbid_skips: bool = True) -> list[str]:
+def check_junit(path: Path, min_tests: int = 1, label: str = "junit", forbid_skips: bool = True,
+                separate_install_job: bool = False) -> list[str]:
     """A JUnit XML that is absent, unparseable, empty, skipped or red is not success.
 
     Skips are checked because a suite gated on an environment variable exits 0
@@ -200,7 +202,10 @@ def check_junit(path: Path, min_tests: int = 1, label: str = "junit", forbid_ski
         ids = [f"{c.attrib.get('classname', '')}::{c.attrib.get('name', '')}" for c in failed[:10]]
         problems.append(f"{label}: {len(failed)} failed/errored testcases, e.g. {ids}")
     if forbid_skips:
-        skipped = [c for c in cases if c.find("skipped") is not None]
+        skipped = [c for c in cases if c.find("skipped") is not None and not (
+            separate_install_job and "test_wheel_install_smoke" in c.attrib.get("classname", "")
+            and "Set C15_INSTALL_SMOKE=1" in c.find("skipped").attrib.get("message", "")
+        )]
         if skipped:
             ids = [f"{c.attrib.get('classname', '')}::{c.attrib.get('name', '')}" for c in skipped[:10]]
             problems.append(f"{label}: {len(skipped)} skipped testcases, e.g. {ids} (gate exited 0 without asserting)")
@@ -237,23 +242,96 @@ def verify_artifacts(
     expected_sha: str | None = None,
     min_wide_tests: int = 1,
     p04_mode: str = CANDIDATE_MODE,
+    require_identity: bool = False,
 ) -> list[str]:
     """Open every mandatory evidence artifact and report what disagrees."""
     root = Path(artifacts_dir)
     problems: list[str] = []
     if not root.is_dir():
         return [f"artifacts: directory absent at {root} (no evidence was downloaded)"]
-    problems.extend(check_p04_run(root / "run.json", expected_sha=expected_sha, mode=p04_mode))
+    namespaces = {
+        "p04-harness": "p04-harness", "wide-suite-linux": "wide-suite-linux",
+        "install-eval-linux": "install-smoke", "c16-harness": "c16-harness",
+        "build-sdist-wheel": "dist", "c15-tests-linux": "c15-linux-evidence",
+        "c15-tests-windows": "c15-windows-evidence",
+    }
+    def folder(job):
+        return root / namespaces[job] if require_identity else root
+    if require_identity:
+        for job in namespaces:
+            problems.extend(check_identity(folder(job), job, expected_sha))
+    problems.extend(check_p04_run(folder("p04-harness") / "run.json", expected_sha=expected_sha, mode=p04_mode))
     problems.extend(
-        check_junit(root / "wide.junit.xml", min_tests=min_wide_tests, label="wide.junit.xml", forbid_skips=False)
+        check_junit(folder("wide-suite-linux") / "wide.junit.xml", min_tests=min_wide_tests,
+                    label="wide.junit.xml", forbid_skips=require_identity, separate_install_job=True)
     )
     # The installed-artifact smoke is skipif-gated on C15_INSTALL_SMOKE. If that
     # env key is ever dropped from the job, pytest skips and exits 0 and the gap
     # comes back inside its own fix, so this artifact forbids skips.
     problems.extend(
-        check_junit(root / "install-smoke.junit.xml", min_tests=1, label="install-smoke.junit.xml", forbid_skips=True)
+        check_junit(folder("install-eval-linux") / "install-smoke.junit.xml", min_tests=1,
+                    label="install-smoke.junit.xml", forbid_skips=True)
     )
-    problems.extend(check_c16(root / "c16.json", expected_sha=expected_sha))
+    problems.extend(check_c16(folder("c16-harness") / "c16.json", expected_sha=expected_sha))
+    if require_identity:
+        for job, filename in [("c15-tests-linux", "c15-linux.junit.xml"),
+                              ("c15-tests-windows", "c15-windows.junit.xml")]:
+            problems.extend(check_junit(folder(job) / filename, label=filename, separate_install_job=True))
+    return problems
+
+
+def check_identity(root: Path, job: str, expected_sha: str | None) -> list[str]:
+    problems: list[str] = []
+    data = _load_json(root / "identity.json", problems, f"{job} identity")
+    if data is None:
+        return problems
+    expected = {
+        "schema": "MP-C06-EVIDENCE/1", "job": job,
+        "tested_commit_sha": expected_sha,
+        "event": os.environ.get("GITHUB_EVENT_NAME"),
+        "run_id": os.environ.get("GITHUB_RUN_ID"),
+        "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+    }
+    for field, value in expected.items():
+        if value is None or data.get(field) != value:
+            problems.append(f"{job}: identity mismatch {field}")
+    if data.get("source_dirty") is not False or data.get("tracked_source_dirty_after") is not False:
+        problems.append(f"{job}: dirty or unrecorded source checkout")
+    if len(str(data.get("tree_sha", ""))) != 40:
+        problems.append(f"{job}: missing tree SHA")
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    event = json.loads(Path(event_path).read_text()) if event_path else {}
+    pr = event.get("pull_request") or {}
+    if data.get("event") == "pull_request":
+        head, base = (pr.get("head") or {}).get("sha"), (pr.get("base") or {}).get("sha")
+        if data.get("pr_head_sha") != head or data.get("base_sha") != base:
+            problems.append(f"{job}: wrong PR head/base")
+        if data.get("parents") != [base, head]:
+            problems.append(f"{job}: tested merge does not have expected base/head parents")
+    # Check against this job's independent checkout too, not only self-reported metadata.
+    import subprocess
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+    if data.get("tree_sha") != tree:
+        problems.append(f"{job}: tree differs from aggregator checkout")
+    files = data.get("files")
+    if not isinstance(files, dict) or not files:
+        return problems + [f"{job}: no sealed artifact contents"]
+    actual = {str(p.relative_to(root)).replace("\\", "/") for p in root.rglob("*")
+              if p.is_file() and p != root / "identity.json"}
+    if set(files) != actual:
+        problems.append(f"{job}: artifact inventory differs")
+    for name, sha in files.items():
+        path = root / name
+        if root.resolve() not in path.resolve().parents or not path.is_file():
+            problems.append(f"{job}: unsafe or absent artifact {name}")
+        elif hashlib.sha256(path.read_bytes()).hexdigest() != sha:
+            problems.append(f"{job}: altered artifact {name}")
+    if job == "build-sdist-wheel":
+        packages = data.get("package_hashes") or {}
+        if not any(n.endswith(".whl") for n in packages) or not any(n.endswith(".tar.gz") for n in packages):
+            problems.append(f"{job}: wheel/sdist hashes absent")
+        if any(files.get(n) != sha for n, sha in packages.items()):
+            problems.append(f"{job}: package hashes disagree")
     return problems
 
 
@@ -273,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-sha", default="", help="candidate SHA the artifacts must have been produced from")
     parser.add_argument("--min-wide-tests", type=int, default=1, help="floor committed before the run")
     parser.add_argument("--p04-mode", default=CANDIDATE_MODE, help="mode the P04 runner artifact must record")
+    parser.add_argument("--require-identity", action="store_true", help="require isolated, sealed job/run identities")
     args = parser.parse_args(argv)
     if args.results_json:
         payload = json.loads(args.results_json)
@@ -290,6 +369,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_sha=args.expected_sha or None,
             min_wide_tests=args.min_wide_tests,
             p04_mode=args.p04_mode,
+            require_identity=args.require_identity,
         )
         if problems:
             print("aggregator: evidence artifacts disagree with the job results:", file=sys.stderr)

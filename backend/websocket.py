@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Optional
 
@@ -24,6 +25,23 @@ async def websocket_endpoint(
     multi-tenant cloud login.
     """
     await websocket.accept()
+    from modules.operacao_local.runtime import get_security_policy
+    from modules.operacao_local.security import AccessDenied
+    policy = get_security_policy()
+    authorization = websocket.headers.get("authorization")
+    if not authorization:
+        try:
+            credentials = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5))
+            authorization = "Bearer " + str(credentials.get("local_auth_token", ""))
+            job_id, token = credentials.get("job_id"), credentials.get("token")
+        except (ValueError, TimeoutError, WebSocketDisconnect):
+            await websocket.close(code=1008)
+            return
+    try:
+        policy.authorize(method="GET", authorization=authorization)
+    except AccessDenied:
+        await websocket.close(code=1008)
+        return
     # Reuse the process JobStore. A new JobStore() here used to run
     # recover_abandoned(live_job_ids=()) and flip a live running job to
     # interrupted on the first /ws connection.

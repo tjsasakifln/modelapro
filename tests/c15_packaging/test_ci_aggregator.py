@@ -203,8 +203,8 @@ def test_stale_artifact_from_another_sha_is_caught(tmp_path):
     assert any("stale" in p for p in problems), problems
 
 
-def test_short_sha_prefix_still_matches(tmp_path):
-    assert check_p04_run(_write_run(tmp_path, _clean_run(sha="8d66c79")), expected_sha=CANDIDATE_SHA) == []
+def test_short_sha_prefix_is_not_exact_candidate_identity(tmp_path):
+    assert check_p04_run(_write_run(tmp_path, _clean_run(sha="8d66c79")), expected_sha=CANDIDATE_SHA)
 
 
 def test_suite_that_never_ran_is_caught(tmp_path):

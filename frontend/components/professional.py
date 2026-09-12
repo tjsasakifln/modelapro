@@ -87,7 +87,9 @@ KNOWN_PURPOSES = (
 )
 
 KNOWN_ASSET_SCOPES = (
-    ("urban_real_estate", "Imóvel urbano"),
+    ("imovel_urbano", "Imóvel urbano"),
+    ("benfeitoria_imovel_urbano", "Benfeitoria de imóvel urbano"),
+    ("imovel_urbano_residencial_financiado", "Imóvel residencial financiado"),
 )
 
 KNOWN_RIGHTS = (
@@ -97,10 +99,10 @@ KNOWN_RIGHTS = (
 )
 
 KNOWN_VALUE_BASES = (
-    ("market_value", "Valor de mercado"),
-    ("reconstruction_cost", "Custo de reconstrução / reposição"),
+    ("valor_de_mercado", "Valor de mercado"),
+    ("custo_de_reedicao", "Custo de reedição"),
     ("depreciated_value", "Valor atual / depreciado"),
-    ("guarantee_limit", "Limite de garantia"),
+    ("limite_maximo_de_garantia", "Limite máximo de garantia"),
     ("adopted_value", "Valor adotado / arbitrado"),
 )
 
@@ -110,185 +112,46 @@ KNOWN_METHODS = (
 )
 
 KNOWN_RECIPIENTS = (
+    ("", "Sem destinatário institucional definido"),
+    ("banco-do-brasil", "Banco do Brasil"),
+    ("instituicoes-autorizadas-pelo-bcb", "Instituição autorizada pelo BCB"),
+    ("caixa-economica-federal", "CAIXA"),
+    ("seguradora-do-ramo-habitacional", "Seguradora do ramo habitacional"),
     ("internal_review", "Revisão interna / arquivo do profissional"),
     ("solicitante", "Solicitante da encomenda"),
     ("banco", "Instituição financeira (banco)"),
     ("seguradora", "Seguradora"),
 )
 
-# UI-side known catalog. Not C05 rules. Homologation is never inferred.
-_KNOWN_PROFILE_ROWS = (
-    {
-        "id": "urban-comparative-market-exploratory",
-        "version": "1",
-        "source_set_sha256": None,
-        "purpose": "analise_exploratoria",
-        "value_basis": "market_value",
-        "method": "comparative_regression",
-        "asset_scope": "urban_real_estate",
-        "recipient_id": "internal_review",
-        "label": "Exploratória — imóvel urbano, comparativo/regressão, valor de mercado",
-        "announced_offer": True,
-        "method_supports_purpose": True,
-        "compatibility_status": "known_offer",
-        "homologation_status": "not_homologated",
-        "requires_art_rrt": False,
-        "requires_distinct_reviewer": False,
-        "required_value_basis": "market_value",
-        "checklist_ids": (
-            "purpose_method_fit",
-            "value_basis",
-            "sample_review",
-            "limitations_visible",
-        ),
-        "notes": "Via de análise. Não é emissão profissional qualificada.",
-    },
-    {
-        "id": "urban-comparative-market-professional",
-        "version": "1",
-        "source_set_sha256": None,
-        "purpose": "avaliacao_profissional",
-        "value_basis": "market_value",
-        "method": "comparative_regression",
-        "asset_scope": "urban_real_estate",
-        "recipient_id": "solicitante",
-        "label": "Profissional — imóvel urbano, comparativo/regressão, valor de mercado",
-        "announced_offer": True,
-        "method_supports_purpose": True,
-        "compatibility_status": "known_offer",
-        "homologation_status": "not_homologated",
-        "requires_art_rrt": True,
-        "requires_distinct_reviewer": False,
-        "required_value_basis": "market_value",
-        "checklist_ids": (
-            "purpose_method_fit",
-            "value_basis",
-            "sample_review",
-            "inspection_record",
-            "professional_identity",
-            "art_rrt",
-            "grade_requirement",
-            "limitations_visible",
-            "calculated_vs_adopted",
-        ),
-        "notes": "Núcleo anunciado. Qualificação do SOFTWARE ≠ conformidade do caso.",
-    },
-    {
-        "id": "urban-comparative-bank-guarantee",
-        "version": "1",
-        "source_set_sha256": None,
-        "purpose": "garantia",
-        "value_basis": "market_value",
-        "method": "comparative_regression",
-        "asset_scope": "urban_real_estate",
-        "recipient_id": "banco",
-        "label": "Banco / garantia — comparativo/regressão, valor de mercado (não homologado)",
-        "announced_offer": True,
-        "method_supports_purpose": True,
-        "compatibility_status": "unverified",
-        "homologation_status": "not_homologated",
-        "requires_art_rrt": True,
-        "requires_distinct_reviewer": True,
-        "required_value_basis": "market_value",
-        "checklist_ids": (
-            "purpose_method_fit",
-            "value_basis",
-            "sample_review",
-            "inspection_record",
-            "professional_identity",
-            "art_rrt",
-            "distinct_reviewer",
-            "grade_requirement",
-            "limitations_visible",
-            "recipient_package",
-        ),
-        "notes": (
-            "Compatibilidade verificada ≠ aceite recebido. Sem ato autorizado "
-            "de instituição este perfil não é vendido como homologado."
-        ),
-    },
-    {
-        "id": "urban-comparative-insurer-reconstruction",
-        "version": "1",
-        "source_set_sha256": None,
-        "purpose": "seguro",
-        "value_basis": "reconstruction_cost",
-        "method": "cost_reconstruction",
-        "asset_scope": "urban_real_estate",
-        "recipient_id": "seguradora",
-        "label": "Seguradora — custo de reconstrução/reposição (rota C01; não homologado)",
-        "announced_offer": True,
-        "method_supports_purpose": False,
-        "compatibility_status": "unverified",
-        "homologation_status": "not_homologated",
-        "requires_art_rrt": True,
-        "requires_distinct_reviewer": True,
-        "required_value_basis": "reconstruction_cost",
-        "checklist_ids": (
-            "purpose_method_fit",
-            "value_basis",
-            "cost_route_c01",
-            "inspection_record",
-            "professional_identity",
-            "art_rrt",
-            "distinct_reviewer",
-            "recipient_package",
-        ),
-        "notes": (
-            "Não converter preço de mercado em custo por coeficiente. Sem rota "
-            "C01 validada e sem catálogo C05 conferido, a oferta securitária "
-            "permanece bloqueada."
-        ),
-        "method_support_note": (
-            "Custo de reconstrução/reposição exige a rota C01; a interface não "
-            "inventa um coeficiente sobre o valor de mercado."
-        ),
-    },
-)
-
-CHECKLIST_LABELS = {
-    "purpose_method_fit": "Método suportado para a finalidade da encomenda",
-    "value_basis": "Base de valor identificada e coerente com o perfil",
-    "sample_review": "Amostra, exclusões e mapa de colunas revisados",
-    "inspection_record": "Vistoria registrada com procedência",
-    "professional_identity": "Identidade profissional informada (não é autenticação do conselho)",
-    "art_rrt": "ART/RRT ou referência documental exigida pelo perfil",
-    "distinct_reviewer": "Revisor distinto do responsável pela emissão",
-    "grade_requirement": "Pedido de grau e status (pending ≠ met)",
-    "limitations_visible": "Limitações e avisos visíveis, sem selo global",
-    "calculated_vs_adopted": "Valor calculado versus adotado (só se C05 admitir)",
-    "recipient_package": "Pacote/instruções do destinatário e comprovante de retorno",
-    "cost_route_c01": "Rota de custo de reconstrução/reposição (C01), não coeficiente de mercado",
-}
-
-BACKUP_NOTICE = (
-    "Rotina de produto vendido: faça cópia de segurança dos projetos e "
-    "revisões. Esta interface não envia dados a nuvem por padrão e não "
-    "substitui o arquivo do profissional."
-)
-
-SYNTHETIC_DEMO_NOTICE = (
-    "Demonstração com dados sintéticos explicitamente marcados — não é "
-    "caso real nem aceite institucional."
-)
-
-
+# Presentation is derived from the installed C05 catalog; no parallel rule catalog.
 def known_profiles() -> list:
-    """Return copies of the UI-known catalog. Not a C05 rule engine."""
-    return [dict(row) for row in _KNOWN_PROFILE_ROWS]
+    from modules.qualification_profile import known_profile_ids as catalog_ids, resolve_profile
+    rows = []
+    for pid in catalog_ids():
+        row = resolve_profile({"id": pid})
+        supported = row.get("method") in {
+            "metodo_comparativo_direto_regressao", "metodo_quantificacao_de_custo",
+        }
+        rows.append({
+            **row, "known": row.get("resolved") is True,
+            "recipient_id": row.get("recipient_id") or "",
+            "label": row.get("label") or pid,
+            "announced_offer": supported, "method_supports_purpose": supported,
+            "compatibility_status": row.get("state"),
+            "homologation_status": "not_homologated", "requires_art_rrt": True,
+            "requires_distinct_reviewer": bool(row.get("recipient_id")),
+            "required_value_basis": row.get("value_basis"),
+            "checklist_ids": tuple(r["id"] for r in row.get("requirements", [])),
+        })
+    return sorted(rows, key=lambda row: (row["id"] != "abnt-14653-2-regressao-mercado", row["id"]))
 
 
 def known_profile_ids() -> tuple:
-    return tuple(row["id"] for row in _KNOWN_PROFILE_ROWS)
+    return tuple(row["id"] for row in known_profiles())
 
 
 def get_known_profile(profile_id: Optional[str]) -> Optional[dict]:
-    if not profile_id:
-        return None
-    for row in _KNOWN_PROFILE_ROWS:
-        if row["id"] == profile_id:
-            return dict(row)
-    return None
+    return next((row for row in known_profiles() if row["id"] == profile_id), None)
 
 
 def _label_map(pairs: Sequence[tuple]) -> dict:
@@ -343,122 +206,51 @@ def purpose_supports_method(purpose: str, method: str, *, profile: Optional[Mapp
 
 
 def select_qualification_profile(
-    profile_id: Optional[str],
-    *,
-    purpose: Optional[str] = None,
-    value_basis: Optional[str] = None,
-    method: Optional[str] = None,
-    asset_scope: Optional[str] = None,
-    recipient_id: Optional[str] = None,
-    version: Optional[str] = None,
+    profile_id: Optional[str], *,
+    purpose: Optional[str] = None, value_basis: Optional[str] = None,
+    method: Optional[str] = None, asset_scope: Optional[str] = None,
+    recipient_id: Optional[str] = None, version: Optional[str] = None,
     source_set_sha256: Optional[str] = None,
 ) -> dict:
-    """Resolve a known profile or flag an unknown/unverified one.
-
-    C02 does not assess rules. Unknown id cannot be sold as homologated.
-    """
+    from modules.qualification_profile import resolve_profile
     known = get_known_profile(profile_id)
-    if known is None:
-        chosen_purpose = purpose or ""
-        chosen_method = method or ""
-        support = purpose_supports_method(chosen_purpose, chosen_method)
-        return {
-            "id": profile_id or "",
-            "version": version or "1",
-            "source_set_sha256": source_set_sha256,
-            "purpose": chosen_purpose,
-            "value_basis": value_basis or "",
-            "method": chosen_method,
-            "asset_scope": asset_scope or "",
-            "recipient_id": recipient_id or "",
-            "known": False,
-            "announced_offer": False,
-            "compatibility_status": "unknown",
-            "homologation_status": "not_homologated",
-            "homologation_badge": None,
-            "sold_as_homologated": False,
-            "method_supports_purpose": support["supported"],
-            "method_support": support,
-            "blocks_ready_for_professional_signoff": True,
-            "block_reason": (
-                "Perfil desconhecido. C02 só escolhe perfis do catálogo conhecido; "
-                "regras pertencem à C05."
-            ),
-            "requires_art_rrt": False,
-            "requires_distinct_reviewer": False,
-            "required_value_basis": value_basis,
-            "checklist_ids": (),
-            "waiting_for": ("C05.catalog", "C01.qualification_context"),
-            "label": "Perfil não verificado / desconhecido",
-        }
-
-    chosen_purpose = purpose if purpose not in (None, "") else known["purpose"]
-    chosen_basis = value_basis if value_basis not in (None, "") else known["value_basis"]
-    chosen_method = method if method not in (None, "") else known["method"]
-    chosen_scope = asset_scope if asset_scope not in (None, "") else known["asset_scope"]
-    chosen_recipient = recipient_id if recipient_id not in (None, "") else known["recipient_id"]
-    support = purpose_supports_method(chosen_purpose, chosen_method, profile=known)
-    mismatch = (
-        chosen_purpose != known["purpose"]
-        or chosen_basis != known["value_basis"]
-        or chosen_method != known["method"]
-        or chosen_scope != known["asset_scope"]
+    request = {"id": profile_id}
+    for key, value in {
+        "purpose": purpose, "value_basis": value_basis, "method": method,
+        "asset_scope": asset_scope, "recipient_id": recipient_id,
+        "version": version, "source_set_sha256": source_set_sha256,
+    }.items():
+        if value is not None:
+            request[key] = value
+    resolved = resolve_profile(request)
+    mismatch = bool(known) and any(
+        key in request and request[key] != known.get(key)
+        for key in ("purpose", "value_basis", "method", "asset_scope", "recipient_id",
+                    "version", "source_set_sha256")
     )
-    unverified = known["homologation_status"] != "institution_accepted"
-    blocks = (
-        not known["known"] if "known" in known else False
-    ) or known["compatibility_status"] == "unknown" or not support["supported"] or mismatch
-    # Bank/insurer remain blocked for signoff until C05/C01 verify + real act.
-    if known["recipient_id"] in {"banco", "seguradora"} and unverified:
-        blocks = True
-        block_reason = (
-            "Perfil institucional não homologado. Compatibilidade do recorte "
-            "não é aceite da instituição."
-        )
-    elif not support["supported"]:
-        block_reason = support["note"]
-    elif mismatch:
-        block_reason = (
-            "Finalidade, base de valor, método ou tipo de bem divergem do perfil selecionado."
-        )
-        blocks = True
-    else:
-        block_reason = None
-        # Exploratory never reaches professional signoff.
-        if known["purpose"] == "analise_exploratoria":
-            blocks = True
-            block_reason = "Análise exploratória não é emissão profissional qualificada."
-
-    payload = {
-        "id": known["id"],
-        "version": version or known["version"],
-        "source_set_sha256": source_set_sha256 if source_set_sha256 is not None else known.get("source_set_sha256"),
-        "purpose": chosen_purpose,
-        "value_basis": chosen_basis,
-        "method": chosen_method,
-        "asset_scope": chosen_scope,
-        "recipient_id": chosen_recipient,
-        "known": True,
-        "announced_offer": bool(known.get("announced_offer")),
-        "compatibility_status": known["compatibility_status"],
-        "homologation_status": "not_homologated",
-        "homologation_badge": None,
-        "sold_as_homologated": False,
-        "institution_accepted": False,
-        "method_supports_purpose": support["supported"],
-        "method_support": support,
-        "blocks_ready_for_professional_signoff": bool(blocks),
-        "block_reason": block_reason,
-        "requires_art_rrt": bool(known.get("requires_art_rrt")),
-        "requires_distinct_reviewer": bool(known.get("requires_distinct_reviewer")),
-        "required_value_basis": known.get("required_value_basis"),
-        "checklist_ids": tuple(known.get("checklist_ids") or ()),
-        "waiting_for": ("C05.assess_qualification", "C01.qualification_context"),
-        "label": known["label"],
-        "notes": known.get("notes"),
-        "mismatch_with_catalog": mismatch,
+    valid = resolved.get("resolved") is True and not mismatch
+    supported = bool(known and known["method_supports_purpose"])
+    blocked = not valid or not supported or resolved.get("state") != "verified"
+    return {
+        **(known or {}), **request,
+        "known": valid, "resolved": valid,
+        "version": resolved.get("version") if valid else version,
+        "source_set_sha256": resolved.get("source_set_sha256") if valid else source_set_sha256,
+        "label": (known or {}).get("label", "Perfil desconhecido"),
+        "compatibility_status": resolved.get("state") if valid else "unknown",
+        "announced_offer": bool(known and known["announced_offer"]),
+        "homologation_status": "not_homologated", "homologation_badge": None,
+        "sold_as_homologated": False, "institution_accepted": False,
+        "method_supports_purpose": supported,
+        "method_support": {"supported": supported, "hide_mismatch": False,
+                           "note": "Escopo do catálogo instalado; liberação depende da avaliação do caso."},
+        "blocks_ready_for_professional_signoff": blocked,
+        "block_reason": "Perfil ausente, divergente ou com requisito pendente." if blocked else None,
+        "mismatch_with_catalog": mismatch, "waiting_for": (),
+        "requires_art_rrt": True, "requires_distinct_reviewer": bool((known or {}).get("recipient_id")),
+        "checklist_ids": (known or {}).get("checklist_ids", ()),
+        "required_value_basis": (known or {}).get("value_basis"),
     }
-    return payload
 
 
 def qualification_profile_wire(profile: Optional[Mapping[str, Any]]) -> dict:

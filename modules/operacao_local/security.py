@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import os
+import ntpath
 import re
 import zipfile
 from dataclasses import dataclass
@@ -83,7 +84,7 @@ class UploadPolicy:
 
 
 def _safe_upload_name(name: str) -> str:
-    if not name or "\x00" in name or name != os.path.basename(name):
+    if not name or "\x00" in name or "/" in name or "\\" in name or ntpath.splitdrive(name)[0]:
         raise ValueError("upload name must be a plain filename")
     suffix = Path(name).suffix.lower()
     if suffix == "" or name.startswith("."):
@@ -114,10 +115,16 @@ def _inspect_zip(content: bytes, policy: UploadPolicy, *, require_xlsx: bool = F
             total = sum(item.file_size for item in infos)
             if total > policy.max_uncompressed_bytes:
                 raise ValueError("zip uncompressed size exceeds limit")
+            seen = set()
             for item in infos:
                 normalized = item.filename.replace("\\", "/")
-                if normalized.startswith("/") or ".." in Path(normalized).parts:
+                if (normalized.startswith("/") or ".." in Path(normalized).parts
+                        or ntpath.splitdrive(normalized)[0] or ":" in normalized):
                     raise ValueError("zip contains unsafe member path")
+                canonical = normalized.rstrip("/").casefold()
+                if canonical in seen:
+                    raise ValueError("zip contains duplicate or case-colliding members")
+                seen.add(canonical)
                 if item.flag_bits & 0x1:
                     raise ValueError("encrypted zip members are not accepted")
                 file_type = (item.external_attr >> 16) & 0o170000

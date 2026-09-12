@@ -117,7 +117,7 @@ def test_aggregator_opens_the_evidence_not_only_the_job_results():
     uses = [s.get("uses", "") for s in steps]
     assert any(u.startswith("actions/download-artifact@") for u in uses), uses
     download = next(s for s in steps if str(s.get("uses", "")).startswith("actions/download-artifact@"))
-    assert download["with"].get("merge-multiple") is True
+    assert download["with"].get("merge-multiple") is False
     run_bodies = " ".join(s.get("run", "") for s in steps)
     assert "--artifacts-dir" in run_bodies
     assert "--expected-sha" in run_bodies
@@ -125,15 +125,16 @@ def test_aggregator_opens_the_evidence_not_only_the_job_results():
     assert "--p04-mode accept-candidate" in run_bodies
 
 
-def test_expected_sha_uses_the_pr_head_not_the_merge_commit():
-    """On pull_request, github.sha is the merge commit; artifacts carry the head."""
+def test_expected_sha_uses_tested_merge_and_requires_parent_identity():
+    """Default checkout tests github.sha; provenance separately binds both parents."""
     step = next(
         s
         for s in _jobs()["acceptance"]["steps"]
         if "--expected-sha" in str(s.get("run", ""))
     )
     expr = str((step.get("env") or {}).get("CANDIDATE_SHA") or "")
-    assert "pull_request.head.sha" in expr, expr
+    assert expr == "${{ github.sha }}", expr
+    assert "--require-identity" in step["run"]
 
 
 def test_no_mandatory_upload_may_vanish_silently():

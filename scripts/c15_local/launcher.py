@@ -156,6 +156,9 @@ def _print_pdf_probe() -> int:
 def main_api(argv: Optional[Sequence[str]] = None) -> int:
     cfg = _config()
     ensure_local_directories(cfg)
+
+    from modules.operacao_local.runtime import get_security_policy
+    get_security_policy()  # Provision private credentials before starting either child.
     from modules.logging_manager import logger
 
     logger.info("Starting API on %s:%s", cfg.API_HOST, cfg.API_PORT)

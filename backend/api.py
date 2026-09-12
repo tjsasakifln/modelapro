@@ -169,7 +169,9 @@ def get_job_store():
     if RuntimeBindings.job_store is not None:
         return RuntimeBindings.job_store
     stores, _ = _import_c11()
-    instance = _instantiate(stores["JobStore"])
+    from modules.operacao_local.runtime import active_store_root
+    root = active_store_root()
+    instance = _instantiate(stores["JobStore"], root) if root else _instantiate(stores["JobStore"])
     if instance is None:
         return None
     RuntimeBindings.job_store = instance
@@ -180,7 +182,9 @@ def get_project_store():
     if RuntimeBindings.project_store is not None:
         return RuntimeBindings.project_store
     stores, _ = _import_c11()
-    instance = _instantiate(stores["ProjectStore"])
+    from modules.operacao_local.runtime import active_store_root
+    root = active_store_root()
+    instance = _instantiate(stores["ProjectStore"], root) if root else _instantiate(stores["ProjectStore"])
     if instance is None:
         return None
     RuntimeBindings.project_store = instance
@@ -327,6 +331,11 @@ async def read_upload_limited(upload: UploadFile, max_bytes: int) -> bytes:
                 "issues": [make_issue("EMPTY_FILE", "Uploaded file is empty", origin="c10.api")],
             },
         )
+    from modules.operacao_local.security import UploadPolicy, validate_upload
+    try:
+        validate_upload(upload.filename or "", data, UploadPolicy(max_bytes=max_bytes))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_UPLOAD", "message": str(exc)}) from exc
     return data
 
 
@@ -427,8 +436,8 @@ def request_spec_from_upload_form(
     candidate_cols: Any,
     solicitante: str,
     finalidade: str,
-    grau_item1: int,
-    grau_item3: int,
+    grau_item1: Optional[int],
+    grau_item3: Optional[int],
 ) -> dict:
     """Compatibility adapter from the legacy /upload form into RequestSpec."""
     if not isinstance(degree, int) or isinstance(degree, bool) or degree < DEGREE_MIN or degree > DEGREE_MAX:
@@ -448,7 +457,7 @@ def request_spec_from_upload_form(
             },
         )
     for label, value in (("grau_item1", grau_item1), ("grau_item3", grau_item3)):
-        if not isinstance(value, int) or isinstance(value, bool) or value < DEGREE_MIN or value > DEGREE_MAX:
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0 or value > DEGREE_MAX):
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -640,6 +649,9 @@ app.add_middleware(
 
 app.include_router(websocket_router)
 
+from .local_guard import LocalRequestGuard
+app.add_middleware(LocalRequestGuard)
+
 worker = Worker()
 
 
@@ -652,6 +664,91 @@ async def _on_startup():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/operations/license")
+async def current_license():
+    from modules.operacao_local.runtime import license_decision
+    decision = license_decision()
+    return {"signature_valid": decision.valid_signature, "expired": decision.expired,
+            "calculate": decision.permits("calculate"), "reason": decision.reason}
+
+
+@app.post("/operations/license")
+async def import_buyer_license(request: Request):
+    import base64
+    from modules.commercial_license import install_license, LicenseError
+    from modules.operacao_local.runtime import runtime_root
+    body = await request.body()
+    if len(body) > 65536:
+        raise HTTPException(413, "license envelope exceeds limit")
+    try:
+        key = os.environ.get("MODELA_LICENSE_PUBLIC_KEY", "")
+        if not key:
+            raise LicenseError("vendor public key not configured")
+        install_license(json.loads(body), base64.urlsafe_b64decode(key + "=" * (-len(key) % 4)),
+                        os.environ.get("MODELA_LICENSE_PATH") or runtime_root() / "entitlement.json")
+    except (ValueError, TypeError, OSError) as exc:
+        raise HTTPException(400, "invalid buyer entitlement") from exc
+    return await current_license()
+
+
+@app.get("/operations/backup")
+async def export_workspace_backup():
+    import io
+    from pathlib import Path
+    import tempfile
+    import zipfile
+    store = get_job_store()
+    if store is None:
+        raise HTTPException(503, "store unavailable")
+    def export():
+        with tempfile.TemporaryDirectory(prefix="modelapro-backup-") as temporary:
+            backup = store.export_backup(Path(temporary) / "backup")
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+                for path in sorted(backup.rglob("*")):
+                    if path.is_file():
+                        archive.write(path, path.relative_to(backup).as_posix())
+            return output.getvalue()
+    payload = await asyncio.to_thread(export)
+    return Response(payload, media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="modelapro-backup.zip"'})
+
+
+@app.post("/operations/restore")
+async def restore_workspace_backup(file: UploadFile = File(...)):
+    import io
+    from pathlib import Path
+    import secrets
+    import tempfile
+    import zipfile
+    from modules.job_store import JobStore, atomic_write_json
+    from modules.project_store import ProjectStore
+    from modules.operacao_local.runtime import runtime_root
+    from modules.operacao_local.security import UploadPolicy, validate_upload
+    store = get_job_store()
+    if store is None or store.list_jobs():
+        raise HTTPException(409, "restore requires an empty workspace; existing evidence is preserved")
+    content = await file.read(100 * 1024 * 1024 + 1)
+    try:
+        validate_upload(file.filename or "", content, UploadPolicy(
+            allowed_extensions=frozenset({".zip"}), max_bytes=100 * 1024 * 1024,
+            max_zip_members=10000, max_uncompressed_bytes=500 * 1024 * 1024,
+            max_compression_ratio=1000))
+        relative = "restored-stores/" + secrets.token_hex(16)
+        destination = runtime_root() / relative
+        with tempfile.TemporaryDirectory(prefix="modelapro-restore-") as temporary:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                archive.extractall(temporary)  # Every member was checked above, before extraction.
+            restored = JobStore.restore_backup(Path(temporary), destination)
+        atomic_write_json(runtime_root() / "restored-store.json", {"relative_path": relative})
+        JobStore.configure_default(destination, recover_abandoned=False)
+        bind_runtime(job_store=restored, project_store=ProjectStore(destination))
+        RuntimeBindings.task_runner = None
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, "backup integrity verification failed") from exc
+    return {"status": "restored", "job_count": len(restored.list_jobs())}
 
 
 @app.post("/preview")
@@ -1179,8 +1276,10 @@ async def upload_file(
     degree: int = Form(...),
     target_col: str = Form(...),
     avaliando_json: Optional[str] = Form(None),
-    grau_item1: int = Form(1),
-    grau_item3: int = Form(1),
+    grau_item1: Optional[int] = Form(None),
+    grau_item3: Optional[int] = Form(None),
+    item1_provenance: Optional[str] = Form(None),
+    item3_provenance: Optional[str] = Form(None),
     candidate_cols_json: Optional[str] = Form(None),
     solicitante: str = Form(""),
     finalidade: str = Form(""),
@@ -1217,6 +1316,9 @@ async def upload_file(
         grau_item1=grau_item1,
         grau_item3=grau_item3,
     )
+    for name, raw in (("item1_provenance", item1_provenance), ("item3_provenance", item3_provenance)):
+        if raw is not None:
+            spec_payload["declared_documentary"][name] = _parse_json_field(raw, field=name)
     spec = _validate_spec_or_400(spec_payload)
     file_bytes = await read_upload_limited(file, _max_upload_bytes())
     filename = file.filename or "upload.bin"

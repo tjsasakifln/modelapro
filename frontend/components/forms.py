@@ -414,6 +414,12 @@ def build_request_spec(
 
     spec = {
         "schema_version": SCHEMA_VERSION,
+        "declared_documentary": {
+            "item1_grade": (documentary or {}).get("item1_grade_declared"),
+            "item3_grade": (documentary or {}).get("item3_grade_declared"),
+            "item1_provenance": (documentary or {}).get("item1_provenance"),
+            "item3_provenance": (documentary or {}).get("item3_provenance"),
+        },
         "target_col": target_col,
         "candidate_cols": cols,
         "roles": dict(roles or {}),
@@ -785,6 +791,14 @@ class JobClient:
 
     def _call(self, method: str, path: str, **kwargs) -> httpx.Response:
         url = path if path.startswith("http") else f"{self.base_url}{path}"
+        from modules.operacao_local.runtime import local_client_headers
+        from urllib.parse import urlsplit
+        if urlsplit(url).netloc != urlsplit(self.base_url).netloc:
+            raise ApiConnectionError("Destino da API diverge do serviço local configurado.")
+        if self._http is None and (urlsplit(url).hostname not in {"localhost", "127.0.0.1", "::1"}
+                                   or urlsplit(url).scheme != "http"):
+            raise ApiConnectionError("A distribuição local exige API em loopback.")
+        kwargs["headers"] = {**local_client_headers(), **kwargs.pop("headers", {})}
         http = self._own_client()
         owns = self._http is None
         try:
@@ -1219,7 +1233,7 @@ def _encomenda_widgets() -> dict:
         "Perfil de qualificação (versionado, catálogo conhecido)",
         options=profile_ids,
         format_func=lambda value: labels.get(value, value),
-        index=1 if len(profile_ids) > 1 else 0,
+        index=0,
         key="c02_profile_id",
         help=(
             "C02 escolhe perfis conhecidos. Regras e conferência normativa são da C05. "
@@ -1242,6 +1256,7 @@ def _encomenda_widgets() -> dict:
     asset_scope = st.selectbox(
         "Tipo de bem",
         options=asset_ids,
+        index=asset_ids.index(chosen["asset_scope"]) if chosen.get("asset_scope") in asset_ids else 0,
         format_func=lambda value: asset_labels.get(value, value),
         key="c02_asset_scope",
     )
@@ -1834,19 +1849,23 @@ def upload_form(
     )
     grau_item1 = st.selectbox(
         "Grau declarado de caracterização do imóvel avaliando (item documental)",
-        options=[1, 2, 3],
+        options=[None, 0, 1, 2, 3],
         index=0,
         key=f"p02_{ns}_grau_item1",
+        format_func=lambda v: "Não declarado" if v is None else str(v),
         help="Declaração do profissional, não verificação automática da planilha.",
     )
     grau_item3 = st.selectbox(
         "Grau declarado de identificação dos dados de mercado (item documental)",
-        options=[1, 2, 3],
+        options=[None, 0, 1, 2, 3],
         index=0,
         key=f"p02_{ns}_grau_item3",
+        format_func=lambda v: "Não declarado" if v is None else str(v),
         help="Declaração do profissional. Pontuação documental declarada não vira comprovação.",
     )
 
+    item1_ref = st.text_input("Evidência da caracterização do avaliando", key=f"p02_{ns}_item1_ref")
+    item3_ref = st.text_input("Evidência da identificação dos dados de mercado", key=f"p02_{ns}_item3_ref")
     request_spec = build_request_spec(
         target_col=target_col,
         candidate_cols=candidate_cols,
@@ -1865,6 +1884,8 @@ def upload_form(
             "item1_grade_declared": grau_item1,
             "item3_grade_declared": grau_item3,
             "provenance": "declared_by_user",
+            "item1_provenance": {"source": "professional_declaration", "evidence_ref": item1_ref} if item1_ref else None,
+            "item3_provenance": {"source": "professional_declaration", "evidence_ref": item3_ref} if item3_ref else None,
         },
         rights=encomenda_state.get("rights"),
         recipient_id=encomenda_state.get("recipient_id"),
