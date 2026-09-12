@@ -11,6 +11,7 @@ Renderer failures on the MP/1 path raise `ReportRenderError` (never `None`).
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import math
 import re
@@ -29,7 +30,9 @@ import seaborn as sns
 
 from .config_manager import config
 from .logging_manager import logger
+from .provenance import canonical_json
 from .report_presenter.formula import compose_model_equation
+from .report_presenter.qualification import assess_document_state
 from .report_presenter.search_coverage import interpret_search
 from .report_presenter.series import assess_chart_series
 from .results import ModelResult
@@ -568,6 +571,40 @@ def _document_items(raw: Any) -> List[Dict[str, Any]]:
     return items
 
 
+def _documentary_attachments(raw: Any) -> List[Dict[str, Any]]:
+    """Prepare only explicitly authorized attachment bytes for the report."""
+    attachments = []
+    for index, item in enumerate(_as_list(raw)):
+        if not isinstance(item, Mapping):
+            continue
+        content = item.get("bytes") or item.get("content")
+        media_type = _safe_text(item.get("type") or item.get("media_type") or "application/octet-stream")
+        authorized = item.get("authorized_for_report") is True
+        row = {
+            "name": _safe_text(item.get("filename") or item.get("name") or f"anexo-{index + 1}"),
+            "media_type": media_type,
+            "authorized": authorized,
+            "sha256": hashlib.sha256(bytes(content)).hexdigest()
+            if isinstance(content, (bytes, bytearray))
+            else _safe_text(item.get("sha256") or ""),
+            "image_data_uri": None,
+            "status": "mapped",
+        }
+        if authorized and isinstance(content, (bytes, bytearray)) and media_type in {
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+        }:
+            row["image_data_uri"] = f"data:{media_type};base64," + base64.b64encode(bytes(content)).decode("ascii")
+            row["status"] = "embedded"
+        elif not authorized:
+            row["status"] = "not_authorized_for_report"
+        elif not isinstance(content, (bytes, bytearray)):
+            row["status"] = "bytes_missing"
+        attachments.append(row)
+    return attachments
+
+
 def _next_action_dict(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, Mapping):
         limitations_raw = raw.get("limitations")
@@ -740,6 +777,11 @@ def build_report_view(
     fundamentacao = _as_mapping(validation.get("fundamentacao"))
     statistical = _as_mapping(validation.get("statistical"))
     documentary = validation.get("documentary")
+    document_state = assess_document_state(snapshot, ctx)
+    qualification_profile = _as_mapping(document_state.get("profile"))
+    qualification_rules = [
+        _redact_mapping(rule) for rule in _as_list(document_state.get("rule_results")) if isinstance(rule, Mapping)
+    ]
 
     unit = _normalize_unit(target.get("unit") if target.get("unit") is not None else ctx.get("target_unit"))
     unit_pending = unit is None
@@ -757,6 +799,13 @@ def build_report_view(
     prediction_interval = _interval_bounds(value.get("prediction_interval"))
     arbitration_interval = _interval_bounds(value.get("arbitration_interval"))
     admissible_interval = _interval_bounds(value.get("admissible_interval"))
+    adopted_raw = value.get("adopted_value", value.get("adopted"))
+    if isinstance(adopted_raw, Mapping):
+        adopted_point = _as_finite_number(adopted_raw.get("point") or adopted_raw.get("value"))
+        adopted_reason = _safe_text(adopted_raw.get("reason") or adopted_raw.get("policy_ref") or "")
+    else:
+        adopted_point = _as_finite_number(adopted_raw)
+        adopted_reason = _safe_text(value.get("adoption_policy_ref") or "")
 
     used_ids = [str(i) for i in _as_list(sample.get("used_row_ids"))]
     excluded_ids = [str(i) for i in _as_list(sample.get("excluded_row_ids"))]
@@ -782,12 +831,8 @@ def build_report_view(
         excluded_details,
         default_justification="Pendência: justificativa de exclusão não informada",
     )
-    used_value_columns = [
-        c for c in _value_columns(used_rows) if c.lower() not in {"nome", "name", "label", "rotulo", "rótulo"}
-    ]
-    excluded_value_columns = [
-        c for c in _value_columns(excluded_rows) if c.lower() not in {"nome", "name", "label", "rotulo", "rótulo"}
-    ]
+    used_value_columns = _value_columns(used_rows)
+    excluded_value_columns = _value_columns(excluded_rows)
     for n, row in enumerate(used_rows, start=1):
         row["seq"] = n
         storage = row.get("storage_values") or {}
@@ -813,6 +858,9 @@ def build_report_view(
 
     documents = _document_items(documentary)
     documents.extend(_document_items(ctx.get("documents")))
+    documentary_attachments = _documentary_attachments(
+        ctx.get("documentary_files") or ctx.get("photos") or ctx.get("attachments")
+    )
     # de-duplicate by (name, status)
     seen_docs = set()
     unique_docs = []
@@ -923,6 +971,7 @@ def build_report_view(
 
     frozen = {
         "MP1_POINT": format_snapshot_number(point),
+        "MP1_ADOPTED_VALUE": format_snapshot_number(adopted_point),
         "MP1_MEAN_CI80_LOWER": format_snapshot_number(mean_ci80["lower"] if mean_ci80 else None),
         "MP1_MEAN_CI80_UPPER": format_snapshot_number(mean_ci80["upper"] if mean_ci80 else None),
         "MP1_PRED_LOWER": format_snapshot_number(
@@ -961,8 +1010,39 @@ def build_report_view(
         "MP1_PRECISAO_GRADE": (
             str(int(precisao_grade)) if isinstance(precisao_grade, int) else "PENDENTE"
         ),
+        "MPQUAL_PROFILE_ID": qualification_profile.get("id") or "PENDENTE",
+        "MPQUAL_PROFILE_VERSION": qualification_profile.get("version") or "PENDENTE",
+        "MPQUAL_VALUE_BASIS": qualification_profile.get("value_basis") or "PENDENTE",
+        "MPQUAL_RELEASE_STATUS": document_state.get("case_release_status") or "analysis_only",
+        "MPQUAL_GRADE_REQUIREMENT": document_state.get("grade_requirement_status") or "pending",
+        "MPQUAL_RESULT_FINGERPRINT": document_state.get("result_fingerprint") or "PENDENTE",
+        "MPQUAL_REPORT_CONTENT_FINGERPRINT": document_state.get("report_content_fingerprint")
+        or "PENDENTE",
+        "MPQUAL_REVIEW_EVENTS": str(len(document_state.get("review_events") or [])),
+        "MPQUAL_RULES_SHA256": hashlib.sha256(
+            canonical_json(qualification_rules).encode("utf-8")
+        ).hexdigest(),
+        "MPQUAL_REVIEW_SHA256": hashlib.sha256(
+            canonical_json(document_state.get("review_events") or []).encode("utf-8")
+        ).hexdigest(),
+        "MPSAMPLE_ROWS_SHA256": hashlib.sha256(
+            canonical_json(
+                {
+                    "used_rows": _as_list(ctx.get("used_rows")),
+                    "excluded_rows": _as_list(ctx.get("excluded_rows")),
+                }
+            ).encode("utf-8")
+        ).hexdigest(),
     }
     frozen_lines = [f"{key}={value}" for key, value in frozen.items()]
+
+    provenance_for_report = _redact_mapping(provenance)
+    for verbose_key in ("qualification_context", "workflow_context"):
+        verbose_value = provenance_for_report.pop(verbose_key, None)
+        if verbose_value:
+            provenance_for_report[f"{verbose_key}_sha256"] = hashlib.sha256(
+                canonical_json(verbose_value).encode("utf-8")
+            ).hexdigest()
 
     grau_fundamentacao_label = GRAU_LABELS.get(fundamentacao.get("grade"), "Não classificado")
     if precisao_status == "unclassified":
@@ -1017,16 +1097,87 @@ def build_report_view(
         else:
             alternatives.append({"id": "", "summary": _safe_text(alt)})
 
-    applicant = ctx.get("applicant") or snapshot.get("applicant") or provenance.get("applicant") or ""
-    purpose = ctx.get("purpose") or snapshot.get("purpose") or provenance.get("purpose") or ""
+    applicant = (
+        ctx.get("applicant")
+        or snapshot.get("applicant")
+        or provenance.get("applicant")
+        or qualification_profile.get("applicant")
+        or ""
+    )
+    purpose = (
+        qualification_profile.get("purpose")
+        or ctx.get("purpose")
+        or snapshot.get("purpose")
+        or provenance.get("purpose")
+        or ""
+    )
+    rights = ctx.get("rights") or ctx.get("property_rights") or ""
+    asset_identification = ctx.get("asset_identification") or ctx.get("asset") or subject
+    if isinstance(asset_identification, Mapping):
+        asset_identification_display = "; ".join(
+            f"{_safe_text(key)}: {_safe_text(val)}" for key, val in asset_identification.items()
+        )
+    else:
+        asset_identification_display = _safe_text(asset_identification)
+    if rights:
+        asset_identification_display = (
+            f"{asset_identification_display}; direitos: {_safe_text(rights)}"
+            if asset_identification_display
+            else f"Direitos: {_safe_text(rights)}"
+        )
+    methodology = (
+        ctx.get("methodology_justification")
+        or qualification_profile.get("method")
+        or validation.get("method")
+        or ""
+    )
+    approved_reviews = document_state.get("approved_review_events") or []
+    if approved_reviews:
+        review = approved_reviews[-1]
+        professional = _as_mapping(review.get("professional") or review.get("reviewer"))
+        professional_review_display = " — ".join(
+            part
+            for part in (
+                _safe_text(professional.get("name") or review.get("professional_name") or "Profissional identificado"),
+                _safe_text(professional.get("registration") or review.get("professional_id") or ""),
+                _safe_text(review.get("reason") or review.get("motive") or review.get("motivation") or ""),
+                _safe_text(review.get("revision_id") or review.get("version") or ""),
+            )
+            if part
+        )
+    else:
+        professional_review_display = "PENDENTE — evento aprovador identificável ausente"
+    acceptance = _as_mapping(document_state.get("institution_acceptance"))
+    acceptance_status = _safe_text(acceptance.get("status") or "not_recorded")
+    if acceptance_status.lower() in {"accepted", "approved"}:
+        institution_acceptance_display = " — ".join(
+            part
+            for part in (
+                acceptance_status,
+                _safe_text(acceptance.get("recipient_id") or qualification_profile.get("recipient_id") or ""),
+                _safe_text(acceptance.get("protocol") or acceptance.get("event_id") or ""),
+                _safe_text(acceptance.get("version") or acceptance.get("document_sha256") or ""),
+            )
+            if part
+        )
+    else:
+        institution_acceptance_display = "Não registrada; emissão do laudo não implica aceitação do destinatário."
 
     view = {
         "app_name": config.APP_NAME,
-        "document_kind": "Minuta técnica para revisão profissional",
-        "not_approved_label": "Este documento não é laudo aprovado automaticamente",
+        "document_kind": document_state["document_kind"],
+        "document_is_final": document_state["is_final"],
+        "not_approved_label": (
+            "Laudo final emitido após os critérios e a revisão vinculados a esta versão"
+            if document_state["is_final"]
+            else "Este documento não é laudo aprovado automaticamente e permanece análise/minuta"
+        ),
         "issuance_status": issuance_status,
-        "issuance_label": ISSUANCE_LABELS[issuance_status],
+        "issuance_label": document_state["document_kind"],
         "issuance_reasons": issuance_reasons,
+        "document_state": document_state,
+        "document_state_blockers": document_state["blockers"],
+        "case_release_status": document_state["case_release_status"],
         "applicant": _safe_text(applicant) or "Não informado",
         "purpose": _safe_text(purpose) or "Não informado",
         "target_col": _safe_text(target.get("column") or ""),
@@ -1050,6 +1201,13 @@ def build_report_view(
             format_snapshot_number(point) if point is not None else "—"
         ),
         "point_raw": format_snapshot_number(point),
+        "adopted_value": adopted_point,
+        "adopted_value_display": (
+            format_value_with_unit(adopted_point, unit) if adopted_point is not None and not unit_pending else (
+                format_snapshot_number(adopted_point) if adopted_point is not None else "Não adotado"
+            )
+        ),
+        "adopted_value_reason": adopted_reason or "Política de adoção não declarada",
         "mean_ci80": mean_ci80,
         "mean_ci80_display": _interval_display(mean_ci80, unit if not unit_pending else None),
         "prediction_interval": prediction_interval,
@@ -1096,6 +1254,7 @@ def build_report_view(
         "grau_precisao_label": grau_precisao_label,
         "item_scores": item_scores,
         "documents": unique_docs,
+        "documentary_attachments": documentary_attachments,
         "next_actions": next_actions,
         "search_exhaustive": search_exhaustive,
         "search_mode": _safe_text(search_mode) if search_mode else "",
@@ -1141,6 +1300,31 @@ def build_report_view(
         "annexes": annexes,
         "subject_items": subject_items,
         "has_subject": bool(subject_items),
+        "asset_identification_display": asset_identification_display or _pending("identificação do bem não informada"),
+        "rights_display": _safe_text(rights) or _pending("direitos avaliados não informados"),
+        "region_characterization": _safe_text(ctx.get("region_characterization") or ""),
+        "property_characterization": _safe_text(ctx.get("property_characterization") or ""),
+        "methodology_display": _safe_text(methodology) or _pending("justificativa metodológica não informada"),
+        "assumptions": [_safe_text(x) for x in _as_list(ctx.get("assumptions"))],
+        "professional_review_display": professional_review_display,
+        "qualification_profile": qualification_profile,
+        "qualification_profile_display": (
+            " / ".join(
+                part
+                for part in (
+                    _safe_text(qualification_profile.get("id")),
+                    _safe_text(qualification_profile.get("version")),
+                    _safe_text(qualification_profile.get("recipient_id")),
+                )
+                if part
+            )
+            or "PENDENTE"
+        ),
+        "value_basis_display": _safe_text(qualification_profile.get("value_basis")) or "PENDENTE",
+        "qualification_rules": qualification_rules,
+        "result_fingerprint": document_state.get("result_fingerprint"),
+        "institution_acceptance_display": institution_acceptance_display,
+        "digital_signature": document_state.get("signature") or {},
         "alternatives": alternatives,
         "model_id": _safe_text(model_id) if model_id else "",
         "model_revision": _safe_text(model_revision) if model_revision else "",
@@ -1148,7 +1332,7 @@ def build_report_view(
         "model_sha": _safe_text(model_sha) if model_sha else "",
         "code_sha": _safe_text(code_sha) if code_sha else "",
         "input_sha256": _safe_text(input_sha) if input_sha else "",
-        "provenance_safe": _redact_mapping(provenance),
+        "provenance_safe": provenance_for_report,
         "frozen": frozen,
         "frozen_lines": frozen_lines,
         "charts": {},
@@ -1372,6 +1556,16 @@ def render_report(
     Does not fit or recalculate a regression.
     """
     view = build_report_view(snapshot, report_context)
+    if (
+        view.get("case_release_status") == "signed_integrity_verified"
+        and view.get("document_is_final")
+    ):
+        raise ReportRenderError(
+            "A revisão assinada não pode ser renderizada novamente; entregue os bytes assinados já vinculados.",
+            code="C03_SIGNED_REVISION_IMMUTABLE",
+            origin="C03",
+            evidence={"result_fingerprint": view.get("result_fingerprint")},
+        )
     view = _attach_charts(view, report_context)
     html_content = compose_report_html(snapshot, report_context, view=view)
     return _write_pdf(html_content)

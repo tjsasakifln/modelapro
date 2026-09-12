@@ -8,7 +8,7 @@
     size: A4;
     margin: 1.5cm 1.4cm 1.8cm 1.4cm;
     @bottom-center {
-      content: "Minuta para revisão profissional — página " counter(page) " de " counter(pages);
+      content: "{{ document_kind }} — página " counter(page) " de " counter(pages);
       font-size: 8pt;
       color: #555;
     }
@@ -71,6 +71,14 @@
     border-radius: 3px;
   }
   .minuta-banner strong { display: block; margin-bottom: 2px; }
+  .final-banner {
+    background-color: #e8f5ed;
+    border: 1.5pt solid #237a45;
+    color: #123d24;
+    padding: 8px 10px;
+    margin: 0.4em 0 0.8em 0;
+    border-radius: 3px;
+  }
   .meta-block p { margin: 2px 0; }
   .meta-block b {
     display: inline-block;
@@ -187,13 +195,6 @@
   .status-present { background: #eaf2f8; }
   .status-verified { background: #e8f8f5; }
   .status-pending { background: #fdecea; }
-  footer.report-footer {
-    margin-top: 1.4em;
-    padding-top: 8px;
-    border-top: 1px solid #ccc;
-    font-size: 8pt;
-    color: #555;
-  }
   .no-data { color: #666; font-style: italic; }
   .annex { page: annex; page-break-before: always; }
   .ledger { page: ledger; page-break-before: always; }
@@ -208,6 +209,7 @@
   .lead-value { font-size: 13pt; font-weight: bold; color: #0b3d5c; }
   .tech-trail { page-break-before: always; }
   .muted { color: #555; font-size: 8.5pt; }
+  .document-image { max-width: 100%; max-height: 12cm; object-fit: contain; page-break-inside: avoid; }
 </style>
 </head>
 <body>
@@ -215,13 +217,20 @@
   <h1>{{ app_name }} — {{ document_kind }}</h1>
   <div class="subtitle">
     Método Comparativo Direto de Dados de Mercado — tratamento científico por regressão.
-    Saída técnica para revisão profissional; não substitui o laudo do avaliador.
+    {% if document_is_final %}
+    Laudo vinculado ao perfil, às regras e à revisão profissional identificados abaixo.
+    {% else %}
+    Saída técnica para revisão profissional; não substitui o laudo final do avaliador.
+    {% endif %}
   </div>
 
-  <div class="minuta-banner">
+  <div class="{% if document_is_final %}final-banner{% else %}minuta-banner{% endif %}">
     <strong>{{ issuance_label }}</strong>
-    {{ not_approved_label }}. Grau de fundamentação ou precisão da tabela, quando informado,
+    {{ not_approved_label }}.
+    {% if not document_is_final %}
+    Grau de fundamentação ou precisão da tabela, quando informado,
     não equivale a prontidão integral de emissão nem a aprovação automática.
+    {% endif %}
     {% if issuance_reasons %}
     <ul>
       {% for reason in issuance_reasons %}
@@ -233,13 +242,15 @@
 
   <div class="meta-block">
     <p><b>Solicitante:</b> {{ applicant }}</p>
-    <p><b>Objeto / finalidade:</b> {{ purpose }}</p>
+    <p><b>Finalidade:</b> {{ purpose }}</p>
+    <p><b>Bem e direitos avaliados:</b> {{ asset_identification_display }}</p>
+    <p><b>Direitos:</b> {{ rights_display }}</p>
     <p><b>Data-base (referência):</b>
       {% if reference_date %}{{ reference_date }}
       {% else %}<span class="pending">{{ reference_date_display }}</span>
       {% endif %}
     </p>
-    <p><b>Data de emissão desta minuta:</b> {{ generated_at }}</p>
+    <p><b>Data de emissão desta revisão:</b> {{ generated_at }}</p>
     {% if inspection_date %}
     <p><b>Data de vistoria (informada no pedido, sem comprovar realização):</b> {{ inspection_date }}</p>
     {% endif %}
@@ -260,7 +271,35 @@
     </p>
   </div>
 
-  <h2>Resultado para revisão</h2>
+  <h2>Perfil, método e escopo qualificado</h2>
+  <table class="metrics-grid">
+    <tr><td class="label">Perfil resolvido</td><td>{{ qualification_profile_display }}</td></tr>
+    <tr><td class="label">Base de valor</td><td>{{ value_basis_display }}</td></tr>
+    <tr><td class="label">Método e justificativa</td><td>{{ methodology_display }}</td></tr>
+    <tr><td class="label">Escopo do bem</td><td>{{ qualification_profile.asset_scope or "PENDENTE" }}</td></tr>
+    <tr><td class="label">Destinatário</td><td>{{ qualification_profile.recipient_id or "PENDENTE" }}</td></tr>
+    <tr><td class="label">Estado do caso</td><td>{{ case_release_status }}</td></tr>
+    <tr><td class="label">Fingerprint do resultado</td><td class="long-wrap">{{ result_fingerprint or "PENDENTE" }}</td></tr>
+  </table>
+  {% if document_state_blockers %}
+  <h3>Pendências que impedem laudo final</h3>
+  <ul>
+    {% for blocker in document_state_blockers %}
+    <li class="long-wrap"><b>{{ blocker.code }}</b> — {{ blocker.message }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <h2>Caracterização e pressupostos</h2>
+  <p><b>Região:</b> {{ region_characterization or "PENDENTE — caracterização da região não informada" }}</p>
+  <p><b>Imóvel:</b> {{ property_characterization or "PENDENTE — caracterização do imóvel não informada" }}</p>
+  {% if assumptions %}
+  <ul>{% for assumption in assumptions %}<li>{{ assumption }}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="pending">Pressupostos e ressalvas específicos não informados.</p>
+  {% endif %}
+
+  <h2>{% if document_is_final %}Resultado da avaliação{% else %}Resultado para revisão{% endif %}</h2>
   <p class="lead-value">Estimativa pontual: {{ point_display }}
     <span class="muted">(armazenado: {{ point_raw }}; arredondamento de resumo com {{ display_rounding_decimals }} casas)</span>
   </p>
@@ -271,6 +310,10 @@
 
   <h2>Identificação do resultado</h2>
   <table class="metrics-grid">
+    <tr>
+      <td class="label">Valor adotado e política</td>
+      <td>{{ adopted_value_display }} — {{ adopted_value_reason }}</td>
+    </tr>
     <tr>
       <td class="label">Estimativa pontual (snapshot.value.point)</td>
       <td>{{ point_display }} <span class="no-data">(bruto: {{ point_raw }})</span></td>
@@ -296,6 +339,46 @@
       <td>O ponto acima é a estimativa do snapshot (em geral média condicional / estimando declarado). Mediana, quando houver, aparece só na descritiva amostral e não substitui este ponto.</td>
     </tr>
   </table>
+
+  <h2>Regras aplicáveis e evidências</h2>
+  {% if qualification_rules %}
+  <table>
+    <thead><tr><th>Regra</th><th>Fonte / edição</th><th>Cláusula</th><th>Estado</th><th>Observado</th><th>Evidências</th><th>Explicação</th></tr></thead>
+    <tbody>
+    {% for rule in qualification_rules %}
+      <tr>
+        <td class="col-id">{{ rule.rule_id }}</td>
+        <td>{{ rule.source_id }} / {{ rule.edition_or_version }}</td>
+        <td>{{ rule.clause }}</td>
+        <td class="col-id">{{ rule.status }}</td>
+        <td class="long-wrap">{{ rule.observed }}</td>
+        <td class="long-wrap">{{ rule.evidence_refs|join("; ") }}</td>
+        <td class="long-wrap">{{ rule.explanation }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="pending">Resultados do classificador canônico não fornecidos.</p>
+  {% endif %}
+
+  <h2>Revisão, assinatura e aceitação institucional</h2>
+  <p><b>Revisão profissional:</b> {{ professional_review_display }}</p>
+  <p><b>Assinatura digital:</b> {{ digital_signature.status or "não verificada" }}.
+     A assinatura comprova autoria/integridade conforme a verificação registrada; não aprova o conteúdo técnico.</p>
+  <p><b>Aceitação do destinatário:</b> {{ institution_acceptance_display }}</p>
+
+  <h2>Documentos e fotografias autorizados</h2>
+  {% if documentary_attachments %}
+  {% for attachment in documentary_attachments %}
+  <div class="attachment">
+    <p><b>{{ attachment.name }}</b> — {{ attachment.media_type }} — {{ attachment.status }} — SHA-256 {{ attachment.sha256 or "PENDENTE" }}</p>
+    {% if attachment.image_data_uri %}<img class="document-image" src="{{ attachment.image_data_uri }}" alt="{{ attachment.name }}">{% endif %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="no-data">Nenhum arquivo documental foi fornecido para incorporação autorizada neste relatório.</p>
+  {% endif %}
 
   <h2>Amostra — n recebido, observado, preparado e efetivo são distintos</h2>
   <table class="metrics-grid">
@@ -795,13 +878,6 @@
   <h3>Proveniência (sem caminhos locais nem segredos)</h3>
   <div class="frozen-box">{{ provenance_safe }}</div>
   </div>
-
-  <footer class="report-footer">
-    Minuta gerada para revisão profissional — {{ app_name }}.
-    Cálculo concluído não implica documento entregue se a renderização falhar.
-    Este texto não é laudo aprovado automaticamente e não dispensa a responsabilidade
-    técnica do profissional habilitado.
-  </footer>
 
 </body>
 </html>
