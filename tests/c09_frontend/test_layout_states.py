@@ -59,12 +59,12 @@ def test_fixture_notice_is_labeled_not_a_real_conclusion():
 
 def test_work_flow_headings_are_portuguese_and_value_centered():
     text = " ".join(WORK_FLOW_HEADINGS).lower()
-    assert "preparação" in text or "preparacao" in text
+    assert "encomenda" in text
     assert "amostra" in text
-    assert "imóvel" in text or "imovel" in text
+    assert "vistoria" in text
     assert "avaliando" in text
-    assert "resultado" in text
-    assert "projeto" in text
+    assert "modelagem" in text
+    assert "emissão" in text or "emissao" in text
     assert "r²" not in text
 
 

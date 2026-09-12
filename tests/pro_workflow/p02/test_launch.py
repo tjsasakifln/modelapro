@@ -32,13 +32,15 @@ def _run_once() -> str:
         raise AssertionError(at.exception)
     text = _collect_text(at)
     joined = " ".join(WORK_FLOW_HEADINGS)
-    assert "Preparação da amostra" in joined
-    assert "Imóvel avaliando" in joined
-    assert "Resultado e revisão" in joined
-    assert "Projeto salvo" in joined
-    assert "MODELA PRO" in text or "Preparação" in text or "amostra" in text.lower()
+    assert "Encomenda" in joined
+    assert "Amostra" in joined
+    assert "vistoria" in joined.lower()
+    assert "Modelagem" in joined
+    assert "Emissão" in joined
+    assert "MODELA PRO" in text or "Encomenda" in text or "amostra" in text.lower()
     assert "R² Ajustado" not in text
     assert "atende à norma" not in text.lower()
+    assert "aceito pelo banco" not in text.lower()
     return text
 
 

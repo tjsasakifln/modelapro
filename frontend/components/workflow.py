@@ -43,13 +43,17 @@ GRADE_REQUIREMENT_LABELS = {
 }
 
 DEPENDENTS_BY_CHANGE = {
-    "file": ("preview", "mapping", "subject", "result"),
-    "import_options": ("preview", "mapping", "subject", "result"),
-    "subject": ("result",),
-    "policy": ("result",),
-    "unit": ("result",),
-    "dates": ("result",),
-    "target": ("subject", "result"),
+    "file": ("preview", "mapping", "subject", "result", "review", "issuance"),
+    "import_options": ("preview", "mapping", "subject", "result", "review", "issuance"),
+    "subject": ("result", "review", "issuance"),
+    "policy": ("result", "review", "issuance"),
+    "unit": ("result", "review", "issuance"),
+    "dates": ("result", "review", "issuance"),
+    "target": ("subject", "result", "review", "issuance"),
+    "profile": ("result", "review", "issuance"),
+    "sample": ("preview", "mapping", "result", "review", "issuance"),
+    "document": ("review", "issuance"),
+    "inspection": ("result", "review", "issuance"),
 }
 
 BATCH_UI_VALIDO = "valido"
@@ -278,6 +282,16 @@ def apply_invalidation(session: Mapping[str, Any], change: str) -> dict:
             out["p02_result_stale"] = True
             out["p02_result_stale_reason"] = _stale_reason(change)
         out["p02_current_result_belongs_to"] = "previous_version"
+    if "review" in dropped or "issuance" in dropped:
+        previous_events = out.get("c02_review_events")
+        if previous_events is not None:
+            out["c02_review_events_history"] = list(previous_events)
+        out["c02_review_stale"] = True
+        out["c02_signature_stale"] = True
+        out["c02_issuance_stale"] = True
+        out["c02_consent_reusable"] = False
+        out["c02_invalidation_reason"] = _stale_reason(change)
+        # History is kept; live events must be rebound to the new fingerprint.
     return out
 
 
@@ -290,6 +304,10 @@ def _stale_reason(change: str) -> str:
         "unit": "A unidade mudou. O resultado abaixo pertence à versão anterior.",
         "dates": "A data-base ou a vistoria mudaram. O resultado abaixo pertence à versão anterior.",
         "target": "O alvo mudou. O resultado abaixo pertence à versão anterior.",
+        "profile": "O perfil de qualificação mudou. Emissão e revisão anteriores ficam no histórico e não autorizam a versão atual.",
+        "sample": "A amostra mudou. O resultado e a emissão abaixo pertencem à versão anterior.",
+        "document": "Um documento ou evidência mudou. A revisão/assinatura anterior não pode ser reutilizada.",
+        "inspection": "A vistoria mudou. O resultado abaixo pertence à versão anterior.",
     }
     return labels.get(change, "Há um resultado de uma versão anterior deste trabalho.")
 

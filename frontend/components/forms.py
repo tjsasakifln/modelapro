@@ -20,6 +20,21 @@ import httpx
 import pandas as pd
 import streamlit as st
 
+from .professional import (
+    BACKUP_NOTICE,
+    KNOWN_ASSET_SCOPES,
+    KNOWN_PURPOSES,
+    KNOWN_RECIPIENTS,
+    KNOWN_RIGHTS,
+    KNOWN_VALUE_BASES,
+    build_encomenda,
+    build_inspection_record,
+    build_professional_identity,
+    empty_inspection_record,
+    known_profiles,
+    qualification_profile_wire,
+    select_qualification_profile,
+)
 from .workflow import (
     SUPPORTED_EVALUATION_METHODS,
     SUPPORTED_EVALUATION_METHOD_IDS,
@@ -334,12 +349,19 @@ def build_request_spec(
     minimum_fundamentacao_grade: Optional[int] = None,
     documentary: Optional[Mapping[str, Any]] = None,
     evaluation_method: Optional[str] = None,
+    rights: Optional[str] = None,
+    recipient_id: Optional[str] = None,
+    value_basis: Optional[str] = None,
+    asset_scope: Optional[str] = None,
+    qualification_profile: Optional[Mapping[str, Any]] = None,
 ) -> dict:
     """Monta RequestSpec MP/1. Não presume BRL, BRL/m² nem data de hoje.
 
     candidate_cols=None → seleção automática por papel.
     candidate_cols=[] → nenhuma variável autorizada (nunca expandido para todas).
     Grau mínimo só em search_policy.minimum_fundamentacao_grade (null ou 1..3).
+    Campos C02 (qualification_profile, rights, recipient_id, value_basis,
+    asset_scope) são aditivos; o schema raiz permanece MP/1.
     """
     if candidate_cols is not None and not isinstance(candidate_cols, (list, tuple)):
         raise TypeError("candidate_cols deve ser None ou lista")
@@ -387,7 +409,7 @@ def build_request_spec(
         missing["target"] = "never_impute"
     outlier = dict(outlier_policy or default_outlier_policy())
 
-    return {
+    spec = {
         "schema_version": SCHEMA_VERSION,
         "target_col": target_col,
         "candidate_cols": cols,
@@ -404,6 +426,17 @@ def build_request_spec(
         "applicant": applicant or "",
         "purpose": purpose or "",
     }
+    if rights:
+        spec["rights"] = rights
+    if recipient_id:
+        spec["recipient_id"] = recipient_id
+    if value_basis:
+        spec["value_basis"] = value_basis
+    if asset_scope:
+        spec["asset_scope"] = asset_scope
+    if qualification_profile:
+        spec["qualification_profile"] = qualification_profile_wire(qualification_profile)
+    return spec
 
 
 def request_spec_json(spec: Mapping[str, Any]) -> str:
@@ -1166,17 +1199,244 @@ def _iso_or_none(value: Any) -> Optional[str]:
     return text or None
 
 
+def _encomenda_widgets() -> dict:
+    """Opening of the professional order. Never auto-attests ART/inspection."""
+    st.subheader("1. Encomenda e perfil")
+    st.caption(
+        "Finalidade, bem, direitos, data-base, unidade, solicitante, destinatário "
+        "e perfil versionado entram no pedido. Compatibilidade verificada não é "
+        "aceite de banco ou seguradora."
+    )
+    catalog = known_profiles()
+    profile_ids = [row["id"] for row in catalog]
+    labels = {row["id"]: row["label"] for row in catalog}
+    profile_id = st.selectbox(
+        "Perfil de qualificação (versionado, catálogo conhecido)",
+        options=profile_ids,
+        format_func=lambda value: labels.get(value, value),
+        index=1 if len(profile_ids) > 1 else 0,
+        key="c02_profile_id",
+        help=(
+            "C02 escolhe perfis conhecidos. Regras e conferência normativa são da C05. "
+            "Perfil bancário/securitário não homologado não é vendido como aceite."
+        ),
+    )
+    chosen = select_qualification_profile(profile_id)
+    purpose_ids = [item[0] for item in KNOWN_PURPOSES]
+    purpose_labels = {item[0]: item[1] for item in KNOWN_PURPOSES}
+    purpose_index = purpose_ids.index(chosen["purpose"]) if chosen.get("purpose") in purpose_ids else 0
+    purpose = st.selectbox(
+        "Finalidade da encomenda",
+        options=purpose_ids,
+        index=purpose_index,
+        format_func=lambda value: purpose_labels.get(value, value),
+        key="c02_purpose",
+    )
+    asset_ids = [item[0] for item in KNOWN_ASSET_SCOPES]
+    asset_labels = {item[0]: item[1] for item in KNOWN_ASSET_SCOPES}
+    asset_scope = st.selectbox(
+        "Tipo de bem",
+        options=asset_ids,
+        format_func=lambda value: asset_labels.get(value, value),
+        key="c02_asset_scope",
+    )
+    rights_ids = [item[0] for item in KNOWN_RIGHTS]
+    rights_labels = {item[0]: item[1] for item in KNOWN_RIGHTS}
+    rights = st.selectbox(
+        "Direitos avaliados",
+        options=rights_ids,
+        format_func=lambda value: rights_labels.get(value, value),
+        key="c02_rights",
+    )
+    basis_ids = [item[0] for item in KNOWN_VALUE_BASES]
+    basis_labels = {item[0]: item[1] for item in KNOWN_VALUE_BASES}
+    basis_index = basis_ids.index(chosen["value_basis"]) if chosen.get("value_basis") in basis_ids else 0
+    value_basis = st.selectbox(
+        "Base de valor",
+        options=basis_ids,
+        index=basis_index,
+        format_func=lambda value: basis_labels.get(value, value),
+        key="c02_value_basis",
+        help="Valor de mercado, custo de reconstrução, valor depreciado e limite de garantia não são sinônimos.",
+    )
+    recipient_ids = [item[0] for item in KNOWN_RECIPIENTS]
+    recipient_labels = {item[0]: item[1] for item in KNOWN_RECIPIENTS}
+    rec_index = recipient_ids.index(chosen["recipient_id"]) if chosen.get("recipient_id") in recipient_ids else 0
+    recipient_id = st.selectbox(
+        "Destinatário",
+        options=recipient_ids,
+        index=rec_index,
+        format_func=lambda value: recipient_labels.get(value, value),
+        key="c02_recipient",
+    )
+    applicant = st.text_input("Solicitante", value="", key="c02_applicant")
+    resolved = select_qualification_profile(
+        profile_id,
+        purpose=purpose,
+        value_basis=value_basis,
+        method=chosen.get("method"),
+        asset_scope=asset_scope,
+        recipient_id=recipient_id,
+    )
+    encomenda = build_encomenda(
+        purpose=purpose,
+        asset_scope=asset_scope,
+        rights=rights,
+        applicant=applicant,
+        recipient_id=recipient_id,
+        value_basis=value_basis,
+        profile=resolved,
+    )
+    previous_profile = st.session_state.get("c02_profile_token")
+    current_token = f"{resolved.get('id')}|{purpose}|{value_basis}|{asset_scope}|{recipient_id}"
+    if previous_profile and previous_profile != current_token:
+        st.session_state["c02_review_stale"] = True
+        st.session_state["c02_signature_stale"] = True
+        st.session_state["c02_issuance_stale"] = True
+        st.session_state["p02_result_stale"] = True
+        st.session_state["p02_result_stale_reason"] = (
+            "O perfil de qualificação mudou. Emissão e revisão anteriores ficam no histórico."
+        )
+    st.session_state["c02_profile_token"] = current_token
+    support = encomenda["method_support_note"]
+    if encomenda["method_supports_purpose"]:
+        st.info(f"Método do perfil: {resolved.get('method')} — {support}")
+    else:
+        st.warning(support)
+    if resolved.get("recipient_id") in {"banco", "seguradora"}:
+        st.warning(
+            "Perfil institucional **não homologado**. Compatibilidade do recorte "
+            "não é aceite recebido do banco ou da seguradora."
+        )
+    if resolved.get("homologation_status") == "not_homologated":
+        st.caption("Estado de homologação: não homologado. Sem selo de aceite institucional.")
+    if purpose == "seguro":
+        st.info(
+            "Base de valor requerida para este perfil: "
+            f"{resolved.get('required_value_basis') or value_basis}. "
+            "Não converter preço de mercado em custo por coeficiente."
+        )
+    st.caption(BACKUP_NOTICE)
+    return {
+        "encomenda": encomenda,
+        "profile": resolved,
+        "applicant": applicant,
+        "purpose": purpose,
+        "rights": rights,
+        "recipient_id": recipient_id,
+        "value_basis": value_basis,
+        "asset_scope": asset_scope,
+    }
+
+
+def _vistoria_and_identity_widgets(*, ns: str, inspection_date: Optional[str]) -> dict:
+    st.subheader("3. Avaliando e vistoria")
+    st.caption(
+        "Vistoria, documentos e identidade profissional com procedência. "
+        "Campo com formato válido de ART/RRT não autentica o conselho. "
+        "Ato de terceiro permanece informação recebida."
+    )
+    procedencia = st.selectbox(
+        "Procedência da vistoria",
+        options=["not_recorded", "professional_act", "received_information"],
+        format_func=lambda value: {
+            "not_recorded": "Não registrada — ausência não é inspeção atestada",
+            "professional_act": "Ato do profissional responsável",
+            "received_information": "Informação recebida de terceiro",
+        }[value],
+        key=f"c02_{ns}_insp_procedencia",
+    )
+    responsible = st.text_input(
+        "Responsável pela vistoria",
+        value="",
+        key=f"c02_{ns}_insp_responsible",
+        help="Vazio permanece não registrado. A tela não preenche inspeção por omissão.",
+    )
+    verified = st.text_area(
+        "Características verificadas",
+        value="",
+        key=f"c02_{ns}_insp_verified",
+    )
+    cadastral = st.text_area(
+        "Divergências cadastrais",
+        value="",
+        key=f"c02_{ns}_insp_cadastral",
+    )
+    physical = st.text_area(
+        "Divergências físicas",
+        value="",
+        key=f"c02_{ns}_insp_physical",
+    )
+    assumptions = st.text_area(
+        "Pressupostos especiais",
+        value="",
+        key=f"c02_{ns}_insp_assumptions",
+    )
+    limitations = st.text_area(
+        "Limitações da vistoria",
+        value="",
+        key=f"c02_{ns}_insp_limitations",
+    )
+    third_party = None
+    if procedencia == "received_information":
+        third_party = st.text_input(
+            "Fonte da informação recebida (terceiro)",
+            value="",
+            key=f"c02_{ns}_insp_third",
+        )
+        st.caption("Informação recebida — não é atestado de regularidade nem inspeção realizada por esta tela.")
+    inspection = build_inspection_record(
+        responsible=responsible,
+        date=inspection_date,
+        verified_characteristics=verified,
+        cadastral_divergences=cadastral,
+        physical_divergences=physical,
+        special_assumptions=assumptions,
+        limitations=limitations,
+        procedencia=procedencia,
+        third_party_source=third_party,
+    )
+    st.markdown("#### Identidade profissional e ART/RRT")
+    st.caption("Nenhum campo abaixo nasce preenchido como atestado. Formato válido ≠ autenticação do conselho.")
+    prof_name = st.text_input("Nome do profissional responsável", value="", key=f"c02_{ns}_prof_name")
+    registration = st.text_input("Registro profissional", value="", key=f"c02_{ns}_prof_reg")
+    council = st.text_input("Conselho (CREA/CAU/…)", value="", key=f"c02_{ns}_prof_council")
+    art_rrt = st.text_input(
+        "ART/RRT ou referência documental",
+        value="",
+        key=f"c02_{ns}_prof_art",
+        help="Exigida por alguns perfis. Preenchimento com formato válido não autentica o conselho.",
+    )
+    documentary_ref = st.text_input(
+        "Referência documental adicional",
+        value="",
+        key=f"c02_{ns}_prof_doc",
+    )
+    identity = build_professional_identity(
+        name=prof_name,
+        registration=registration,
+        council=council,
+        art_rrt=art_rrt,
+        documentary_reference=documentary_ref,
+    )
+    if identity["art_rrt_format_valid"]:
+        st.caption("Formato de ART/RRT aparente — não é autenticação junto ao conselho.")
+    return {"inspection": inspection, "identity": identity}
+
+
 def upload_form(
     preview_provider: Optional[Callable[..., dict]] = None,
     cached_preview: Optional[Mapping[str, Any]] = None,
 ) -> dict:
-    """Fluxo: preparação da amostra → imóvel avaliando.
+    """Fluxo profissional: encomenda → amostra → avaliando/vistoria.
 
     Não lê CSV/Excel para interpretar colunas. Se a prévia falhar por
     conexão, devolve erro e não fabrica uma leitura local. O mapeamento
     fica vinculado ao arquivo/esquema — outro arquivo não herda o imóvel anterior.
     """
-    st.subheader("1. Preparação da amostra")
+    encomenda_state = _encomenda_widgets()
+    st.subheader("2. Amostra e evidências")
+    st.markdown("**1. Preparação da amostra**")
     st.caption("A interpretação vem da prévia da API. Esta tela não relê a planilha.")
     uploaded_file = st.file_uploader(
         "Arquivo de dados de mercado (CSV ou Excel)",
@@ -1285,6 +1545,8 @@ def upload_form(
             "connection_error": connection_error,
             "preview_error": preview_error,
             "execute": False,
+            "encomenda": encomenda_state.get("encomenda"),
+            "qualification_profile": encomenda_state.get("profile"),
         }
 
     if preview_error:
@@ -1301,6 +1563,8 @@ def upload_form(
             "connection_error": None,
             "preview_error": preview_error,
             "execute": False,
+            "encomenda": encomenda_state.get("encomenda"),
+            "qualification_profile": encomenda_state.get("profile"),
         }
 
     if preview is None:
@@ -1319,6 +1583,8 @@ def upload_form(
             "connection_error": None,
             "preview_error": preview_error,
             "execute": False,
+            "encomenda": encomenda_state.get("encomenda"),
+            "qualification_profile": encomenda_state.get("profile"),
         }
 
     model = preview_to_form_model(preview)
@@ -1451,6 +1717,15 @@ def upload_form(
     else:
         st.caption("Nenhuma coluna candidata ficou de fora sem razão visível.")
 
+    with st.expander("Exclusões justificadas da amostra", expanded=False):
+        st.caption("Exclusão não é automática para melhorar R²/grau. Motivo, responsável e efeito são obrigatórios.")
+        excl_row = st.text_input("Identificador do registro excluído", value="", key=f"c02_{ns}_excl_row")
+        excl_reason = st.text_input("Motivo da exclusão", value="", key=f"c02_{ns}_excl_reason")
+        excl_who = st.text_input("Profissional que decide a exclusão", value="", key=f"c02_{ns}_excl_who")
+        excl_effect = st.text_input("Efeito da exclusão (n, grau, etc.)", value="", key=f"c02_{ns}_excl_effect")
+        if excl_row and excl_reason and excl_who:
+            st.caption(f"Exclusão de {excl_row} registrada com motivo explícito — não é filtro silencioso.")
+
     target_unit = st.text_input(
         "Unidade do valor-alvo",
         value=units.get(target_col, ""),
@@ -1488,11 +1763,9 @@ def upload_form(
         else:
             st.caption("Data da vistoria é campo próprio, distinto da data-base e da emissão.")
 
-    col_sol, col_fin = st.columns(2)
-    with col_sol:
-        applicant = st.text_input("Solicitante", value="", key=f"p02_{ns}_applicant")
-    with col_fin:
-        purpose = st.text_input("Finalidade da avaliação", value="", key=f"p02_{ns}_purpose")
+    applicant = encomenda_state.get("applicant") or ""
+    purpose = encomenda_state.get("purpose") or ""
+    st.caption(f"Solicitante e finalidade vêm da encomenda: {applicant or 'não informado'} / {purpose or 'não informada'}.")
 
     degree_choice = st.selectbox(
         "Grau mínimo solicitado",
@@ -1560,6 +1833,11 @@ def upload_form(
             "item3_grade_declared": grau_item3,
             "provenance": "declared_by_user",
         },
+        rights=encomenda_state.get("rights"),
+        recipient_id=encomenda_state.get("recipient_id"),
+        value_basis=encomenda_state.get("value_basis"),
+        asset_scope=encomenda_state.get("asset_scope"),
+        qualification_profile=encomenda_state.get("profile"),
     )
 
     policies = policies_on_the_wire(request_spec)
@@ -1577,7 +1855,8 @@ def upload_form(
         if cost:
             st.write("Estimativa de custo devolvida pela API:", cost["value"])
 
-    st.subheader("2. Imóvel avaliando")
+    evidence_state = _vistoria_and_identity_widgets(ns=ns, inspection_date=inspection_date)
+    st.markdown("**2. Imóvel avaliando**")
     st.caption(
         "Use as variáveis-base do esquema (categorias, números já interpretados, "
         "ausências e unidades). Não preencha colunas dummy. "
@@ -1709,6 +1988,10 @@ def upload_form(
         "policies": policies,
         "fingerprint": fingerprint,
         "stale_reason": st.session_state.get("p02_result_stale_reason"),
+        "encomenda": encomenda_state.get("encomenda"),
+        "qualification_profile": encomenda_state.get("profile"),
+        "inspection": evidence_state.get("inspection") or empty_inspection_record(),
+        "professional_identity": evidence_state.get("identity"),
     }
 
 

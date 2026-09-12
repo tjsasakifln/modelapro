@@ -21,6 +21,19 @@ from .forms import (
     TERMINAL_JOB_STATES,
     may_start_execution,
 )
+from .professional import (
+    BACKUP_NOTICE,
+    HOMOLOGATION_FORBIDDEN_BADGES,
+    map_issuance_to_case_release,
+    present_aptidao,
+    present_calculated_vs_adopted,
+    present_independent_validation_coverage,
+    present_qualification_context,
+    present_seguro_value_basis,
+    present_valid_not_released,
+    redact_diagnostic,
+    select_qualification_profile,
+)
 from .workflow import (
     alternatives_comparable,
     group_issues,
@@ -33,10 +46,11 @@ from .workflow import (
 )
 
 WORK_FLOW_HEADINGS = [
-    "1. Preparação da amostra",
-    "2. Imóvel avaliando",
-    "3. Resultado e revisão",
-    "4. Projeto salvo",
+    "1. Encomenda e perfil",
+    "2. Amostra e evidências",
+    "3. Avaliando e vistoria",
+    "4. Modelagem e revisão",
+    "5. Emissão e arquivo",
 ]
 
 FIXTURE_SCREEN_NOTICE = (
@@ -65,9 +79,16 @@ INTERVAL_KINDS = {
 ARBITRATION_NOT_CONFIDENCE = "Faixa arbitrada — não é intervalo de confiança."
 
 ISSUANCE_LABELS = {
-    "draft": "Rascunho",
+    "draft": "Rascunho / análise apenas",
     "review_required": "Revisão profissional necessária",
     "ready_for_professional_review": "Pronto para revisão profissional",
+}
+
+CASE_RELEASE_LABELS = {
+    "analysis_only": "Análise apenas — não liberada",
+    "review_required": "Revisão profissional necessária",
+    "ready_for_professional_signoff": "Pronto para assinatura do responsável",
+    "signed_integrity_verified": "Arquivo assinado importado com vínculo verificado",
 }
 
 JOB_STATE_LABELS = {
@@ -151,6 +172,10 @@ def present_snapshot(
             "validation_execution": present_validation_execution(None, request_spec),
             "stale_reason": stale_reason,
             "false_imovel_ausente": False,
+            "qualification": present_qualification_context(None, selected_profile=(request_spec or {}).get("qualification_profile") if request_spec else None),
+            "aptidao": present_aptidao(),
+            "homologation_badge": None,
+            "aceito_pelo_banco": False,
         }
 
     target = snapshot.get("target") or {}
@@ -248,10 +273,51 @@ def present_snapshot(
     _legacy_is_valid = validation.get("is_valid")  # noqa: F841
 
     requested_grade = None
+    selected_profile = None
     if request_spec:
         requested_grade = (request_spec.get("search_policy") or {}).get("minimum_fundamentacao_grade")
+        raw_profile = request_spec.get("qualification_profile")
+        if isinstance(raw_profile, Mapping) and raw_profile.get("id"):
+            selected_profile = select_qualification_profile(
+                raw_profile.get("id"),
+                purpose=raw_profile.get("purpose"),
+                value_basis=raw_profile.get("value_basis"),
+                method=raw_profile.get("method"),
+                asset_scope=raw_profile.get("asset_scope"),
+                recipient_id=raw_profile.get("recipient_id"),
+                version=raw_profile.get("version"),
+                source_set_sha256=raw_profile.get("source_set_sha256"),
+            )
+        else:
+            selected_profile = raw_profile
     grade_requirement = present_grade_requirement(snapshot, requested_minimum_grade=requested_grade)
     subject_presence = present_subject_presence(snapshot)
+    qualification = present_qualification_context(snapshot, selected_profile=selected_profile)
+    issuance_map = map_issuance_to_case_release(issuance.get("status"))
+    validation_coverage = present_independent_validation_coverage(snapshot, request_spec)
+    aptidao = present_aptidao(
+        grade_requirement_status=grade_requirement.get("status") or qualification.get("grade_requirement_status"),
+        calculation_status=qualification.get("calculation_status"),
+        profile=selected_profile if isinstance(selected_profile, Mapping) else {},
+        issuance_status=issuance.get("status"),
+    )
+    if qualification.get("calculation_status") == "valid_not_released" or (
+        grade_requirement.get("status") in {"pending", "not_met"} and point is not None
+    ):
+        not_released = present_valid_not_released(
+            reason=grade_requirement.get("note") or "Análise calculável, não liberada para emissão.",
+            action="Revisar evidências e requisitos do perfil; o pedido de grau é preservado.",
+            requested_grade=requested_grade,
+        )
+    else:
+        not_released = None
+    seguro_basis = None
+    if isinstance(selected_profile, Mapping) and selected_profile.get("purpose") == "seguro":
+        seguro_basis = present_seguro_value_basis(selected_profile)
+    adopted = present_calculated_vs_adopted(
+        calculated_point=point,
+        c05_admits=None,
+    )
     grouped = group_issues(issues)
     comparable_alts = []
     for alt in alternatives:
@@ -308,7 +374,18 @@ def present_snapshot(
             "status": issuance.get("status"),
             "label": ISSUANCE_LABELS.get(issuance.get("status"), issuance.get("status") or "não informado"),
             "reasons": list(issuance.get("reasons") or []),
+            "case_release_status": issuance_map.get("case_release_status"),
+            "case_release_label": CASE_RELEASE_LABELS.get(issuance_map.get("case_release_status") or "", ""),
+            "emitted_illegal_issuance": False,
         },
+        "qualification": qualification,
+        "aptidao": aptidao,
+        "valid_not_released": not_released,
+        "validation_coverage": validation_coverage,
+        "seguro_value_basis": seguro_basis,
+        "calculated_vs_adopted": adopted,
+        "homologation_badge": None,
+        "aceito_pelo_banco": False,
         "issues": issues,
         "grouped_issues": grouped,
         "issues_count": len(issues),
@@ -414,12 +491,16 @@ def present_artifacts(artifact_states: Optional[Mapping[str, Any]]) -> dict:
 def snapshot_contains_forbidden_norma_banner(view: Mapping[str, Any]) -> bool:
     if view.get("norma_banner"):
         return True
+    if view.get("homologation_badge") or view.get("aceito_pelo_banco"):
+        return True
     blob = json.dumps(
-        {k: view.get(k) for k in ("headings", "norma_banner", "issuance", "precisao", "value_block")},
+        {k: view.get(k) for k in ("headings", "norma_banner", "issuance", "precisao", "value_block", "homologation_badge", "aptidao")},
         ensure_ascii=False,
         default=str,
     ).lower()
-    return NORMA_BANNER_FORBIDDEN in blob
+    if NORMA_BANNER_FORBIDDEN in blob:
+        return True
+    return any(token in blob for token in HOMOLOGATION_FORBIDDEN_BADGES)
 
 
 def load_css() -> None:
@@ -432,7 +513,7 @@ def load_css() -> None:
 def header() -> None:
     st.title("MODELA PRO")
     st.markdown(
-        '<p class="mp-subtitle">Da planilha à análise revisável e ao projeto recuperável</p>',
+        '<p class="mp-subtitle">Encomenda, amostra, vistoria, modelagem e emissão revisada pelo responsável</p>',
         unsafe_allow_html=True,
     )
 
@@ -440,7 +521,11 @@ def header() -> None:
 def sidebar() -> dict:
     with st.sidebar:
         st.header("Trabalho")
-        st.caption("Percurso em quatro etapas. Use Tab e as setas nos controles. O estado também está escrito, não só colorido.")
+        st.caption(
+            "Percurso profissional. Use Tab e as setas. O estado também está escrito, "
+            "não só colorido. Duplo clique no disparo é bloqueado."
+        )
+        st.caption(BACKUP_NOTICE)
         visual_fixture = st.checkbox(
             "Tela de verificação visual (exemplo)",
             value=False,
@@ -484,7 +569,7 @@ def _issue_text(issue: Any) -> str:
 
 
 def render_snapshot_panel(view: Mapping[str, Any], *, fixture: bool = False) -> None:
-    st.subheader("3. Resultado e revisão")
+    st.subheader("4. Modelagem e revisão")
     if fixture:
         st.warning(FIXTURE_SCREEN_NOTICE)
     if view.get("stale_reason"):
@@ -560,6 +645,45 @@ def render_snapshot_panel(view: Mapping[str, Any], *, fixture: bool = False) -> 
 
     for reason in issuance.get("reasons") or []:
         st.info(reason)
+
+    aptidao = view.get("aptidao") or {}
+    if aptidao:
+        st.markdown(f"**Aptidão do caso:** {aptidao.get('ui_status')} — {aptidao.get('headline')}")
+        if aptidao.get("global_green"):
+            st.error("A interface não deve produzir sucesso visual global a partir de um único indicador.")
+        if aptidao.get("may_show_approved_value"):
+            st.error("Caso não liberado não deve aparecer como valor aprovado.")
+        if aptidao.get("can_prepare_laudo"):
+            st.info("Percurso legítimo: pode seguir para a preparação do laudo final.")
+    not_released = view.get("valid_not_released")
+    if not_released:
+        st.warning(not_released.get("reason") or "Análise acessível, não liberada.")
+        if not_released.get("action"):
+            st.caption(f"Ação que pode resolver: {not_released['action']}")
+        if not_released.get("field"):
+            st.caption(f"Campo/evidência: {not_released['field']}")
+    case_release = issuance.get("case_release_label")
+    if case_release:
+        st.caption(f"Estado de liberação (mapeado, sem inventar status MP/1): {case_release}")
+    if view.get("homologation_badge") or view.get("aceito_pelo_banco"):
+        st.error("Selo institucional indevido — compatibilidade não é aceite.")
+    seguro = view.get("seguro_value_basis")
+    if seguro:
+        st.info(seguro.get("note"))
+        st.caption(f"Base de valor requerida: {seguro.get('required_label')}")
+        if seguro.get("mismatch"):
+            st.warning("Descompasso entre finalidade securitária e base/método — não ocultado.")
+    adopted = view.get("calculated_vs_adopted") or {}
+    if adopted:
+        st.caption(
+            f"Valor calculado: {adopted.get('calculated')}. "
+            f"Valor adotado distinto só é registrado se C05 admitir ({adopted.get('note') or 'sem override silencioso'})."
+        )
+    coverage = view.get("validation_coverage") or {}
+    if coverage:
+        st.caption(coverage.get("label") or "")
+        if coverage.get("presented_train_as_external"):
+            st.error("Métrica de treino não pode ser apresentada como validação externa.")
 
     st.markdown("#### Intervalo de confiança da média e intervalo de predição")
     first_rows = [
@@ -755,7 +879,7 @@ def render_artifact_panel(
     snapshot: Optional[Mapping[str, Any]] = None,
     delivery: Optional[Mapping[str, Any]] = None,
 ) -> dict:
-    st.subheader("4. Projeto salvo")
+    st.subheader("5. Emissão e arquivo")
     pressed = {"save": False, "download_calc": False, "download_named": None, "load_projects": False}
     delivery = delivery or present_delivery_state(job_view, artifact_view)
     st.markdown(f"**{delivery.get('headline')}**")
@@ -827,7 +951,14 @@ def render_project_panel(
     st.markdown("#### Projetos recuperáveis")
     st.caption("A lista vem de GET /projects. Reabrir recupera o frozen_project/resultado canônicos, não o texto da tela.")
     pressed["refresh_projects"] = st.button("Atualizar lista de projetos")
+    query = st.text_input("Pesquisa local de projetos", value="", key="c02_project_search")
     items = list(projects or [])
+    if query.strip():
+        needle = query.strip().lower()
+        items = [
+            item for item in items
+            if needle in json.dumps(item, ensure_ascii=False, default=str).lower()
+        ]
     if items:
         rows = []
         for item in items:
@@ -907,3 +1038,111 @@ def render_project_panel(
             hide_index=True,
         )
     return pressed
+
+
+def render_review_panel(
+    *,
+    checklist: Optional[Sequence[Mapping[str, Any]]] = None,
+    review_stale: bool = False,
+    signature_stale: bool = False,
+    fingerprint: Optional[str] = None,
+    requires_distinct_reviewer: bool = False,
+) -> dict:
+    """Checklist from the selected profile's requirements. Bound to fingerprint."""
+    st.markdown("#### Revisão profissional para emissão")
+    st.caption(
+        "Checklist gerado dos requisitos do perfil selecionado. "
+        "A campanha não assina em nome do usuário. Consentimento antigo não é reutilizado."
+    )
+    if review_stale or signature_stale:
+        st.warning(
+            "Houve mudança material. A revisão/assinatura anterior permanece no histórico "
+            "e não autoriza a emissão atual."
+        )
+    if fingerprint:
+        st.caption(f"Fingerprint desta versão: {fingerprint[:16]}…")
+    pressed = {
+        "decision": None,
+        "professional_id": "",
+        "reviewer_id": "",
+        "motive": "",
+        "export_for_external_signer": False,
+        "import_signed": False,
+    }
+    items = list(checklist or [])
+    if items:
+        for item in items:
+            st.markdown(f"- **{item.get('label') or item.get('requirement_id')}** — {item.get('status') or 'pending'}")
+            st.caption(f"Evidência: {item.get('evidence') or 'não anexada neste item'}")
+    else:
+        st.caption("Nenhum item de checklist — perfil sem requisitos locais ou ainda não selecionado.")
+    pressed["professional_id"] = st.text_input("Profissional responsável pela decisão", value="", key="c02_review_prof")
+    if requires_distinct_reviewer:
+        pressed["reviewer_id"] = st.text_input("Revisor distinto", value="", key="c02_review_other")
+    pressed["motive"] = st.text_area("Motivo da decisão", value="", key="c02_review_motive")
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        if st.button("Registrar revisão (não assina o laudo)"):
+            pressed["decision"] = "reviewed"
+    with col_b:
+        pressed["export_for_external_signer"] = st.button("Exportar para assinador externo")
+    with col_c:
+        pressed["import_signed"] = st.button("Registrar arquivo assinado importado")
+    st.caption("Assinatura/autoria não valida o conteúdo técnico. O produto não assina em nome do usuário.")
+    return pressed
+
+
+def render_recipient_panel(
+    *,
+    profile: Optional[Mapping[str, Any]] = None,
+    submissions: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> dict:
+    """Export/return records. No simulated bank/insurer portal."""
+    st.markdown("#### Destinatário e retorno institucional")
+    profile = profile or {}
+    st.caption(
+        f"Destinatário: {profile.get('recipient_id') or 'não informado'}. "
+        "Não há envio automático a portal de banco/seguradora. "
+        "HTTP 200 local não é aceite institucional."
+    )
+    if profile.get("purpose") == "seguro":
+        st.info(
+            f"Base de valor requerida: {profile.get('required_value_basis') or profile.get('value_basis')}. "
+            "Método de custo é da C01; esta tela não converte mercado em custo."
+        )
+    pressed = {
+        "export_package": False,
+        "import_return": False,
+        "simulate_send": False,
+    }
+    pressed["export_package"] = st.button("Preparar pacote de exportação do perfil")
+    uploaded = st.file_uploader(
+        "Importar comprovante de retorno institucional (arquivo original)",
+        type=["pdf", "json", "txt"],
+        key="c02_institution_return",
+        help="Comprovante importado pelo profissional. Sem credenciais embutidas e sem portal simulado.",
+    )
+    if uploaded is not None:
+        pressed["import_return"] = True
+        pressed["imported_file"] = uploaded
+    if submissions:
+        st.markdown("Histórico de submissão/retorno (registros, não aceite fabricado):")
+        for event in submissions:
+            st.write({
+                "evento": event.get("event"),
+                "destinatário": event.get("recipient_id"),
+                "aceite": False if not event.get("institution_acceptance") else True,
+                "http_local_nao_e_aceite": event.get("local_http_200_is_not_acceptance"),
+            })
+    return pressed
+
+
+def render_issuance_history(events: Optional[Sequence[Mapping[str, Any]]] = None) -> None:
+    st.markdown("#### Histórico de emissão e revisões")
+    if not events:
+        st.caption("Nenhuma emissão registrada neste projeto.")
+        return
+    for event in events:
+        stale = " (invalidada)" if event.get("stale") else ""
+        st.write(f"{event.get('decision') or event.get('event') or 'evento'}{stale} — {event.get('professional_id') or ''}")
+        st.caption(redact_diagnostic(str(event.get("motive") or event.get("invalidated_reason") or "")))

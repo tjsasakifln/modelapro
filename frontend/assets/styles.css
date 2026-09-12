@@ -77,6 +77,11 @@ section[data-testid="stSidebar"] {
   box-shadow: 4px 4px 0 #0b0a08;
 }
 
+.mp-not-homologated {
+  color: var(--mp-warn);
+  font-weight: 600;
+}
+
 .mp-value-kicker {
   font-family: "Source Sans 3", "Segoe UI", sans-serif;
   font-size: 0.82rem;
