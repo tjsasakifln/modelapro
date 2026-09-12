@@ -48,7 +48,12 @@ def _copy_interval(block: Any) -> Optional[Dict[str, Any]]:
     return out
 
 
-def _c05_interval_rule(rule_bundle: Any, name: str) -> Optional[Dict[str, Any]]:
+def _c05_interval_rule(
+    rule_bundle: Any,
+    name: str,
+    *,
+    point: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
     if not isinstance(rule_bundle, Mapping):
         return None
     intervals = rule_bundle.get("intervals") or rule_bundle.get("value_intervals")
@@ -59,7 +64,28 @@ def _c05_interval_rule(rule_bundle: Any, name: str) -> Optional[Dict[str, Any]]:
             copied.setdefault("kind", name)
             return copied
     direct = rule_bundle.get(name)
-    return _copy_interval(direct)
+    copied = _copy_interval(direct)
+    if copied is not None:
+        return copied
+    if name != "arbitration_interval":
+        return None
+    declarative = rule_bundle.get("arbitration")
+    if not isinstance(declarative, Mapping):
+        return None
+    if str(declarative.get("method") or "").lower() != "percent_around_point":
+        return None
+    percent = _finite(declarative.get("percent"))
+    if point is None or point <= 0.0 or percent is None or percent < 0.0 or percent > 100.0:
+        return None
+    delta = abs(point) * percent / 100.0
+    return {
+        "lower": point - delta,
+        "upper": point + delta,
+        "kind": name,
+        "method": "percent_around_point",
+        "percent": percent,
+        "source": declarative.get("source") or rule_bundle.get("source"),
+    }
 
 
 def compose_value_intervals(
@@ -90,14 +116,29 @@ def compose_value_intervals(
         if "percent_band_not_statistical_interval" not in notes:
             notes.append("percent_band_not_statistical_interval")
 
-    arb = _c05_interval_rule(c05_interval_rule, "arbitration_interval")
+    arb = _c05_interval_rule(
+        c05_interval_rule, "arbitration_interval", point=value["point"]
+    )
     adm = _c05_interval_rule(c05_interval_rule, "admissible_interval")
     if arb is not None:
         arb["kind"] = arb.get("kind") or "arbitration_interval"
         arb["not_statistical"] = True
         value["arbitration_interval"] = arb
     else:
-        if "arbitration_rule_unverified" not in notes:
+        declared = (
+            c05_interval_rule.get("arbitration")
+            if isinstance(c05_interval_rule, Mapping)
+            else None
+        )
+        if (
+            value["point"] is not None
+            and value["point"] <= 0.0
+            and isinstance(declared, Mapping)
+            and str(declared.get("method") or "").lower() == "percent_around_point"
+        ):
+            if "arbitration_point_non_positive" not in notes:
+                notes.append("arbitration_point_non_positive")
+        elif "arbitration_rule_unverified" not in notes:
             notes.append("arbitration_rule_unverified")
     if adm is not None:
         adm["kind"] = adm.get("kind") or "admissible_interval"

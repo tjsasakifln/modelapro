@@ -393,7 +393,7 @@ def build_evidence_bundle(
             request_spec.get("evaluation_policy"), arts.get("evaluation_policy"), snap.get("evaluation_policy")
         ),
         "value_policy": _first_mapping(
-            request_spec.get("value_policy"), arts.get("value_policy"), snap.get("value_policy")
+            arts.get("value_policy"), snap.get("value_policy"), request_spec.get("value_policy")
         ),
     }
     for name, payload in policies.items():
@@ -2480,7 +2480,9 @@ def _reconstruct_value_policy(
             percent = number_as_float64(arbitration_rule.get("percent"))
             if percent < 0 or percent > 100:
                 raise ValueError("percent out of range")
-            delta = point * percent / 100.0
+            if point <= 0:
+                raise ValueError("point must be positive for market arbitration")
+            delta = abs(point) * percent / 100.0
             arbitration = {"lower": point - delta, "upper": point + delta}
         except (TypeError, ValueError) as exc:
             notes.append(f"arbitration policy invalid: {exc}")
