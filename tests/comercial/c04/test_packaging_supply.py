@@ -956,8 +956,16 @@ def test_windows_product_shutdown_kills_complete_process_tree(
     )
     monkeypatch.setattr(
         verify_windows_install,
+        "_windows_open_process_handles",
+        lambda _pids: [(5001, 101), (5002, 102)],
+    )
+    monkeypatch.setattr(
+        verify_windows_install,
         "_wait_for_windows_children_stopped",
         lambda _pids: [],
+    )
+    monkeypatch.setattr(
+        verify_windows_install, "_windows_close_process_handles", lambda _items: []
     )
     monkeypatch.setattr(
         verify_windows_install, "_wait_for_product_ports_closed", lambda: []
@@ -973,9 +981,12 @@ def test_windows_product_shutdown_kills_complete_process_tree(
         "method": "parent_termination_with_job_containment",
         "parent_returncode": 1,
         "observed_child_pids": [5001, 5002],
+        "observed_child_handle_count": 2,
         "child_processes_exited": True,
         "remaining_child_pids_before_fallback": [],
         "service_ports_closed": True,
+        "child_observation_error": None,
+        "child_handle_close_failures": [],
     }
 
 
@@ -1001,8 +1012,16 @@ def test_windows_product_shutdown_fails_before_using_cleanup_fallback(
     )
     monkeypatch.setattr(
         verify_windows_install,
+        "_windows_open_process_handles",
+        lambda _pids: [(5001, 101)],
+    )
+    monkeypatch.setattr(
+        verify_windows_install,
         "_wait_for_windows_children_stopped",
         lambda _pids: [5001],
+    )
+    monkeypatch.setattr(
+        verify_windows_install, "_windows_close_process_handles", lambda _items: []
     )
     monkeypatch.setenv("SystemRoot", r"C:\WINDOWS")
     monkeypatch.setattr(
@@ -1027,6 +1046,41 @@ def test_windows_product_shutdown_fails_before_using_cleanup_fallback(
     assert result["service_ports_closed"] is True
     assert result["fallback_taskkill_exit_code"] == 0
     assert "child processes" in result["error"]["detail"]
+
+
+def test_windows_product_shutdown_fails_closed_when_child_observation_is_unavailable(
+    monkeypatch,
+) -> None:
+    process = SimpleNamespace(
+        pid=4242,
+        returncode=None,
+        poll=lambda: None,
+        terminate=lambda: None,
+        wait=lambda *, timeout: 1,
+    )
+    monkeypatch.setattr(verify_windows_install.os, "name", "nt")
+    monkeypatch.setattr(
+        verify_windows_install,
+        "_windows_descendant_pids",
+        lambda _pid: (_ for _ in ()).throw(PermissionError("access denied")),
+    )
+    monkeypatch.setattr(
+        verify_windows_install, "_wait_for_product_ports_closed", lambda: []
+    )
+    monkeypatch.setattr(
+        verify_windows_install, "_windows_close_process_handles", lambda _items: []
+    )
+    monkeypatch.setattr(
+        verify_windows_install.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
+    )
+
+    result = verify_windows_install._stop(process, None)
+
+    assert result["status"] == "FAILED"
+    assert "PermissionError: access denied" in result["child_observation_error"]
+    assert result["fallback_taskkill_exit_code"] == 0
 
 
 def test_windows_transition_scope_separates_bootstrap_from_distinct_recalculation():

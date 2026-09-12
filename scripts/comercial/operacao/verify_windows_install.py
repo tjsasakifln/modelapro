@@ -521,7 +521,9 @@ def _wait_for_product_ports_closed(timeout: float = 15.0) -> list[str]:
     return _open_product_ports()
 
 
-def _windows_descendant_pids(parent_pid: int) -> list[int]:
+def _windows_descendant_pids(
+    parent_pid: int, executable_name: str = "MODELA-PRO.exe"
+) -> list[int]:
     """Snapshot descendants before terminating a windowless launcher."""
     import ctypes
     from ctypes import wintypes
@@ -553,15 +555,31 @@ def _windows_descendant_pids(parent_pid: int) -> list[int]:
     if snapshot == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
     parents: dict[int, int] = {}
+    executable_names: dict[int, str] = {}
+    enumeration_error: BaseException | None = None
     try:
         entry = ProcessEntry()
         entry.dwSize = ctypes.sizeof(entry)
+        ctypes.set_last_error(0)
         present = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        if not present:
+            raise ctypes.WinError(ctypes.get_last_error())
         while present:
             parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            executable_names[int(entry.th32ProcessID)] = str(entry.szExeFile)
+            ctypes.set_last_error(0)
             present = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+        error = ctypes.get_last_error()
+        if error != 18:  # ERROR_NO_MORE_FILES is the sole normal terminator.
+            raise ctypes.WinError(error)
+    except BaseException as exc:
+        enumeration_error = exc
     finally:
-        kernel32.CloseHandle(snapshot)
+        closed = kernel32.CloseHandle(snapshot)
+    if enumeration_error is not None:
+        raise enumeration_error
+    if not closed:
+        raise ctypes.WinError(ctypes.get_last_error())
     descendants: set[int] = set()
     changed = True
     while changed:
@@ -572,48 +590,92 @@ def _windows_descendant_pids(parent_pid: int) -> list[int]:
             ):
                 descendants.add(pid)
                 changed = True
-    return sorted(descendants)
+    return sorted(
+        pid
+        for pid in descendants
+        if executable_names.get(pid, "").casefold() == executable_name.casefold()
+    )
 
 
-def _windows_process_alive(pid: int) -> bool:
+def _windows_open_process_handles(child_pids: list[int]) -> list[tuple[int, int]]:
     import ctypes
     from ctypes import wintypes
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = kernel32.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return False
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    observed: list[tuple[int, int]] = []
     try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        return exit_code.value == 259
-    finally:
-        kernel32.CloseHandle(handle)
+        for pid in child_pids:
+            ctypes.set_last_error(0)
+            handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+            if not handle:
+                error = ctypes.get_last_error()
+                if error == 87:  # Process exited between snapshot and OpenProcess.
+                    continue
+                raise ctypes.WinError(error)
+            observed.append((pid, handle))
+        return observed
+    except BaseException:
+        for _pid, handle in observed:
+            kernel32.CloseHandle(handle)
+        raise
 
 
 def _wait_for_windows_children_stopped(
-    child_pids: list[int], timeout: float = 15.0
+    observed: list[tuple[int, int]], timeout: float = 15.0
 ) -> list[int]:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+
+    def alive() -> list[int]:
+        running = []
+        for pid, handle in observed:
+            state = kernel32.WaitForSingleObject(handle, 0)
+            if state == 258:  # WAIT_TIMEOUT: the original process still runs.
+                running.append(pid)
+            elif state != 0:  # WAIT_OBJECT_0: the original process exited.
+                raise ctypes.WinError(ctypes.get_last_error())
+        return running
+
     deadline = time.time() + timeout
     while time.time() < deadline:
-        alive = [pid for pid in child_pids if _windows_process_alive(pid)]
-        if not alive:
+        running = alive()
+        if not running:
             return []
         time.sleep(0.25)
-    return [pid for pid in child_pids if _windows_process_alive(pid)]
+    return alive()
+
+
+def _windows_close_process_handles(observed: list[tuple[int, int]]) -> list[int]:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return [pid for pid, handle in observed if not kernel32.CloseHandle(handle)]
 
 
 def _stop(process: subprocess.Popen, log: Any) -> dict[str, Any]:
     shutdown: dict[str, Any] = {"status": "PASSED", "parent_pid": process.pid}
-    child_pids = _windows_descendant_pids(process.pid) if os.name == "nt" else []
+    child_pids: list[int] = []
+    observed_children: list[tuple[int, int]] = []
+    observation_error = None
     if os.name == "nt":
+        try:
+            child_pids = _windows_descendant_pids(process.pid)
+            observed_children = _windows_open_process_handles(child_pids)
+        except BaseException as exc:
+            observation_error = f"{type(exc).__name__}: {exc}"
         shutdown["observed_child_pids"] = child_pids
+        shutdown["observed_child_handle_count"] = len(observed_children)
     if process.poll() is None:
         if os.name == "nt":
             # Abrupt parent termination is deliberate: the frozen launcher
@@ -633,12 +695,20 @@ def _stop(process: subprocess.Popen, log: Any) -> dict[str, Any]:
         shutdown["process_already_exited"] = True
     shutdown["parent_returncode"] = process.returncode
     if os.name == "nt":
-        alive_children = _wait_for_windows_children_stopped(child_pids)
+        wait_error = None
+        try:
+            alive_children = _wait_for_windows_children_stopped(observed_children)
+        except BaseException as exc:
+            alive_children = child_pids
+            wait_error = f"{type(exc).__name__}: {exc}"
+        close_failures = _windows_close_process_handles(observed_children)
         open_ports = _wait_for_product_ports_closed()
         shutdown["child_processes_exited"] = not alive_children
         shutdown["remaining_child_pids_before_fallback"] = alive_children
         shutdown["service_ports_closed"] = not open_ports
-        if alive_children or open_ports:
+        shutdown["child_observation_error"] = observation_error or wait_error
+        shutdown["child_handle_close_failures"] = close_failures
+        if observation_error or wait_error or close_failures or alive_children or open_ports:
             # Cleanup is best effort after recording a failed containment
             # check; it must never turn that failure into passing evidence.
             system_root = os.environ.get("SystemRoot", r"C:\Windows").rstrip("\\/")
@@ -655,7 +725,10 @@ def _stop(process: subprocess.Popen, log: Any) -> dict[str, Any]:
                 "type": "VerificationError",
                 "detail": (
                     "launcher termination left installed child processes or service "
-                    f"ports active: child_pids={alive_children}, ports={open_ports}"
+                    "observation unresolved: "
+                    f"child_pids={alive_children}, ports={open_ports}, "
+                    f"observation_error={observation_error or wait_error}, "
+                    f"close_failures={close_failures}"
                 ),
             }
     return shutdown
