@@ -99,7 +99,12 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
             page.get_by_role(
                 "heading", name="1. Encomenda e perfil", exact=True
             ).wait_for(state="visible", timeout=60000)
-            page.get_by_text(TEST_BUILD_LABEL, exact=True).first.wait_for(timeout=30000)
+            build_label = page.get_by_text(TEST_BUILD_LABEL, exact=True).first
+            try:
+                build_label.wait_for(state="visible", timeout=30000)
+                result["test_build_label_visible"] = True
+            except Exception:
+                result["test_build_label_visible"] = False
 
             profile = page.locator("[data-testid='stSelectbox']").filter(
                 has_text="Perfil de qualificação (versionado, catálogo conhecido)"
@@ -132,6 +137,8 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
                 raise BrowserVerificationError("installed UI did not render the API-backed sample preview")
             if result["page_errors"]:
                 raise BrowserVerificationError(f"installed UI raised page errors: {result['page_errors']}")
+            if not result["test_build_label_visible"]:
+                raise BrowserVerificationError("installed UI omitted its mandatory synthetic TEST build label")
             result["profile_labels"] = sorted(labels)
             result["preview_visible"] = True
             result["status"] = "PASSED"
