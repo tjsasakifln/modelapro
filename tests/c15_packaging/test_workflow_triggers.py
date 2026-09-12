@@ -48,7 +48,7 @@ def test_p04_harness_job_accepts_the_candidate_strictly():
 # `bash -e {0}` has no pipefail, so `run.py | tee` returned tee's zero while
 # the runner had failed. These tests fail if that default ever comes back.
 
-import yaml  # noqa: E402
+from tests.c15_packaging._workflow_yaml import load as _load_yaml  # noqa: E402
 
 LINUX_JOBS = (
     "lint",
@@ -63,7 +63,7 @@ LINUX_JOBS = (
 
 
 def _jobs() -> dict:
-    return yaml.safe_load(_load())["jobs"]
+    return _load_yaml(_load())["jobs"]
 
 
 def _shell_of(job: dict) -> str:
@@ -142,3 +142,67 @@ def test_no_mandatory_upload_may_vanish_silently():
             if str(step.get("uses", "")).startswith("actions/upload-artifact@"):
                 found = (step.get("with") or {}).get("if-no-files-found")
                 assert found == "error", f"{name}:{step.get('name')} -> {found!r}"
+
+
+# --- the reader itself must not be silently wrong ------------------------
+#
+# Every guard above is only as good as _workflow_yaml.load. A reader that
+# quietly returned an empty mapping would make all of them vacuous, so it is
+# pinned against known content of the real file and against a hand-built
+# sample with the shapes it claims to support.
+
+
+def test_reader_sees_every_job_of_the_real_workflow():
+    jobs = _jobs()
+    assert set(LINUX_JOBS) | {"c15-tests-windows"} == set(jobs), sorted(jobs)
+    for name, job in jobs.items():
+        assert job.get("runs-on"), name
+        assert job.get("steps"), name
+
+
+def test_reader_handles_the_shapes_it_claims():
+    sample = """
+name: demo
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: piped
+        env:
+          K: v
+        run: |
+          echo a | tee b.log
+          echo done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: x/
+          if-no-files-found: error
+          merge-multiple: true
+"""
+    doc = _load_yaml(sample)
+    job = doc["jobs"]["build"]
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["defaults"]["run"]["shell"] == "bash -eo pipefail {0}"
+    steps = job["steps"]
+    assert len(steps) == 3, steps
+    assert steps[0]["uses"] == "actions/checkout@v4"
+    assert steps[1]["name"] == "piped"
+    assert steps[1]["env"] == {"K": "v"}
+    assert steps[1]["run"].splitlines() == ["echo a | tee b.log", "echo done"]
+    assert steps[2]["with"]["if-no-files-found"] == "error"
+    assert steps[2]["with"]["merge-multiple"] is True
+    assert doc["on"]["push"]["branches"] == ["main"]
+
+
+def test_reader_does_not_silently_return_empty():
+    assert _load_yaml("") == {}
+    assert _jobs(), "reader returned nothing for the real workflow"

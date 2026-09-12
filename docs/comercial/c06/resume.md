@@ -1,0 +1,69 @@
+# C06 — handoff retomável
+
+Campanha `MP-COM-20260912/C06` — validação independente, consolidação e
+liberação comercial. Frente integradora e dona da prova final.
+
+- BASE_SHA do contrato: `8d66c7973c659174e06d7223c9a9a8181e8eeabf`
+- Destino de composição: PR **#20**, branch
+  `mp-pro-20260911/p04-referencia-consolidacao` (base `mp-20260911/integracao-final`)
+- Worktree de trabalho: `/home/tjsasakifln/code/modela-pro-p04`
+- C06 é a **única** frente autorizada a publicar a composição nessa branch.
+
+## Como retomar
+
+```bash
+cd /home/tjsasakifln/code/modela-pro-p04
+git fetch origin mp-pro-20260911/p04-referencia-consolidacao
+PYTHONPATH= python3 -m pytest tests/c15_packaging/test_ci_aggregator.py \
+    tests/c15_packaging/test_workflow_triggers.py -q          # portão do aceite
+PYTHONPATH= python3 scripts/pro_workflow/run.py \
+    --mode accept-candidate --output /tmp/p04-accept          # candidato estrito
+```
+
+O segundo comando **hoje sai 1**. Ver o handoff de grau abaixo: isso é o
+portão funcionando, não uma regressão.
+
+## O que está feito e verificado
+
+**C06-A01 — aceite realmente bloqueante: `IMPLEMENTED_VERIFIED`.**
+`docs/comercial/c06/r20a_gate.md`. O gap R20-A eram três defeitos
+independentes (pipe sem `pipefail`, candidato avaliado em `diagnose-base`,
+agregador que só lia conclusões de job). Todos corrigidos, com matriz de
+injeções obrigatórias e guardas estruturais que parseiam o YAML.
+
+## O que está bloqueado, e em quem
+
+**C06-A03, propriedade do grau — `BLOCKED_ON_C01`.**
+`docs/comercial/c06/handoff_c01_grade_not_met.md`. Pedir
+`minimum_fundamentacao_grade: 2` faz o job inteiro falhar sem snapshot, em
+vez de rotular o resultado válido como `grade_requirement_status: not_met`.
+Camada: `backend/worker.py:1220-1223`. C06 não edita esse arquivo.
+
+**C06-A06 — composição: `WAITING_FOR_COMPONENTS`.**
+C01, C02, C03 e C05 ainda estão em `8d66c797` com trabalho não commitado;
+apenas C04 tem commit próprio. Nenhum HEAD estabilizado para incorporar.
+Composição só depois de HEAD estabilizado conhecido, com ancestralidade
+registrada, e o aceite reabre a cada mudança posterior.
+
+**C06-A04 e C06-A05 — `BLOCKED_EXTERNAL_EVIDENCE`.**
+Não há dado real autorizado, não há revisor externo independente, não há
+autorização para submeter nada a nenhuma instituição. Protocolos preparados,
+atos reais ausentes e nomeados. Simulação por agentes não substitui pessoa.
+
+## Limites do ambiente local
+
+`tests/c15_packaging/test_format_engines.py` falha localmente por `xlrd`
+ausente no venv de desenvolvimento. É ambiental: o CI instala `.[dev]` com
+`constraints/linux-py3.txt`. Não é regressão de C06 e não foi tocado.
+
+## Regras que a retomada precisa preservar
+
+- Não voltar `p04-harness` para `diagnose-base` para conseguir verde.
+- Não relaxar tolerância depois de ver o número, não apagar teste, não
+  aceitar qualquer estado, não rerodar até verde.
+- Não escrever em arquivo de outro proprietário; pedir por handoff com
+  payload mínimo, evidência e critério de aceite.
+- SHA publicado **depois** do commit, em comentário/artefato, nunca dentro
+  do próprio commit que ele descreve.
+- `COMMERCIAL_RELEASE_READY` não se declara com requisito decisivo pendente.
+  Sem merge, venda ou deploy automáticos.

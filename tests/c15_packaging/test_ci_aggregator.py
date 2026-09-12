@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from c15_local.aggregate_required import evaluate
+import json
+import xml.etree.ElementTree as ET
+
+import pytest
+
+from c15_local.aggregate_required import (
+    check_c16,
+    check_junit,
+    check_p04_run,
+    evaluate,
+    verify_artifacts,
+)
 
 
 def test_all_success_is_green():
@@ -96,18 +107,6 @@ def test_cli_required_jobs_flag():
 # pipefail and ran the diagnostic mode, so the job returned 0 while
 # artifacts/p04/run.json recorded exit_code 1. Job conclusions alone cannot
 # see that, so these injections drive the artifact readers directly.
-
-import json
-import xml.etree.ElementTree as ET
-
-import pytest
-
-from c15_local.aggregate_required import (
-    check_c16,
-    check_junit,
-    check_p04_run,
-    verify_artifacts,
-)
 
 CANDIDATE_SHA = "8d66c7973c659174e06d7223c9a9a8181e8eeabf"
 
