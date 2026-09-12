@@ -104,9 +104,12 @@ import backend, modules, frontend, c15_local
 from pyhanko.pdf_utils import reader as pyhanko_reader
 from c15_local.launcher import frontend_app_path, frontend_command
 from modules.commercial_license import trust_anchor_metadata, trusted_vendor_public_key
+from modules import cost_valuation
 from modules.qualification_profile import load_catalog, resolve_profile
 from modules.digital_signatures import pdf as digital_signature_pdf
+from modules.pro_workflow import report_context as pro_report_context
 from modules.report_export import docx as report_docx, pdfa as report_pdfa
+from modules.valuation_policy import qualification as valuation_qualification
 
 assert not os.environ.get("PYTHONPATH"), os.environ.get("PYTHONPATH")
 template = files("modules") / "templates" / "report.html"
@@ -173,8 +176,11 @@ module_paths = {
     "c15_local": c15_local.__file__,
     "pyhanko_reader": pyhanko_reader.__file__,
     "digital_signatures": digital_signature_pdf.__file__,
+    "cost_valuation": cost_valuation.__file__,
+    "pro_workflow": pro_report_context.__file__,
     "report_docx": report_docx.__file__,
     "report_pdfa": report_pdfa.__file__,
+    "valuation_policy": valuation_qualification.__file__,
 }
 for name, module_path in module_paths.items():
     assert module_path, name

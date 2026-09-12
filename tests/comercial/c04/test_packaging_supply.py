@@ -367,6 +367,9 @@ def test_wheel_contains_runtime_components_but_not_release_tooling(tmp_path: Pat
         names = archive.namelist()
     assert any(name.startswith("modules/operacao_local/") for name in names)
     assert any(name.startswith("modules/commercial_license/") for name in names)
+    assert any(name.startswith("modules/cost_valuation/") for name in names)
+    assert any(name.startswith("modules/pro_workflow/") for name in names)
+    assert any(name.startswith("modules/valuation_policy/") for name in names)
     assert "modules/commercial_license/trusted_vendor_anchor.json" in names
     assert any(name.startswith("profiles/normative/") and name.endswith(".json") for name in names)
     assert any(name.startswith("profiles/institutions/") and name.endswith(".json") for name in names)
