@@ -335,6 +335,7 @@ jobs:
         run: |
           mkdir -p artifacts/ui-e2e
           set -o pipefail
+          python -m c15_local.test_inventory | tee artifacts/inventory-check.log
           C06_COLLECTION_OUTPUT=artifacts/collection.json python -m pytest -p c15_local.collection_evidence tests -q --tb=line --junitxml=artifacts/wide.junit.xml | tee artifacts/wide.log
       - name: Seal evidence including failures
         if: ${{ !cancelled() }}

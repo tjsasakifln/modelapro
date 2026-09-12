@@ -13,6 +13,7 @@ from c15_local.aggregate_required import check_collection
 def test_collection_cross_checks_obligations_and_execution(tmp_path, monkeypatch, mutation):
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
     files = [
+        "tests/comercial/test_c06_commercial_surfaces.py",
         "tests/comercial/test_c06_qualification_integration.py",
         "tests/comercial/test_c06_document_flow.py",
         "tests/comercial/test_c06_cost_flow.py",
@@ -27,6 +28,14 @@ def test_collection_cross_checks_obligations_and_execution(tmp_path, monkeypatch
         "tests/comercial/c02/test_playwright_path.py",
         "tests/pro_workflow/p04/test_mutations_commercial.py",
     ]
+    from c15_local import test_inventory
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps({
+        "schema": "MP-C06-TEST-INVENTORY/1",
+        "nodeids": sorted(name + "::test_obligation" for name in files),
+    }), encoding="utf-8")
+    real_check = test_inventory.check_inventory
+    monkeypatch.setattr(test_inventory, "check_inventory", lambda nodes: real_check(nodes, inventory))
     if mutation == "missing_file":
         files.pop()
     nodes = [name + "::test_obligation" for name in files]

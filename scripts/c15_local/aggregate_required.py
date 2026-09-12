@@ -237,6 +237,7 @@ def check_collection(root: Path, expected_sha: str | None) -> list[str]:
         ):
             problems.append(f"wide collection: obligation did not pass: {node}")
     required_files = {
+        "tests/comercial/test_c06_commercial_surfaces.py",
         "tests/comercial/test_c06_qualification_integration.py",
         "tests/comercial/test_c06_document_flow.py",
         "tests/comercial/test_c06_cost_flow.py",
@@ -252,6 +253,11 @@ def check_collection(root: Path, expected_sha: str | None) -> list[str]:
         "tests/pro_workflow/p04/test_mutations_commercial.py",
     }
     collected_files = {node.split("::", 1)[0] for node in nodes}
+    if __package__:
+        from .test_inventory import check_inventory
+    else:  # CI invokes this stdlib-only aggregator directly, without installing the wheel.
+        from test_inventory import check_inventory
+    problems.extend(check_inventory(nodes))
     if required_files - collected_files:
         problems.append("wide collection: mandatory C06 files absent: "
                         + ", ".join(sorted(required_files - collected_files)))
