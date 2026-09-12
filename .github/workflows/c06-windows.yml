@@ -187,6 +187,11 @@ jobs:
           }
           $identity | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $evidence "candidate-identity.json") -Encoding utf8
           Copy-Item $env:WINDOWS_LOCK (Join-Path $evidence "windows-py312-x64.txt")
+          $nativeEvidence = Join-Path $evidence "windows-native-runtime"
+          New-Item -ItemType Directory -Path $nativeEvidence -Force | Out-Null
+          Copy-Item "$env:MODELA_WINDOWS_NATIVE_DIR\native-runtime.json" $nativeEvidence
+          Copy-Item "$env:MODELA_WINDOWS_NATIVE_DIR\licenses" $nativeEvidence -Recurse
+          Copy-Item "$env:MODELA_WINDOWS_NATIVE_DIR\fontconfig" $nativeEvidence -Recurse
           $version = "0.1.0-c06.${{ github.run_number }}"
           "C06_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "C06_EVIDENCE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -195,6 +200,7 @@ jobs:
         shell: pwsh
         run: |
           $build = Join-Path $env:RUNNER_TEMP "modelapro-build-b"
+          "C06_BUILD=$build" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           $generated = (Get-Date).ToUniversalTime().ToString("o")
           & $env:BUILD_PYTHON -m scripts.comercial.operacao.build_windows `
             --root . `
@@ -209,23 +215,81 @@ jobs:
           $installer = Join-Path $build $installerEntries[0].path
           if (-not (Test-Path $installer)) { throw "current installer absent from release manifest path" }
           "C06_CURRENT_INSTALLER=$installer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "C06_BUILD=$build" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Download a previous distinct-tree candidate when explicitly selected
-        if: ${{ inputs.previous_run_id != '' }}
+      - name: Resolve a previous successful candidate from the same PR cohort
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_PR: ${{ github.event.pull_request.number }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          MANUAL_RUN_ID: ${{ inputs.previous_run_id }}
+          MANUAL_RUN_ATTEMPT: ${{ inputs.previous_run_attempt }}
+        run: |
+          $selectedId = "$env:MANUAL_RUN_ID".Trim()
+          $selectedAttempt = "$env:MANUAL_RUN_ATTEMPT".Trim()
+          $selection = if ($selectedId) { "explicit_workflow_input" } else { "none" }
+          if ($selectedId -and $selectedId -notmatch '^\d+$') {
+            throw "previous_run_id must contain only decimal digits"
+          }
+          if ($selectedAttempt -and $selectedAttempt -notmatch '^\d+$') {
+            throw "previous_run_attempt must contain only decimal digits"
+          }
+          if (-not $selectedId -and "${{ github.event_name }}" -eq "pull_request") {
+            $headers = @{
+              Authorization = "Bearer $env:GH_TOKEN"
+              Accept = "application/vnd.github+json"
+              "X-GitHub-Api-Version" = "2022-11-28"
+            }
+            $current = Invoke-RestMethod `
+              -Headers $headers `
+              -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            $branch = [uri]::EscapeDataString($env:HEAD_BRANCH)
+            $listing = Invoke-RestMethod `
+              -Headers $headers `
+              -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs?branch=$branch&event=pull_request&status=success&per_page=50"
+            $sameCohort = @()
+            foreach ($candidate in $listing.workflow_runs) {
+              $samePr = @(
+                $candidate.pull_requests | Where-Object { $_.number -eq [int]$env:CURRENT_PR }
+              )
+              if (
+                $candidate.workflow_id -eq $current.workflow_id -and
+                $candidate.id -ne [long]$env:GITHUB_RUN_ID -and
+                $candidate.head_branch -eq $env:HEAD_BRANCH -and
+                $candidate.head_repository.full_name -eq $env:GITHUB_REPOSITORY -and
+                $candidate.head_sha -ne $current.head_sha -and
+                $samePr.Count -eq 1
+              ) {
+                $sameCohort += $candidate
+              }
+            }
+            $prior = @($sameCohort | Sort-Object created_at -Descending | Select-Object -First 1)
+            if ($prior.Count -eq 1) {
+              $selectedId = [string]$prior[0].id
+              $selectedAttempt = [string]$prior[0].run_attempt
+              $selection = "latest_success_same_pr_branch_workflow"
+            }
+          }
+          if ($selectedId -and -not $selectedAttempt) { $selectedAttempt = "1" }
+          "C06_PREVIOUS_RUN_ID=$selectedId" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C06_PREVIOUS_RUN_ATTEMPT=$selectedAttempt" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C06_PREVIOUS_SELECTION=$selection" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Download the selected previous distinct-tree candidate
+        if: ${{ env.C06_PREVIOUS_RUN_ID != '' }}
         uses: actions/download-artifact@v4
         with:
-          name: c06-windows-candidate-${{ inputs.previous_run_id }}-${{ inputs.previous_run_attempt }}
+          name: c06-windows-candidate-${{ env.C06_PREVIOUS_RUN_ID }}-${{ env.C06_PREVIOUS_RUN_ATTEMPT }}
           path: ${{ runner.temp }}/modelapro-prior-candidate
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.previous_run_id }}
+          run-id: ${{ env.C06_PREVIOUS_RUN_ID }}
 
       - name: Select A for version transition and rollback
         shell: pwsh
         run: |
           $prior = Join-Path $env:RUNNER_TEMP "modelapro-installer-a"
           New-Item -ItemType Directory -Path $prior -Force | Out-Null
-          $previousRun = "${{ inputs.previous_run_id }}"
+          $previousRun = "$env:C06_PREVIOUS_RUN_ID"
           $distinct = -not [string]::IsNullOrWhiteSpace($previousRun)
           $currentIdentity = Get-Content "$env:C06_EVIDENCE\candidate-identity.json" -Raw | ConvertFrom-Json
           if ($distinct) {
@@ -284,6 +348,8 @@ jobs:
           [ordered]@{
             schema_version = "MP-COM-WINDOWS-TRANSITION/1"
             previous_run_id = if ($distinct) { $previousRun } else { $null }
+            previous_run_attempt = if ($distinct) { $env:C06_PREVIOUS_RUN_ATTEMPT } else { $null }
+            previous_selection = $env:C06_PREVIOUS_SELECTION
             previous_version = $priorVersion
             previous_tree_sha = $priorTree
             current_version = $env:C06_VERSION
@@ -390,11 +456,13 @@ jobs:
             "S-1-5-32-544",
             "S-1-3-0"
           )
-          $targets = @(
+          $requiredTargets = @(
             (Join-Path $env:RUNNER_TEMP "profile-active"),
             (Join-Path $env:RUNNER_TEMP "profile-restored"),
             $env:C06_TEST_LICENSE_DIR
-          ) | Where-Object { $_ -and (Test-Path $_) }
+          )
+          $targets = @($requiredTargets | Where-Object { $_ -and (Test-Path $_) })
+          $missingTargets = @($requiredTargets | Where-Object { -not $_ -or -not (Test-Path $_) })
           $entries = @()
           $unsafe = @()
           foreach ($target in $targets) {
@@ -444,22 +512,39 @@ jobs:
               }
             }
           }
-          $aclStatus = if ($targets.Count -gt 0 -and $unsafe.Count -eq 0) { "PASSED" } else { "FAILED" }
+          $aclStatus = if ($missingTargets.Count -eq 0 -and $unsafe.Count -eq 0) { "PASSED" } else { "FAILED" }
           [ordered]@{
             schema_version = "MP-COM-WINDOWS-ACL/1"
             status = $aclStatus
             model = "Windows discretionary ACL; POSIX chmod is not accepted as evidence"
             allowed_sids = $allowedSids
             targets = $targets
+            missing_required_targets = $missingTargets
             entries = $entries
             unsafe_allow_entries = $unsafe
           } | ConvertTo-Json -Depth 8 | Set-Content "$evidence\runtime-acl.json" -Encoding utf8
-          if ($aclStatus -ne "PASSED") { throw "private runtime paths have missing or overbroad Windows ACLs" }
+          if ($aclStatus -ne "PASSED" -and "${{ job.status }}" -eq "success") {
+            throw "private runtime paths have missing or overbroad Windows ACLs"
+          }
 
       - name: Uninstall without deleting the separate evidence profile
         if: always()
         shell: pwsh
         run: |
+          if (-not $env:C06_INSTALL) {
+            $evidence = if ($env:C06_EVIDENCE) {
+              $env:C06_EVIDENCE
+            } else {
+              Join-Path $env:RUNNER_TEMP "c06-windows-evidence"
+            }
+            New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+            [ordered]@{
+              schema_version = "MP-COM-WINDOWS-UNINSTALL/1"
+              status = "NOT_RUN"
+              blocking_reason = "candidate was not installed; there is no installation to remove"
+            } | ConvertTo-Json | Set-Content (Join-Path $evidence "uninstall.json") -Encoding utf8
+            exit 0
+          }
           $uninstaller = Join-Path $env:C06_INSTALL "unins000.exe"
           if (-not (Test-Path $uninstaller)) { throw "Inno Setup uninstaller absent" }
           & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART

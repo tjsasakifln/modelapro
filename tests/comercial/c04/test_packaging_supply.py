@@ -371,6 +371,8 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir() -> None:
     assert 'collect_data_files("profiles")' in spec
     assert 'collect_submodules("pyhanko")' in spec
     assert 'collect_submodules("pyhanko_certvalidator")' in spec
+    assert '[str(root / "scripts" / "c15_local" / "launcher.py")]' in spec
+    assert 'Analysis(\n    ["scripts/c15_local/launcher.py"]' not in spec
     assert "exclude_binaries=True" in spec
     assert "COLLECT(" in spec
     for buyer_document in (
