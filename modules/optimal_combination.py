@@ -668,6 +668,46 @@ def classify_admissibility(
     }
 
 
+def _documentary_inputs(evaluation_policy: Mapping[str, Any]) -> Dict[str, Any]:
+    """Read documentary grades and provenance without truthy defaults.
+
+    ``0``, ``None`` and an invalid value have different meanings in the C05
+    classifier, so this adapter must preserve the value exactly.  Both the
+    legacy flat keys and C02's nested ``documentary.itemN`` shape are accepted.
+    """
+    policy = dict(evaluation_policy or {})
+    documentary = policy.get("documentary")
+    documentary = dict(documentary) if isinstance(documentary, Mapping) else {}
+
+    def value(item: int, kind: str) -> Any:
+        nested = documentary.get(f"item{item}")
+        nested = dict(nested) if isinstance(nested, Mapping) else {}
+        if kind == "grade":
+            for candidate in (
+                nested.get("grade"),
+                documentary.get(f"item{item}_grade"),
+                policy.get(f"grau_item{item}"),
+            ):
+                if candidate is not None:
+                    return candidate
+            return None
+        for candidate in (
+            nested.get("provenance"),
+            documentary.get(f"item{item}_provenance"),
+            policy.get(f"item{item}_provenance"),
+        ):
+            if candidate is not None:
+                return candidate
+        return None
+
+    return {
+        "grau_item1": value(1, "grade"),
+        "grau_item3": value(3, "grade"),
+        "item1_provenance": value(1, "provenance"),
+        "item3_provenance": value(3, "provenance"),
+    }
+
+
 def build_search_cache_key(
     prepared_dataset: Mapping[str, Any],
     subject_design: Optional[Mapping[str, Any]],
@@ -851,8 +891,10 @@ class OptimalCombinationFinder:
         target_col: str,
         degree: int = 1,
         avaliando_raw: Optional[Dict[str, float]] = None,
-        grau_item1: int = 1,
-        grau_item3: int = 1,
+        grau_item1: Optional[int] = None,
+        grau_item3: Optional[int] = None,
+        item1_provenance: Any = None,
+        item3_provenance: Any = None,
         candidate_cols: Optional[List[str]] = None,
     ) -> OptimalCombinationResult:
         """Adapter: map the legacy DataFrame call onto ``search_models`` and back."""
@@ -864,10 +906,14 @@ class OptimalCombinationFinder:
                 avaliando_raw=avaliando_raw,
                 grau_item1=grau_item1,
                 grau_item3=grau_item3,
+                item1_provenance=item1_provenance,
+                item3_provenance=item3_provenance,
                 candidate_cols=candidate_cols,
             )
             result = search_models(prepared, subject, request_spec)
-            legacy = self._to_legacy_result(result, degree=degree)
+            legacy = self._to_legacy_result(
+                result, degree=degree, evaluation_policy=request_spec["evaluation_policy"]
+            )
             if avaliando_raw and legacy.best_model is not None:
                 builder = ModelBuilder()
                 original_df = prepared.get("base_frame")
@@ -896,8 +942,10 @@ class OptimalCombinationFinder:
         target_col: str,
         degree: int,
         avaliando_raw: Optional[Dict[str, float]],
-        grau_item1: int,
-        grau_item3: int,
+        grau_item1: Optional[int],
+        grau_item3: Optional[int],
+        item1_provenance: Any,
+        item3_provenance: Any,
         candidate_cols: Optional[List[str]],
     ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]:
         if target_col not in df.columns:
@@ -955,6 +1003,8 @@ class OptimalCombinationFinder:
                 "outlier_action": "report_only",
                 "grau_item1": grau_item1,
                 "grau_item3": grau_item3,
+                "item1_provenance": item1_provenance,
+                "item3_provenance": item3_provenance,
                 "seed": 0,
             },
             "missing_policy": {"target": "never_impute", "predictors": "complete_case"},
@@ -975,7 +1025,10 @@ class OptimalCombinationFinder:
         return prepared, request_spec, subject
 
     def _to_legacy_result(
-        self, search: Mapping[str, Any], degree: int = 1
+        self,
+        search: Mapping[str, Any],
+        degree: int = 1,
+        evaluation_policy: Optional[Mapping[str, Any]] = None,
     ) -> OptimalCombinationResult:
         issues = list(search.get("issues") or [])
         error_issues = [i for i in issues if i.get("severity") == "error"]
@@ -1044,14 +1097,19 @@ class OptimalCombinationFinder:
                     except Exception:
                         pass
                 if X_design is not None and y_design is not None and best_model.model_object is not None:
-                    try:
-                        from modules.nbr14653_validation import NBRValidator
+                    from modules.nbr14653_validation import NBRValidator
 
-                        best_model.validation_result = NBRValidator.validate_model(
-                            best_model, X_design, y_design, degree
-                        )
-                    except Exception:
-                        pass
+                    doc = _documentary_inputs(evaluation_policy or {})
+                    best_model.validation_result = NBRValidator.validate_model(
+                        best_model,
+                        X_design,
+                        y_design,
+                        degree,
+                        grau_item1=doc["grau_item1"],
+                        grau_item3=doc["grau_item3"],
+                        item1_provenance=doc["item1_provenance"],
+                        item3_provenance=doc["item3_provenance"],
+                    )
         # Item 4/precision for the legacy DataFrame API is completed in
         # find_best_model via add_precision_and_extrapolation when avaliando exists.
         grau = None
@@ -1777,6 +1835,7 @@ def _fit_and_score(
         )
     else:
         builder = ModelBuilder()
+        documentary = _documentary_inputs(evaluation_policy)
         raw_degree = (
             evaluation_policy.get("minimum_fundamentacao_grade")
             if evaluation_policy.get("minimum_fundamentacao_grade") is not None
@@ -1794,8 +1853,10 @@ def _fit_and_score(
             y_series,
             degree=degree,
             remove_outliers=remove_outliers,
-            grau_item1=int(evaluation_policy.get("grau_item1") or 1),
-            grau_item3=int(evaluation_policy.get("grau_item3") or 1),
+            grau_item1=documentary["grau_item1"],
+            grau_item3=documentary["grau_item3"],
+            item1_provenance=documentary["item1_provenance"],
+            item3_provenance=documentary["item3_provenance"],
         )
         if not model_result.success or model_result.model_metrics is None:
             record["status"] = "rejected"

@@ -7,6 +7,7 @@ import pytest
 from backend.worker import CompositionError, compose_valuation_job, resolve_peers
 from modules.optimal_combination import search_models
 from modules.result_contract import RequestSpecError, validate_request_spec
+from modules.qualification_profile import resolve_profile
 from tests.c05_search.helpers import make_prepared, request_spec
 from tests.comercial.c01.conftest import (
     apto_declared_documentary,
@@ -60,7 +61,7 @@ def test_fitted_but_grade_not_met_is_analysis_not_no_winner(isolated_c01_runtime
     assert qc.get("grade_requirement_status") in {"not_met", "pending"}
     assert qc.get("case_release_status") in {"analysis_only", "review_required"}
     assert qc.get("case_release_status") != "ready_for_professional_signoff"
-    assert qc.get("calculation_status") == "fitted"
+    assert qc.get("calculation_status") == "ok"
     issuance = (snap.get("validation") or {}).get("issuance") or {}
     assert issuance.get("status") != "ready_for_professional_review" or qc.get("grade_requirement_status") == "met"
 
@@ -92,6 +93,19 @@ def test_reachable_grade_has_professional_review_path(isolated_c01_runtime):
     spec["search_policy"] = dict(spec["search_policy"])
     spec["search_policy"]["minimum_fundamentacao_grade"] = 1
     spec["declared_documentary"] = apto_declared_documentary()
+    resolved = resolve_profile({"id": "abnt-14653-2-regressao-mercado", "version": "1.0.0"})
+    spec["qualification_profile"] = {
+        key: resolved.get(key)
+        for key in (
+            "id", "version", "source_set_sha256", "purpose", "value_basis",
+            "method", "asset_scope",
+        )
+    }
+    spec["profile_evidence"] = {
+        "parte1.6.3.vistoria": "TESTE::vistoria-sintetica",
+        "8.2.1.5.2.campo_suficiente": "TESTE::revisao-campo-sintetica",
+        "10.1.laudo_completo": "TESTE::laudo-completo-sintetico",
+    }
     spec = validate_request_spec(spec)
     ctx = compose_valuation_job(
         job_id=created["job_id"],

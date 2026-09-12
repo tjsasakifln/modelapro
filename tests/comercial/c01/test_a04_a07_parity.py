@@ -72,6 +72,10 @@ def test_compose_batch_subprocess_share_monetary_blocks(isolated_c01_runtime, tm
     snap = ctx["snapshot"]
     frozen = ctx["frozen_project"]
     assert frozen is not None
+    persisted_normative = store.get_artifact(created["job_id"], "normative_assessment.json")
+    persisted_report_context = store.get_artifact(created["job_id"], "report_context.json")
+    assert json.loads(persisted_normative) == (snap["provenance"]["normative_assessment"])
+    assert json.loads(persisted_report_context) == ctx["report_context"]
     value = snap["value"]
     assert value["point"] is not None
     assert value.get("arbitration_interval") in (None, value.get("arbitration_interval"))
@@ -113,7 +117,11 @@ def test_compose_batch_subprocess_share_monetary_blocks(isolated_c01_runtime, tm
     assert qc.get("schema_version") == "MP-QUAL/1"
     assert qc.get("result_fingerprint")
     rules = qc.get("rule_results") or []
-    assert rules
+    # This parity fixture deliberately has no qualification profile.  Numeric
+    # results remain reproducible, but no normative profile rules may be
+    # invented for the unqualified calculation.
+    assert rules == []
+    assert qc.get("case_release_status") == "analysis_only"
     assert all(r.get("status") != "passed" or not r.get("unverified") for r in rules)
     assert "unverified" not in {r.get("status") for r in rules if r.get("status") == "passed"}
 

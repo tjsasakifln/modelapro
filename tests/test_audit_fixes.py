@@ -177,7 +177,12 @@ class TestAvaliandoDomainPreFilter:
         )
         item4 = next(i for i in vr.item_scores if i.item == 4)
         assert item4.grau_achieved == 3
-        assert vr.grau_fundamentacao is not None
+        # This test exercises the avaliando-domain prefilter and supplies no
+        # documentary evidence. A successful prediction must not fabricate a
+        # fundamentação grade as a side effect.
+        documentary = {i.item: i.grau_achieved for i in vr.item_scores if i.item in (1, 3)}
+        assert documentary == {1: 0, 3: 0}
+        assert vr.grau_fundamentacao is None
 
 
 class TestExhaustiveDisclosurePropagation:

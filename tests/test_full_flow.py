@@ -32,8 +32,11 @@ class TestFullFlow:
         assert np.isclose(params['x1'], 3.0, atol=0.5)
 
         val = result.best_model.validation_result
-        assert val.is_valid is True
-        assert result.target_achieved is True
+        # This numeric flow supplies no documentary evidence for items 1/3.
+        # It remains an exploratory fitted result rather than fabricating Grau I.
+        assert val.is_valid is False
+        assert result.target_achieved is False
+        assert val.grau_fundamentacao is None
         assert result.best_grau_reached == val.grau_fundamentacao
 
 

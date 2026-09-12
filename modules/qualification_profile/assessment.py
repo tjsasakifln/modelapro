@@ -278,6 +278,7 @@ def _decide_release(
     review_events: Sequence[Mapping[str, Any]],
     signature: Optional[Mapping[str, Any]],
     fingerprint: str,
+    report_fingerprint: Optional[str],
 ) -> Dict[str, Any]:
     """Decide case_release_status with the reasons that bound it.
 
@@ -380,6 +381,8 @@ def _decide_release(
         and e.get("professional_id")
         and e.get("motive")
         and e.get("version")
+        and e.get("valid") is not False
+        and e.get("decision") not in ("rejected", "cancelled")
     ]
     stale_reviews = [
         e for e in review_events if e.get("fingerprint") not in (None, fingerprint)
@@ -407,16 +410,39 @@ def _decide_release(
         status = CASE_REVIEW_REQUIRED
     else:
         status = CASE_READY_FOR_SIGNOFF
-        if signature and signature.get("integrity_verified"):
-            if signature.get("fingerprint") == fingerprint:
+        if signature and signature.get("integrity_verified") is not False:
+            bound_result = signature.get("result_fingerprint") or signature.get("fingerprint")
+            bound_report = signature.get("report_content_fingerprint")
+            signed_sha = signature.get("signed_pdf_sha256") or signature.get("signed_bytes_sha256")
+            unsigned_sha = signature.get("unsigned_pdf_sha256") or signature.get("unsigned_bytes_sha256")
+            digest_fields_valid = all(
+                isinstance(value, str)
+                and len(value) == 64
+                and all(ch in "0123456789abcdefABCDEF" for ch in value)
+                for value in (signed_sha, unsigned_sha)
+            )
+            signature_valid = bool(
+                signature.get("integrity_verified") is True
+                and bound_result == fingerprint
+                and report_fingerprint
+                and bound_report == report_fingerprint
+                and digest_fields_valid
+            )
+            if signature_valid:
                 status = CASE_SIGNED_INTEGRITY_VERIFIED
             else:
                 status = CASE_REVIEW_REQUIRED
                 blockers.append({
-                    "code": "signature_stale",
+                    "code": (
+                        "signature_stale"
+                        if bound_result not in (None, fingerprint)
+                        or bound_report not in (None, report_fingerprint)
+                        else "signature_unverified"
+                    ),
                     "detail": (
-                        "assinatura registrada sobre outro result_fingerprint: mudança "
-                        "material invalida decisões dependentes sem apagar o histórico."
+                        "A assinatura não está vinculada simultaneamente ao "
+                        "result_fingerprint, report_content_fingerprint e aos hashes "
+                        "dos bytes PDF antes/depois da assinatura."
                     ),
                 })
 
@@ -451,25 +477,69 @@ def assess_qualification(
       institution_acceptance -- a RECORD of a real act, never inferred
     """
     ctx = dict(context or {})
+    assessment = ctx.get("normative_assessment") or {}
+    raw_signature = ctx.get("signature")
+    signature = raw_signature if isinstance(raw_signature, Mapping) else None
+    review_events = [
+        dict(event)
+        for event in (ctx.get("review_events") or [])
+        if isinstance(event, Mapping)
+    ]
     try:
         resolved = resolve_profile(profile)
     except ProfileError as exc:
+        if ctx.get("result_material"):
+            calculation_status = _calculation_status(assessment, ctx)
+            requested = ctx.get("requested_minimum_grade")
+            achieved = (assessment.get("fundamentacao") or {}).get("grade")
+            grade_status = _grade_requirement_status(
+                requested, achieved, calculation_status=calculation_status
+            )
+        else:
+            calculation_status = CALC_ABSENT
+            grade_status = GRADE_ERROR
+        unresolved_fingerprint = (
+            result_fingerprint({
+                "profile": dict(profile or {}),
+                "result_material": ctx.get("result_material") or {},
+                "output_manifest": ctx.get("output_manifest") or {},
+            })
+            if ctx.get("result_material")
+            else None
+        )
+        stale_reviews = [
+            event
+            for event in review_events
+            if event.get("fingerprint") not in (None, unresolved_fingerprint)
+        ]
         return {
             "schema_version": SCHEMA_VERSION,
             "profile": {"id": (profile or {}).get("id"), "resolved": False,
                         "state": "error", "detail": str(exc)},
-            "result_fingerprint": None,
-            "calculation_status": CALC_ABSENT,
+            "result_fingerprint": unresolved_fingerprint,
+            "calculation_status": calculation_status,
             "rule_results": [],
-            "grade_requirement_status": GRADE_ERROR,
+            "grade_requirement_status": grade_status,
             "case_release_status": CASE_ANALYSIS_ONLY,
-            "review_events": [],
+            "release_blockers": [{
+                "code": "profile_unknown",
+                "detail": str(exc),
+            }],
+            "pending_manual_rules": [],
+            "review_events": review_events,
+            "stale_review_events": stale_reviews,
+            "report_content_fingerprint": ctx.get("report_content_fingerprint"),
+            "signed_bytes_sha256": (
+                signature.get("signed_pdf_sha256")
+                or signature.get("signed_bytes_sha256")
+                if signature
+                else None
+            ),
             "institution_acceptance": None,
             "claims": [],
             "error": {"code": "profile_error", "detail": str(exc)},
         }
 
-    assessment = ctx.get("normative_assessment") or {}
     calculation_status = _calculation_status(assessment, ctx)
 
     achieved = (assessment.get("fundamentacao") or {}).get("grade")
@@ -494,6 +564,8 @@ def assess_qualification(
 
     precisao = assessment.get("precisao") or {}
     intervals = assessment.get("intervals") or {}
+    output_manifest = ctx.get("output_manifest")
+    report_fingerprint = ctx.get("report_content_fingerprint")
     fingerprint = result_fingerprint({
         "profile_id": resolved.get("id"),
         "profile_version": resolved.get("version"),
@@ -532,15 +604,22 @@ def assess_qualification(
             for sid, doc in sorted((assessment.get("source_documents") or {}).items())
         },
         "result_snapshot_id": ctx.get("result_snapshot_id"),
+        # Facts from the actual calculation surface (value, coefficients,
+        # units, dates, sample and policies) are supplied by C01. Review and
+        # signature events stay outside this material so the two-pass protocol
+        # can bind them to the stable first-pass digest.
+        "result_material": ctx.get("result_material") or {},
+        # Output completeness participates in the case decision. The report's
+        # own content digest remains a separate identifier below.
+        "output_manifest": output_manifest or {},
     })
 
     # Conformidade da SAÍDA contra o padrão documental do destinatário. Um laudo
     # normativamente correto ainda volta com ressalva se faltar anexo que o
     # manual do destinatário exige, então isto bloqueia a liberação.
-    output = assess_output_conformance(resolved, ctx.get("output_manifest"))
+    output = assess_output_conformance(resolved, output_manifest)
     rule_results.extend(output["rule_results"])
 
-    review_events = list(ctx.get("review_events") or [])
     release_profile = dict(resolved)
     release_profile["_output_blocking"] = output["blocking"]
     release_profile["_model_use_prohibited"] = assessment.get("model_use_prohibited") or []
@@ -550,8 +629,9 @@ def assess_qualification(
         calculation_status=calculation_status,
         grade_status=grade_status,
         review_events=review_events,
-        signature=ctx.get("signature"),
+        signature=signature,
         fingerprint=fingerprint,
+        report_fingerprint=report_fingerprint,
     )
 
     acceptance = ctx.get("institution_acceptance")
@@ -586,6 +666,13 @@ def assess_qualification(
             "sources": resolved.get("sources") or [],
         },
         "result_fingerprint": fingerprint,
+        "report_content_fingerprint": report_fingerprint,
+        "signed_bytes_sha256": (
+            signature.get("signed_pdf_sha256")
+            or signature.get("signed_bytes_sha256")
+            if signature
+            else None
+        ),
         "calculation_status": calculation_status,
         "rule_results": rule_results,
         "grade_requirement_status": grade_status,

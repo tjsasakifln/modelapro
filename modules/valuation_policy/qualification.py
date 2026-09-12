@@ -15,7 +15,6 @@ PROFILE_REQUIRED = (
     "value_basis",
     "method",
     "asset_scope",
-    "recipient_id",
 )
 RULE_STATUSES = frozenset(
     {
@@ -54,34 +53,6 @@ RELEASE_TO_ISSUANCE = {
     "signed_integrity_verified": "ready_for_professional_review",
 }
 
-KNOWN_VALUE_BASES = frozenset(
-    {
-        "market",
-        "reconstruction_cost",
-        "replacement_cost",
-        "depreciated_cost",
-        "guarantee_limit",
-        "adopted",
-        "arbitrated",
-    }
-)
-KNOWN_METHODS = frozenset({"comparative_regression", "reconstruction_cost", "replacement_cost"})
-KNOWN_PURPOSES = frozenset(
-    {
-        "market_analysis",
-        "professional_report",
-        "mortgage",
-        "insurance",
-        "preview",
-        "teste de contrato",
-        "aceite-integracao",
-        "p01-synthetic-acceptance",
-        "c01-acceptance",
-        "c01-gold",
-        "c01-inapto",
-    }
-)
-
 
 class QualificationProfileError(ValueError):
     def __init__(self, message: str, issues: Optional[Sequence[Mapping[str, Any]]] = None):
@@ -102,7 +73,13 @@ def _as_mapping(obj: Any) -> Dict[str, Any]:
 
 
 def validate_qualification_profile(raw: Any) -> dict:
-    """Structural validation. Unknown id is not a type error; it stays unresolved."""
+    """Validate a complete wire reference against the installed C05 catalog.
+
+    A profile reference is an immutable identity, not client supplied metadata.
+    The id, version, source digest and semantic fields must all describe the
+    same catalog row.  This also makes an empty/missing installed catalog fail
+    closed at the RequestSpec boundary.
+    """
     if raw is None:
         return {}
     if not isinstance(raw, Mapping):
@@ -120,14 +97,16 @@ def validate_qualification_profile(raw: Any) -> dict:
     for key in PROFILE_REQUIRED:
         value = profile.get(key)
         if key == "source_set_sha256":
-            if value is None:
-                profile[key] = None
-                continue
-            if not isinstance(value, str) or len(value) < 16:
+            if (
+                not isinstance(value, str)
+                or len(value) != 64
+                or any(ch not in "0123456789abcdefABCDEF" for ch in value)
+            ):
                 raise QualificationProfileError(
                     "source_set_sha256 invalid",
-                    [_issue("TYPE_ERROR", "source_set_sha256 must be a hex digest or null")],
+                    [_issue("TYPE_ERROR", "source_set_sha256 must be a 64-character hex digest")],
                 )
+            profile[key] = value.lower()
             continue
         if not isinstance(value, str) or not value.strip():
             raise QualificationProfileError(
@@ -135,10 +114,32 @@ def validate_qualification_profile(raw: Any) -> dict:
                 [_issue("TYPE_ERROR", f"qualification_profile.{key} must be a non-empty string")],
             )
         profile[key] = value.strip()
+    recipient = profile.get("recipient_id")
+    if recipient is not None:
+        if not isinstance(recipient, str) or not recipient.strip():
+            raise QualificationProfileError(
+                "qualification_profile.recipient_id must be a non-empty string when provided",
+                [_issue("TYPE_ERROR", "qualification_profile.recipient_id must be a non-empty string")],
+            )
+        profile["recipient_id"] = recipient.strip()
+    resolved = resolve_qualification_profile({"qualification_profile": profile}, validate=False)
+    if not resolved.get("known"):
+        raise QualificationProfileError(
+            "qualification_profile does not match the installed catalog",
+            list(resolved.get("issues") or [
+                _issue(
+                    "QUALIFICATION_PROFILE_UNKNOWN",
+                    "qualification_profile could not be resolved by the installed catalog",
+                    profile_id=profile.get("id"),
+                )
+            ]),
+        )
     return profile
 
 
-def resolve_qualification_profile(spec: Mapping[str, Any]) -> Dict[str, Any]:
+def resolve_qualification_profile(
+    spec: Mapping[str, Any], *, validate: bool = True
+) -> Dict[str, Any]:
     raw = spec.get("qualification_profile")
     if not raw:
         return {
@@ -147,22 +148,65 @@ def resolve_qualification_profile(spec: Mapping[str, Any]) -> Dict[str, Any]:
             "profile": None,
             "known": False,
         }
-    profile = validate_qualification_profile(raw)
+    profile = validate_qualification_profile(raw) if validate else dict(raw)
     catalogue = _try_c05_catalogue()
-    known = False
+    issues: List[dict] = []
+    canonical = None
     if catalogue is not None:
-        getter = getattr(catalogue, "get_profile", None) or getattr(catalogue, "resolve", None)
-        if callable(getter):
-            found = getter(profile)
-            known = bool(found)
-        elif isinstance(catalogue, Mapping):
-            known = profile["id"] in catalogue
+        resolver = getattr(catalogue, "resolve_profile", None)
+        loader = getattr(catalogue, "load_catalog", None)
+        if callable(resolver):
+            try:
+                candidate = resolver(profile)
+            except Exception as exc:
+                issues.append(_issue("QUALIFICATION_CATALOG_ERROR", str(exc)))
+            else:
+                if isinstance(candidate, Mapping) and candidate.get("resolved") is True:
+                    canonical = dict(candidate)
+        catalog_row = None
+        if callable(loader):
+            try:
+                catalog_row = (loader() or {}).get(profile.get("id"))
+            except Exception as exc:
+                issues.append(_issue("QUALIFICATION_CATALOG_ERROR", str(exc)))
+        if canonical is not None:
+            expected = dict(catalog_row or canonical)
+            mismatches = {}
+            for field in PROFILE_REQUIRED:
+                expected_value = expected.get(field)
+                observed = profile.get(field)
+                if str(observed) != str(expected_value):
+                    mismatches[field] = {"requested": observed, "catalog": expected_value}
+            expected_recipient = expected.get("recipient_id")
+            if expected_recipient not in (None, "") and str(profile.get("recipient_id")) != str(expected_recipient):
+                mismatches["recipient_id"] = {
+                    "requested": profile.get("recipient_id"),
+                    "catalog": expected_recipient,
+                }
+            if mismatches:
+                issues.append(
+                    _issue(
+                        "QUALIFICATION_PROFILE_MISMATCH",
+                        "qualification_profile fields differ from the installed catalog",
+                        profile_id=profile.get("id"),
+                        mismatches=mismatches,
+                    )
+                )
+                canonical = None
+    if catalogue is None:
+        issues.append(
+            _issue(
+                "QUALIFICATION_CATALOG_UNAVAILABLE",
+                "the installed C05 qualification catalog is unavailable",
+            )
+        )
     return {
-        "resolved": True,
-        "reason": "provided",
-        "profile": profile,
-        "known": known if catalogue is not None else False,
+        "resolved": canonical is not None,
+        "reason": "catalog_match" if canonical is not None else "catalog_rejected",
+        "profile": canonical if canonical is not None else profile,
+        "known": canonical is not None,
         "catalogue_available": catalogue is not None,
+        "issues": issues,
     }
 
 
@@ -179,7 +223,7 @@ def _try_assess_qualification(context: Mapping[str, Any], profile: Optional[Mapp
         from modules.qualification_profile import assess_qualification  # type: ignore
     except Exception:
         return None
-    if not callable(assess_qualification) or not profile:
+    if not callable(assess_qualification) or profile is None:
         return None
     return assess_qualification(context, profile)
 
@@ -258,53 +302,6 @@ def _calculation_status(winner: Any, issues: Sequence[Mapping[str, Any]]) -> str
     return "fitted"
 
 
-def derive_case_release_status(
-    *,
-    grade_status: str,
-    calculation_status: str,
-    profile_resolved: bool,
-    profile_known: bool,
-    rule_results: Sequence[Mapping[str, Any]],
-    cost_blocked: bool = False,
-) -> str:
-    if calculation_status in {"error", "rejected", "unsupported"}:
-        return "analysis_only"
-    decisive_unverified = False
-    decisive_failed = False
-    for rule in rule_results:
-        if not isinstance(rule, Mapping):
-            continue
-        if rule.get("applicability") not in {None, "applicable", "decisive"}:
-            continue
-        if rule.get("status") == "failed":
-            decisive_failed = True
-        if rule.get("status") in {"unverified", "unsupported", "error"}:
-            decisive_unverified = True
-        if rule.get("status") == "not_applicable" and not rule.get("explanation"):
-            decisive_unverified = True
-    if cost_blocked or decisive_failed:
-        return "analysis_only"
-    if calculation_status != "fitted":
-        return "analysis_only"
-    if grade_status in {"not_met", "error"}:
-        return "analysis_only"
-    if not profile_resolved:
-        if grade_status == "met":
-            return "review_required"
-        if grade_status == "pending":
-            return "review_required"
-        return "analysis_only"
-    if not profile_known or decisive_unverified:
-        if grade_status in {"met", "pending"}:
-            return "review_required"
-        return "analysis_only"
-    if grade_status in {"met", "not_requested"}:
-        return "ready_for_professional_signoff"
-    if grade_status == "pending":
-        return "review_required"
-    return "analysis_only"
-
-
 def map_issuance_status(case_release_status: str) -> str:
     return RELEASE_TO_ISSUANCE.get(case_release_status, "draft")
 
@@ -342,182 +339,160 @@ def compose_qualification_context(
     review_events: Optional[Sequence[Mapping[str, Any]]] = None,
     cost_result: Optional[Mapping[str, Any]] = None,
     previous_fingerprint: Optional[str] = None,
+    normative_assessment: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
+    del previous_fingerprint  # staleness is decided from each event's bound digest by C05.
     spec = dict(request_spec)
     resolved = resolve_qualification_profile(spec)
     profile = resolved.get("profile")
-    workflow = _as_mapping(_as_mapping(snapshot_draft.get("provenance")).get("workflow_context"))
-    grade_status = workflow.get("grade_requirement_status") or "not_requested"
-    if grade_status not in GRADE_STATUSES:
-        grade_status = "error"
-    issue_list = [dict(i) for i in (issues or snapshot_draft.get("issues") or []) if isinstance(i, Mapping)]
-    calc_status = _calculation_status(winner if isinstance(winner, Mapping) else _as_mapping(winner), issue_list)
-
-    engine_rules: List[dict] = []
-    engine_rules.append(
-        _empty_rule(
-            rule_id="c01.numeric_fit",
-            status="passed" if calc_status == "fitted" else "failed",
-            explanation="Numeric/technical fit of the comparative-regression engine.",
-            observed={"calculation_status": calc_status},
-            evidence_refs=["model.diagnostics"],
+    profile_omitted = resolved.get("reason") == "not_provided"
+    if not profile_omitted and (not resolved.get("known") or not profile):
+        raise QualificationProfileError(
+            "qualification_profile is not resolvable",
+            list(resolved.get("issues") or []),
         )
+
+    issue_list = [
+        dict(item)
+        for item in (issues or snapshot_draft.get("issues") or [])
+        if isinstance(item, Mapping)
+    ]
+    calc_status = _calculation_status(
+        winner if isinstance(winner, Mapping) else _as_mapping(winner), issue_list
     )
-    if grade_status == "not_requested":
-        engine_rules.append(
-            _empty_rule(
-                rule_id="c01.grade_requirement",
-                status="not_applicable",
-                applicability="not_applicable",
-                explanation="No minimum fundamentação grade was requested on this profile.",
-                observed={"grade_requirement_status": grade_status},
-            )
-        )
-    elif grade_status == "met":
-        engine_rules.append(
-            _empty_rule(
-                rule_id="c01.grade_requirement",
-                status="passed",
-                explanation="Requested minimum fundamentação grade is met by C05/legacy classifier facts.",
-                observed={"grade_requirement_status": grade_status},
-                evidence_refs=["validation.fundamentacao"],
-            )
-        )
-    elif grade_status in {"not_met", "pending"}:
-        engine_rules.append(
-            _empty_rule(
-                rule_id="c01.grade_requirement",
-                status="pending_manual" if grade_status == "pending" else "failed",
-                explanation="Requested grade is not demonstrated; calculation may still be an analysis.",
-                observed={"grade_requirement_status": grade_status},
-                evidence_refs=["validation.fundamentacao"],
-            )
-        )
-    else:
-        engine_rules.append(
-            _empty_rule(
-                rule_id="c01.grade_requirement",
-                status="error",
-                explanation="Grade requirement could not be classified.",
-                observed={"grade_requirement_status": grade_status},
-            )
+    search_policy = _as_mapping(spec.get("search_policy"))
+    requested_grade = search_policy.get("minimum_fundamentacao_grade")
+    if requested_grade is None:
+        requested_grade = _as_mapping(spec.get("evaluation_policy")).get(
+            "minimum_fundamentacao_grade"
         )
 
-    cost_blocked = False
-    if cost_result:
-        if not cost_result.get("computable"):
-            cost_blocked = True
-            engine_rules.append(
-                _empty_rule(
-                    rule_id="c01.reconstruction_cost",
-                    status="failed" if cost_result.get("items") else "unverified",
-                    explanation=str(cost_result.get("reason") or "Cost route not computable."),
-                    observed={"computable": False},
-                )
-            )
-        else:
-            engine_rules.append(
-                _empty_rule(
-                    rule_id="c01.reconstruction_cost",
-                    status="passed",
-                    explanation="Reconstruction/replacement cost computed from an explicit BOM.",
-                    observed={"point": (cost_result.get("value") or {}).get("point")},
-                    evidence_refs=["cost_bom"],
-                )
-            )
-
-    c05_bundle = None
-    if resolved.get("resolved") and profile:
-        context = {
-            "request_spec": spec,
-            "snapshot": snapshot_draft,
-            "search_audit": dict(search_audit or {}),
-            "engine_rules": engine_rules,
-            "calculation_status": calc_status,
-            "grade_requirement_status": grade_status,
-        }
-        c05_bundle = _try_assess_qualification(context, profile)
-
-    rule_results = list(engine_rules)
-    if isinstance(c05_bundle, Mapping):
-        extra = c05_bundle.get("rule_results") or c05_bundle.get("rules") or []
-        for item in extra:
-            if isinstance(item, Mapping) and item.get("rule_id"):
-                status = item.get("status")
-                if status not in RULE_STATUSES:
-                    item = dict(item)
-                    item["status"] = "error"
-                if item.get("status") == "not_applicable" and not item.get("explanation"):
-                    item = dict(item)
-                    item["status"] = "unverified"
-                    item["explanation"] = "not_applicable requires a profile/source reason"
-                if item.get("status") == "passed" and item.get("unverified"):
-                    item = dict(item)
-                    item["status"] = "unverified"
-                rule_results.append(dict(item))
-    elif resolved.get("resolved") and profile and not resolved.get("catalogue_available"):
-        rule_results.append(
-            _empty_rule(
-                rule_id="c05.catalogue",
-                status="unverified",
-                source_id="c05.qualification_profile",
-                explanation="C05 assess_qualification is not importable on this HEAD; decisive rules stay unverified.",
-                applicability="decisive",
-            )
-        )
-    elif resolved.get("resolved") and profile and not resolved.get("known"):
-        rule_results.append(
-            _empty_rule(
-                rule_id="c05.profile_unknown",
-                status="unsupported",
-                source_id="c05.qualification_profile",
-                explanation="Profile id is not in the C05 catalogue.",
-                applicability="decisive",
-                observed={"id": profile.get("id")},
-            )
-        )
-
-    fingerprint = fingerprint_result(
-        value=_as_mapping(snapshot_draft.get("value")),
-        model=_as_mapping(snapshot_draft.get("model")),
-        sample=_as_mapping(snapshot_draft.get("sample")),
-        request_spec=spec,
-        input_sha256=str(snapshot_draft.get("input_sha256") or ""),
-        code_sha=str(snapshot_draft.get("code_sha") or ""),
-        calculation_version=_as_mapping(snapshot_draft.get("provenance")).get("calculation_version"),
-    )
-    events = invalidate_reviews_on_material_change(previous_fingerprint, fingerprint, review_events or [])
-    release = derive_case_release_status(
-        grade_status=grade_status,
-        calculation_status=calc_status,
-        profile_resolved=bool(resolved.get("resolved") and profile),
-        profile_known=bool(resolved.get("known")),
-        rule_results=rule_results,
-        cost_blocked=cost_blocked,
-    )
-    if any(r.get("status") == "unverified" and r.get("applicability") == "decisive" for r in rule_results):
-        if release == "ready_for_professional_signoff":
-            release = "review_required"
-
-    return {
-        "schema_version": QUALIFICATION_SCHEMA,
-        "profile": profile,
-        "profile_resolved": bool(resolved.get("resolved") and profile),
-        "profile_known": bool(resolved.get("known")),
-        "versions": {
-            "qualification_schema": QUALIFICATION_SCHEMA,
-            "result_schema": snapshot_draft.get("schema_version"),
-            "calculation_version": _as_mapping(snapshot_draft.get("provenance")).get("calculation_version"),
+    provenance = _as_mapping(snapshot_draft.get("provenance"))
+    material = {
+        "schema_version": snapshot_draft.get("schema_version"),
+        "input_sha256": snapshot_draft.get("input_sha256"),
+        "code_sha": snapshot_draft.get("code_sha"),
+        "reference_date": snapshot_draft.get("reference_date"),
+        "target": snapshot_draft.get("target"),
+        "value": snapshot_draft.get("value"),
+        "sample": snapshot_draft.get("sample"),
+        "model": snapshot_draft.get("model"),
+        "request": {
+            "qualification_profile": spec.get("qualification_profile"),
+            "search_policy": spec.get("search_policy"),
+            "evaluation_policy": spec.get("evaluation_policy"),
+            "units": spec.get("units"),
+            "target_unit": spec.get("target_unit"),
+            "reference_date": spec.get("reference_date"),
+            "inspection_date": spec.get("inspection_date"),
+            "declared_documentary": spec.get("declared_documentary"),
         },
-        "result_fingerprint": fingerprint,
-        "calculation_status": calc_status,
-        "rule_results": rule_results,
-        "grade_requirement_status": grade_status,
-        "case_release_status": release,
-        "review_events": events,
-        "institution_acceptance": None,
-        "limitations": list(
-            _as_mapping(_as_mapping(snapshot_draft.get("validation")).get("statistical")).get("limitations")
-            or []
-        ),
+        "calculation_version": provenance.get("calculation_version"),
+        "search_audit": dict(search_audit or {}),
+        "cost_result": dict(cost_result or {}),
     }
+    context = {
+        "normative_assessment": dict(normative_assessment or {}),
+        "requested_minimum_grade": requested_grade,
+        "targets_grau_iii": requested_grade == 3,
+        "profile_evidence": dict(spec.get("profile_evidence") or {}),
+        "review_events": [dict(item) for item in (review_events or spec.get("review_events") or [])],
+        "signature": dict(spec.get("signature") or {}) or None,
+        "output_manifest": dict(spec.get("output_manifest") or {}),
+        "claim_evidence": dict(spec.get("claim_evidence") or {}),
+        "institution_acceptance": spec.get("institution_acceptance"),
+        "software_version": snapshot_draft.get("code_sha"),
+        "result_snapshot_id": snapshot_draft.get("job_id"),
+        "result_material": material,
+        "report_content_fingerprint": spec.get("report_content_fingerprint"),
+        "calculation_failed": calc_status != "fitted",
+    }
+    block = _try_assess_qualification(context, profile or {})
+    if not isinstance(block, Mapping):
+        raise QualificationProfileError(
+            "C05 assess_qualification is unavailable",
+            [_issue("QUALIFICATION_ASSESSOR_UNAVAILABLE", "C05 assess_qualification is unavailable")],
+        )
+    # C05 is the sole authority for rule, grade and release decisions. C01
+    # returns its block intact and only adds schema/version trace metadata.
+    result = dict(block)
+    result.setdefault("versions", {})
+    result["versions"] = {
+        **dict(result.get("versions") or {}),
+        "qualification_schema": QUALIFICATION_SCHEMA,
+        "result_schema": snapshot_draft.get("schema_version"),
+        "calculation_version": provenance.get("calculation_version"),
+    }
+    return result
+
+
+def reassess_qualification_context(
+    *,
+    snapshot: Mapping[str, Any],
+    request_spec: Mapping[str, Any],
+    output_manifest: Mapping[str, Any],
+    report_content_fingerprint: str,
+    review_events: Optional[Sequence[Mapping[str, Any]]] = None,
+    signature: Optional[Mapping[str, Any]] = None,
+    normative_assessment: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Run the document/review pass against an already calculated snapshot.
+
+    The calculation and normative grade are reused verbatim. Document routes
+    supply the manifest and report digest produced from the actual artifacts;
+    review/signature records then bind to the stable result/report/byte
+    identities. This function returns a replacement MP-QUAL/1 block and does
+    not persist or mutate the snapshot.
+    """
+    if not isinstance(output_manifest, Mapping):
+        raise QualificationProfileError(
+            "output_manifest must be a mapping",
+            [_issue("TYPE_ERROR", "output_manifest must be a mapping")],
+        )
+    if (
+        not isinstance(report_content_fingerprint, str)
+        or len(report_content_fingerprint) != 64
+        or any(ch not in "0123456789abcdefABCDEF" for ch in report_content_fingerprint)
+    ):
+        raise QualificationProfileError(
+            "report_content_fingerprint must be a SHA-256 hex digest",
+            [_issue(
+                "TYPE_ERROR",
+                "report_content_fingerprint must be a 64-character hex digest",
+            )],
+        )
+
+    provenance = _as_mapping(snapshot.get("provenance"))
+    current = _as_mapping(provenance.get("qualification_context"))
+    normative = normative_assessment
+    if normative is None:
+        normative = _as_mapping(provenance.get("normative_assessment"))
+    if not normative:
+        raise QualificationProfileError(
+            "normative_assessment is unavailable for qualification reassessment",
+            [_issue(
+                "NORMATIVE_ASSESSMENT_MISSING",
+                "the persisted normative assessment is required for the second qualification pass",
+            )],
+        )
+
+    spec = dict(request_spec)
+    spec["output_manifest"] = dict(output_manifest)
+    spec["report_content_fingerprint"] = report_content_fingerprint.lower()
+    spec["review_events"] = [dict(item) for item in (review_events or [])]
+    if signature is not None:
+        spec["signature"] = dict(signature)
+    else:
+        spec.pop("signature", None)
+
+    winner = {"status": "fitted"} if current.get("calculation_status") == "ok" else None
+    search_audit = _as_mapping(_as_mapping(snapshot.get("search")).get("audit"))
+    return compose_qualification_context(
+        request_spec=spec,
+        snapshot_draft=snapshot,
+        winner=winner,
+        search_audit=search_audit,
+        issues=list(snapshot.get("issues") or []),
+        review_events=spec["review_events"],
+        normative_assessment=normative,
+    )

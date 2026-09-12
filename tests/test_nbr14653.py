@@ -563,22 +563,8 @@ class TestOptimalCombinationTargetAchieved:
         df = pd.DataFrame({'area': area, 'preco': preco})
         return df
 
-    def test_declared_documentary_grades_are_discarded_by_legacy_revalidation(self):
-        """MP-COM/C05 handoff C05->C01: documented production defect.
-
-        ``find_best_model`` accepts grau_item1/grau_item3 and routes them into
-        the per-spec validation, but ``optimal_combination.py`` then RE-RUNS
-        ``NBRValidator.validate_model`` on the winning model without passing
-        the documentary arguments, overwriting the correct assessment. The
-        caller's declaration is silently lost.
-
-        Until C05 removed the approving defaults, this was invisible: the
-        re-validation defaulted items 1 and 3 to Grau I, so the result looked
-        classified while never reflecting what the caller declared (a caller
-        declaring Grau III also silently received Grau I). This test pins the
-        CURRENT behaviour so the handoff cannot be closed by accident; see
-        docs/comercial/c05/handoff.md.
-        """
+    def test_declared_documentary_grades_survive_final_revalidation(self):
+        """The legacy adapter preserves the caller's documentary declarations."""
         from modules.optimal_combination import OptimalCombinationFinder
 
         df = self._make_strong_dataset()
@@ -594,23 +580,14 @@ class TestOptimalCombinationTargetAchieved:
         vr = result.best_model.validation_result
         grades = {i.item: i.grau_achieved for i in vr.item_scores}
 
-        # The calculated items are fine; the declared documentary ones are lost.
+        # The final validation is the same assessment made with the declarations;
+        # it must not overwrite them with absent/default values.
         assert grades[2] == 3 and grades[4] == 3 and grades[5] == 3 and grades[6] == 3
-        assert grades[1] == 0, "declared item 1 survived: C01 handoff may be done"
-        assert grades[3] == 0, "declared item 3 survived: C01 handoff may be done"
-        # Absence of a documentary declaration must NOT be approved as a grade.
-        assert vr.grau_fundamentacao is None
+        assert grades[1] == 2
+        assert grades[3] == 2
+        assert vr.grau_fundamentacao is not None
         assert result.best_grau_reached == vr.grau_fundamentacao
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Blocked on C05->C01 handoff: optimal_combination.py must pass the "
-            "documentary grades and provenance into the final "
-            "NBRValidator.validate_model call instead of re-validating without "
-            "them. C05 does not own that file."
-        ),
-    )
     def test_target_achieved_true_when_reachable(self):
         from modules.optimal_combination import OptimalCombinationFinder
 
@@ -635,10 +612,9 @@ class TestOptimalCombinationTargetAchieved:
 
         df = self._make_strong_dataset()
         finder = OptimalCombinationFinder()
-        # Grau III requires items 1 and 3 (documentary) to be >= 2. Since
-        # MP-COM/C05 they are no longer defaulted to Grau I, and the legacy
-        # re-validation discards whatever the caller declared, so Grau III is
-        # unreachable through this path regardless of data quality.
+        # Grau III requires items 1 and 3 (documentary) to be >= 2. No
+        # declaration is supplied, so it remains unreachable regardless of
+        # the calculated items.
         result = finder.find_best_model(
             df, target_col='preco', degree=3,
             avaliando_raw={'area': 120.0},
@@ -650,6 +626,48 @@ class TestOptimalCombinationTargetAchieved:
         assert result.best_grau_reached == final_grau
         assert final_grau is None or final_grau < 3
         assert result.target_achieved is False
+
+    def test_explicit_zero_documentary_grades_are_not_defaulted_to_one(self):
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        result = OptimalCombinationFinder().find_best_model(
+            self._make_strong_dataset(),
+            target_col="preco",
+            degree=1,
+            avaliando_raw={"area": 120.0},
+            grau_item1=0,
+            grau_item3=0,
+        )
+
+        assert result.success is True
+        scores = {
+            item.item: item.grau_achieved
+            for item in result.best_model.validation_result.item_scores
+        }
+        assert scores[1] == 0
+        assert scores[3] == 0
+        assert result.best_model.validation_result.grau_fundamentacao is None
+
+    def test_invalid_documentary_grade_remains_distinct_from_absence(self):
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        result = OptimalCombinationFinder().find_best_model(
+            self._make_strong_dataset(),
+            target_col="preco",
+            degree=1,
+            avaliando_raw={"area": 120.0},
+            grau_item1="invalid",
+            grau_item3=None,
+        )
+
+        assert result.success is True
+        details = {
+            item.item: item.detail
+            for item in result.best_model.validation_result.item_scores
+        }
+        assert "inválido" in details[1]
+        assert "não informado" in details[3]
+        assert result.best_model.validation_result.grau_fundamentacao is None
 
     def test_target_achieved_false_and_best_grau_none_without_avaliando(self):
         """Without avaliando_raw, item 4 stays provisionally 0 and no grau

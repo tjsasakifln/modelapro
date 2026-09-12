@@ -921,6 +921,52 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
     elif "qualification_profile" in spec and spec.get("qualification_profile") is None:
         spec["qualification_profile"] = None
 
+    for field in (
+        "profile_evidence",
+        "output_manifest",
+        "signature",
+        "claim_evidence",
+        "institution_acceptance",
+        "professional_findings",
+        "normative_diagnostics",
+        "category_counts",
+    ):
+        value = spec.get(field)
+        if value is not None and not isinstance(value, Mapping):
+            raise RequestSpecError(
+                f"{field} must be a mapping when provided",
+                [make_issue("TYPE_ERROR", f"{field} must be a mapping")],
+            )
+        if isinstance(value, Mapping):
+            spec[field] = dict(value)
+
+    review_events = spec.get("review_events")
+    if review_events is not None:
+        if not isinstance(review_events, list) or not all(
+            isinstance(item, Mapping) for item in review_events
+        ):
+            raise RequestSpecError(
+                "review_events must be a list of mappings",
+                [make_issue("TYPE_ERROR", "review_events must be a list of mappings")],
+            )
+        spec["review_events"] = [dict(item) for item in review_events]
+
+    report_fingerprint = spec.get("report_content_fingerprint")
+    if report_fingerprint is not None and (
+        not isinstance(report_fingerprint, str)
+        or len(report_fingerprint) != 64
+        or any(ch not in "0123456789abcdefABCDEF" for ch in report_fingerprint)
+    ):
+        raise RequestSpecError(
+            "report_content_fingerprint must be a SHA-256 hex digest",
+            [make_issue(
+                "TYPE_ERROR",
+                "report_content_fingerprint must be a 64-character hex digest",
+            )],
+        )
+    if isinstance(report_fingerprint, str):
+        spec["report_content_fingerprint"] = report_fingerprint.lower()
+
     if spec.get("cost_bom") is not None and not isinstance(spec.get("cost_bom"), Mapping):
         raise RequestSpecError(
             "cost_bom must be a mapping when provided",

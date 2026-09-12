@@ -141,6 +141,7 @@ def _qualification_context(assessment, **overrides):
     ctx = {
         "normative_assessment": assessment,
         "requested_minimum_grade": 3,
+        "report_content_fingerprint": "a" * 64,
         "targets_grau_iii": True,
         "software_version": "1.4.2",
         "profile_evidence": {
@@ -155,6 +156,16 @@ def _qualification_context(assessment, **overrides):
     }
     ctx.update(overrides)
     return ctx
+
+
+def _verified_signature(result_fingerprint, report_fingerprint="a" * 64):
+    return {
+        "integrity_verified": True,
+        "result_fingerprint": result_fingerprint,
+        "report_content_fingerprint": report_fingerprint,
+        "unsigned_pdf_sha256": "b" * 64,
+        "signed_pdf_sha256": "c" * 64,
+    }
 
 
 @pytest.fixture(scope="module")
@@ -284,13 +295,13 @@ def test_two_pass_protocol_review_then_signature(grau_iii_assessment):
     assert second["case_release_status"] == CASE_READY_FOR_SIGNOFF
 
     signed = dict(with_review)
-    signed["signature"] = {"integrity_verified": True, "fingerprint": fingerprint}
+    signed["signature"] = _verified_signature(fingerprint)
     third = assess_qualification(signed, PROFILE_REF)
     assert third["case_release_status"] == CASE_SIGNED_INTEGRITY_VERIFIED
 
     # A signature taken over a different fingerprint is stale, not a release.
     stale = dict(with_review)
-    stale["signature"] = {"integrity_verified": True, "fingerprint": "0" * 64}
+    stale["signature"] = _verified_signature("0" * 64)
     assert assess_qualification(stale, PROFILE_REF)["case_release_status"] == (
         CASE_REVIEW_REQUIRED
     )

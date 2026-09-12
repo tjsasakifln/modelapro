@@ -9,6 +9,7 @@ from .qualification import (
     fingerprint_result,
     invalidate_reviews_on_material_change,
     map_issuance_status,
+    reassess_qualification_context,
     resolve_qualification_profile,
     validate_qualification_profile,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "interval_policy_id",
     "invalidate_reviews_on_material_change",
     "map_issuance_status",
+    "reassess_qualification_context",
     "objective_metric_key",
     "ranking_primary_score",
     "resolve_qualification_profile",

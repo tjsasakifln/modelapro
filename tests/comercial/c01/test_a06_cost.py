@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from modules.cost_valuation import compute_reconstruction_cost
 from modules.result_contract import validate_request_spec
+from modules.qualification_profile import resolve_profile
 from backend.worker import compose_valuation_job, resolve_peers
 from tests.comercial.c01.conftest import gold_csv_bytes, gold_spec, gold_subject
 
@@ -83,15 +84,13 @@ def test_missing_bom_blocks_insurance_profile_but_allows_analysis(isolated_c01_r
     store = isolated_c01_runtime["job_store"]
     created = store.create(payload={"filename": "gold.csv"})
     spec = gold_spec()
+    resolved = resolve_profile({"id": "abnt-14653-2-custo-reedicao", "version": "0.1.0"})
     spec["qualification_profile"] = {
-        "id": "insurance.habitacional.reconstruction",
-        "version": "1",
-        "source_set_sha256": None,
-        "purpose": "insurance",
-        "value_basis": "reconstruction_cost",
-        "method": "reconstruction_cost",
-        "asset_scope": "urban_residential",
-        "recipient_id": "seguradora-sintetica",
+        key: resolved.get(key)
+        for key in (
+            "id", "version", "source_set_sha256", "purpose", "value_basis",
+            "method", "asset_scope",
+        )
     }
     spec = validate_request_spec(spec)
     ctx = compose_valuation_job(
@@ -109,9 +108,10 @@ def test_missing_bom_blocks_insurance_profile_but_allows_analysis(isolated_c01_r
     assert snap["value"]["point"] is None or snap["value"].get("basis") == "reconstruction_cost"
     assert qc.get("case_release_status") != "ready_for_professional_signoff"
     assert qc.get("case_release_status") == "analysis_only"
-    statuses = {r["rule_id"]: r["status"] for r in qc.get("rule_results") or []}
-    assert statuses.get("c01.reconstruction_cost") in {"failed", "unverified"}
-    assert qc.get("profile_known") is False or qc.get("profile_resolved") is True
+    assert "profile_not_verified" in {
+        blocker.get("code") for blocker in qc.get("release_blockers") or []
+    }
+    assert qc["profile"]["id"] == "abnt-14653-2-custo-reedicao"
 
 
 def test_explicit_land_only_when_flagged():

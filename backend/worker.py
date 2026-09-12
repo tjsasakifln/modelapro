@@ -927,12 +927,15 @@ def _axes_from_fit(
         )
         if qualitative:
             sample_values = []
+            observed_counts: Dict[str, int] = {}
             for item in values:
                 if item is None:
                     continue
                 text = str(item)
                 if text and text not in sample_values:
                     sample_values.append(text)
+                if text:
+                    observed_counts[text] = observed_counts.get(text, 0) + 1
             aval = raw.get(name)
             axes.append(
                 {
@@ -942,6 +945,7 @@ def _axes_from_fit(
                     "avaliando_value": aval,
                     "sample_values": sample_values,
                     "categories": sample_values,
+                    "category_counts": observed_counts,
                 }
             )
             continue
@@ -989,6 +993,10 @@ def _documentary_from_spec(spec: Mapping[str, Any]) -> dict:
     raw = spec.get("declared_documentary") if isinstance(spec.get("declared_documentary"), Mapping) else None
     if raw is None and isinstance(spec.get("documentary"), Mapping):
         raw = spec.get("documentary")
+    if raw is None:
+        evaluation = spec.get("evaluation_policy")
+        if isinstance(evaluation, Mapping) and isinstance(evaluation.get("documentary"), Mapping):
+            raw = evaluation.get("documentary")
     if not isinstance(raw, Mapping):
         return {}
     out = dict(raw)
@@ -1078,6 +1086,16 @@ def _normative_context_from_fit(
     statistical.setdefault("n", n)
     statistical.setdefault("k", k)
     statistical.setdefault("automatic_selection", False)
+    declared_category_counts = spec.get("category_counts")
+    if isinstance(declared_category_counts, Mapping):
+        category_counts = dict(declared_category_counts)
+    else:
+        category_counts = {
+            f"{axis.get('name')}={category}": count
+            for axis in axes
+            if axis.get("kind") == "categorical"
+            for category, count in dict(axis.get("category_counts") or {}).items()
+        }
     return {
         "n": n,
         "k": k,
@@ -1101,6 +1119,9 @@ def _normative_context_from_fit(
         "grau_item3": _declared_item_grade(spec, 3),
         "item1_provenance": _declared_item_provenance(spec, 1),
         "item3_provenance": _declared_item_provenance(spec, 3),
+        "diagnostics": dict(spec.get("normative_diagnostics") or {}),
+        "professional_findings": dict(spec.get("professional_findings") or {}),
+        "category_counts": category_counts,
         "request_spec": spec,
         "used_row_ids": used_ids,
         "statistical": statistical,
@@ -1182,6 +1203,8 @@ def compose_valuation_job(
         "subject_raw": dict(subject_raw) if isinstance(subject_raw, Mapping) else None,
         "artifact_bytes": {},
         "artifact_states": {
+            "normative_assessment.json": {"state": "pending", "error": None},
+            "report_context.json": {"state": "pending", "error": None},
             "report.pdf": {"state": "pending", "error": None},
             "evidence_manifest.json": {"state": "pending", "error": None},
             "frozen_project.json": {"state": "pending", "error": None},
@@ -1392,14 +1415,20 @@ def compose_valuation_job(
     value_basis = str((profile or {}).get("value_basis") or "market")
     cost_result = None
     market_value_block = dict(value_block)
-    if value_basis in {"reconstruction_cost", "replacement_cost", "depreciated_cost"}:
+    cost_basis_map = {
+        "reconstruction_cost": "reconstruction_cost",
+        "replacement_cost": "replacement_cost",
+        "depreciated_cost": "depreciated_cost",
+        "custo_de_reedicao": "depreciated_cost",
+    }
+    if value_basis in cost_basis_map:
         from modules.cost_valuation import compute_reconstruction_cost
 
         cost_result = compute_reconstruction_cost(
             spec.get("cost_bom"),
             market_point=market_value_block.get("point"),
-            value_basis=value_basis,
-            include_depreciation=value_basis == "depreciated_cost",
+            value_basis=cost_basis_map[value_basis],
+            include_depreciation=cost_basis_map[value_basis] == "depreciated_cost",
         )
         snapshot_issues.extend(list(cost_result.get("issues") or []))
         cost_value = dict(cost_result.get("value") or {})
@@ -1463,6 +1492,10 @@ def compose_valuation_job(
             "sample_ledger_present": sample_ledger is not None,
             "subject_categorical_survived": _subject_categorical_survived(subject_design, context["subject_raw"]),
             "calculation_version": CALCULATION_VERSION,
+            # Persist the single normative authority so document/review routes
+            # can perform the second MP-QUAL/1 pass without reconstructing a
+            # grade from presentation fields.
+            "normative_assessment": _as_dict(normative) or {},
             "workflow_context": build_workflow_context(
                 request_spec=spec,
                 subject_raw=context.get("subject_raw"),
@@ -1492,10 +1525,11 @@ def compose_valuation_job(
         review_events=list(spec.get("review_events") or context.get("review_events") or []),
         cost_result=cost_result,
         previous_fingerprint=context.get("previous_fingerprint") or spec.get("previous_fingerprint"),
+        normative_assessment=_as_dict(normative) or {},
     )
     draft.setdefault("provenance", {})
     draft["provenance"]["qualification_context"] = qc
-    if value_basis in {"reconstruction_cost", "replacement_cost", "depreciated_cost"}:
+    if value_basis in cost_basis_map:
         draft["provenance"]["market_value_not_used_as_cost"] = market_value_block
     issuance = dict((draft.get("validation") or {}).get("issuance") or {})
     issuance["status"] = map_issuance_status(qc.get("case_release_status"))
@@ -1520,6 +1554,30 @@ def compose_valuation_job(
         job_store.save_snapshot(job_id, snapshot)
 
     artifact_refs: Dict[str, Any] = {}
+    # These are internal, calculation-derived inputs for document/review
+    # re-assessment.  Persist them rather than accepting equivalent structures
+    # back from an HTTP client, which would create a qualification bypass.
+    for artifact_name, artifact_value in (
+        ("normative_assessment.json", _as_dict(normative) or {}),
+        ("report_context.json", report_context),
+    ):
+        try:
+            artifact_payload = dumps_strict(artifact_value).encode("utf-8")
+            context["artifact_bytes"][artifact_name] = artifact_payload
+            context["artifact_states"][artifact_name] = {"state": "ready", "error": None}
+            artifact_refs[artifact_name] = {"sha256": sha256_bytes(artifact_payload)}
+            _save_artifact(job_store, job_id, artifact_name, artifact_payload)
+        except Exception as exc:
+            context["artifact_states"][artifact_name] = {
+                "state": "failed",
+                "error": make_issue(
+                    "INTERNAL_CONTEXT_PERSIST_FAILED",
+                    f"{artifact_name} could not be persisted: {exc}",
+                    origin="c06.worker",
+                    evidence={"exception_type": type(exc).__name__},
+                ),
+            }
+
     emit(STAGE_REPORT, None)
     render = peers.get("render_report")
     if callable(render):

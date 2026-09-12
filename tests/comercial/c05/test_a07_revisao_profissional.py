@@ -38,6 +38,7 @@ from modules.qualification_profile import (
 )
 
 PROFILE_ID = "abnt-14653-2-regressao-mercado"
+REPORT_FINGERPRINT = "a" * 64
 
 
 def _profile(**over):
@@ -114,6 +115,7 @@ def _context(assessment=None, **over):
         "requested_minimum_grade": 3,
         "targets_grau_iii": True,
         "profile_evidence": _profile_evidence(),
+        "report_content_fingerprint": REPORT_FINGERPRINT,
     }
     ctx.update(over)
     return ctx
@@ -128,6 +130,18 @@ def _review(fingerprint, **over):
     }
     ev.update(over)
     return ev
+
+
+def _signature(fingerprint, **over):
+    signature = {
+        "integrity_verified": True,
+        "result_fingerprint": fingerprint,
+        "report_content_fingerprint": REPORT_FINGERPRINT,
+        "unsigned_pdf_sha256": "b" * 64,
+        "signed_pdf_sha256": "c" * 64,
+    }
+    signature.update(over)
+    return signature
 
 
 def _blocker_codes(block):
@@ -221,6 +235,20 @@ def test_revisao_sem_fingerprint_algum_nao_conta_como_revisao():
     assert block["stale_review_events"] == []
 
 
+def test_valid_true_sozinho_nao_lava_evento_incompleto_e_valid_false_e_respeitado():
+    fingerprint = _first_pass_fingerprint()
+    merely_flagged = {"valid": True, "fingerprint": fingerprint}
+    explicitly_invalid = _review(fingerprint, valid=False)
+
+    block = assess_qualification(
+        _context(review_events=[merely_flagged, explicitly_invalid]), _profile()
+    )
+
+    assert block["case_release_status"] == CASE_REVIEW_REQUIRED
+    assert block["review_events"] == [merely_flagged, explicitly_invalid]
+    assert block["stale_review_events"] == []
+
+
 def test_revisao_sobre_outro_fingerprint_nao_conta_e_fica_registrada_como_obsoleta():
     event = _review("0" * 64)
     block = assess_qualification(_context(review_events=[event]), _profile())
@@ -249,8 +277,7 @@ def test_protocolo_de_duas_passadas_chega_a_assinado_com_integridade_verificada(
     assert second["result_fingerprint"] == fingerprint
 
     third = assess_qualification(
-        _context(review_events=[review],
-                 signature={"integrity_verified": True, "fingerprint": fingerprint}),
+        _context(review_events=[review], signature=_signature(fingerprint)),
         _profile(),
     )
     assert third["case_release_status"] == CASE_SIGNED_INTEGRITY_VERIFIED
@@ -261,7 +288,7 @@ def test_protocolo_de_duas_passadas_chega_a_assinado_com_integridade_verificada(
 def test_assinatura_sem_revisao_valida_nao_produz_assinado():
     fingerprint = _first_pass_fingerprint()
     block = assess_qualification(
-        _context(signature={"integrity_verified": True, "fingerprint": fingerprint}),
+        _context(signature=_signature(fingerprint)),
         _profile(),
     )
     assert block["case_release_status"] == CASE_REVIEW_REQUIRED
@@ -272,7 +299,7 @@ def test_assinatura_sem_integridade_verificada_nao_produz_assinado():
     fingerprint = _first_pass_fingerprint()
     block = assess_qualification(
         _context(review_events=[_review(fingerprint)],
-                 signature={"integrity_verified": False, "fingerprint": fingerprint}),
+                 signature=_signature(fingerprint, integrity_verified=False)),
         _profile(),
     )
     assert block["case_release_status"] == CASE_READY_FOR_SIGNOFF
@@ -283,7 +310,7 @@ def test_assinatura_sobre_outro_fingerprint_nunca_e_aceita_como_assinada():
     fingerprint = _first_pass_fingerprint()
     block = assess_qualification(
         _context(review_events=[_review(fingerprint)],
-                 signature={"integrity_verified": True, "fingerprint": "f" * 64}),
+                 signature=_signature("f" * 64)),
         _profile(),
     )
     assert block["case_release_status"] == CASE_REVIEW_REQUIRED
@@ -299,7 +326,7 @@ def test_assinatura_sobre_outro_fingerprint_nunca_e_aceita_como_assinada():
 def _signed_baseline():
     fingerprint = _first_pass_fingerprint()
     review = _review(fingerprint)
-    signature = {"integrity_verified": True, "fingerprint": fingerprint}
+    signature = _signature(fingerprint)
     signed = assess_qualification(
         _context(review_events=[review], signature=signature), _profile()
     )
@@ -388,7 +415,7 @@ def test_nova_revisao_sobre_o_novo_fingerprint_restaura_o_fluxo():
     block = assess_qualification(
         _context(changed,
                  review_events=[_review(new_fingerprint)],
-                 signature={"integrity_verified": True, "fingerprint": new_fingerprint}),
+                 signature=_signature(new_fingerprint)),
         _profile(),
     )
     assert block["case_release_status"] == CASE_SIGNED_INTEGRITY_VERIFIED
@@ -411,7 +438,7 @@ def test_assinatura_valida_nao_libera_caso_com_regra_decisiva_reprovada():
     block = assess_qualification(
         _context(failed,
                  review_events=[_review(fingerprint)],
-                 signature={"integrity_verified": True, "fingerprint": fingerprint}),
+                 signature=_signature(fingerprint)),
         _profile(),
     )
     assert block["case_release_status"] == CASE_ANALYSIS_ONLY
@@ -429,7 +456,7 @@ def test_perfil_desconhecido_com_assinatura_valida_segue_analysis_only():
     fingerprint = assess_qualification(ctx, unknown)["result_fingerprint"]
     block = assess_qualification(
         _context(review_events=[_review(fingerprint)],
-                 signature={"integrity_verified": True, "fingerprint": fingerprint}),
+                 signature=_signature(fingerprint)),
         unknown,
     )
     assert block["case_release_status"] == CASE_ANALYSIS_ONLY

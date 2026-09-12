@@ -1954,8 +1954,10 @@ class ModelBuilder:
         y: pd.Series,
         degree: int = 1,
         remove_outliers: bool = False,
-        grau_item1: int = 1,
-        grau_item3: int = 1,
+        grau_item1: Optional[int] = None,
+        grau_item3: Optional[int] = None,
+        item1_provenance: Any = None,
+        item3_provenance: Any = None,
     ) -> ModelResult:
         """Legacy adapter around fit_candidate.
 
@@ -2024,7 +2026,14 @@ class ModelBuilder:
                 model_object=model,
             )
             result.validation_result = NBRValidator.validate_model(
-                result, X_design, y_used, degree, grau_item1=grau_item1, grau_item3=grau_item3
+                result,
+                X_design,
+                y_used,
+                degree,
+                grau_item1=grau_item1,
+                grau_item3=grau_item3,
+                item1_provenance=item1_provenance,
+                item3_provenance=item3_provenance,
             )
             setattr(result, "_c04_candidate_fit", fit)
             setattr(result, "_c04_used_row_ids", list(fit.used_row_ids))
