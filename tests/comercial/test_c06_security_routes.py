@@ -98,6 +98,102 @@ def test_job_token_recovery_requires_authenticated_workspace_and_csrf(installati
     assert response.json()["access_token"] == record["access_token"]
 
 
+def test_credentials_in_urls_are_rejected_even_percent_encoded(installation):
+    client, headers, _ = installation
+    for query in ("access_token=secret", "%61ccess_token=secret", "token=secret"):
+        assert client.get("/jobs/unknown/result?" + query, headers=headers).status_code == 403
+
+
+def test_docx_served_with_office_mime_and_attachment(installation):
+    from backend import api
+    client, headers, _ = installation
+    store = api.get_job_store()
+    job = store.create()
+    store.save_artifact(job["job_id"], "report.docx", b"SYNTHETIC_DOCX_BYTES")
+    response = client.get(f"/jobs/{job['job_id']}/artifacts/report.docx", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert response.headers["content-disposition"] == 'attachment; filename="report.docx"'
+
+
+def test_license_body_cap_precedes_parser_with_length_and_chunked(installation):
+    client, headers, _ = installation
+    assert client.post("/operations/license", content=b"x" * 65537, headers=headers).status_code == 413
+    consumed = []
+    def chunks():
+        for index in range(3):
+            consumed.append(index)
+            yield b"x" * 32768
+    response = client.post("/operations/license", content=chunks(), headers=headers)
+    assert response.status_code == 413
+    # The ASGI boundary, not json.loads/install_license, rejects these bytes.
+    assert "REQUEST_BODY_TOO_LARGE" in response.text
+
+
+def test_restore_excludes_concurrent_submission_and_second_restore(installation, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from starlette.datastructures import UploadFile
+    from backend import api
+    client, headers, _ = installation
+    archive = client.get("/operations/backup", headers=headers).content
+    entered, release = Event(), Event()
+    original_read = UploadFile.read
+    async def paused_read(file, size=-1):
+        if file.filename == "SYNTHETIC_restore.zip":
+            entered.set()
+            assert release.wait(10), "test barrier timeout"
+        return await original_read(file, size)
+    monkeypatch.setattr(UploadFile, "read", paused_read)
+    def restore():
+        with TestClient(api.app) as other:
+            return other.post("/operations/restore", headers=headers,
+                              files={"file": ("SYNTHETIC_restore.zip", archive, "application/zip")})
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(restore)
+        try:
+            assert entered.wait(10), "restore did not reach guarded upload"
+            assert client.post("/jobs", headers=headers).status_code == 409
+            assert client.post("/operations/restore", headers=headers).status_code == 409
+            assert not api.get_job_store().list_jobs()
+        finally:
+            release.set()
+        response = pending.result(timeout=10)
+    assert response.status_code == 200, response.text
+
+
+def test_real_ui_websocket_consumer_with_enabled_guards(installation, monkeypatch):
+    import socket
+    import threading
+    import time
+    import uvicorn
+    from backend import api
+    from frontend.app import _maybe_listen_websocket
+    monkeypatch.delenv("MODELA_DISABLE_WS", raising=False)
+    record = api.get_job_store().create()
+    server = uvicorn.Server(uvicorn.Config(api.app, log_level="error", access_log=False, lifespan="off"))
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(128)
+        port = listener.getsockname()[1]
+        thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+        thread.start()
+        try:
+            deadline = time.monotonic() + 10
+            while not server.started and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert server.started, "NOT_RUN: real WebSocket server failed to start"
+            url = f"ws://127.0.0.1:{port}/ws"
+            result = _maybe_listen_websocket(record["job_id"], url, record["access_token"])
+            assert result == {"status": "connected", "job_id": record["job_id"]}
+            assert _maybe_listen_websocket(record["job_id"], url, "wrong")["status"] == "rejected_job"
+            assert _maybe_listen_websocket(record["job_id"], "ws://evil.example/ws", "TEST")["status"] == "rejected_destination"
+        finally:
+            server.should_exit = True
+            thread.join(timeout=10)
+        assert not thread.is_alive()
+
+
 def test_real_backup_restore_preserves_bytes_and_survives_runtime_reset(installation, monkeypatch, tmp_path):
     from backend import api
     from modules.job_store import JobStore

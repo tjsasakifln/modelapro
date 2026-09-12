@@ -30,6 +30,7 @@ def synthetic_local_installation(tmp_path_factory):
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
     from modules.commercial_license import make_signed_envelope
     patch = pytest.MonkeyPatch()
+    patch.setenv("MODELA_TEST_CONTEXT", "1")
     root = tmp_path_factory.mktemp("SYNTHETIC_TEST_installation")
     patch.setenv("LOCAL_AUTH_TOKEN", os.environ.get("LOCAL_AUTH_TOKEN") or "SYNTHETIC_TEST_local_bearer_0123456789")
     patch.setenv("LOCAL_CSRF_SECRET", os.environ.get("LOCAL_CSRF_SECRET") or base64.urlsafe_b64encode(

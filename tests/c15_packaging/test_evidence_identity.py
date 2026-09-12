@@ -8,6 +8,21 @@ import pytest
 from c15_local.aggregate_required import check_identity
 
 
+def test_event_json_is_utf8_even_under_windows_legacy_default(tmp_path, monkeypatch):
+    from pathlib import Path
+    from c15_local.evidence_identity import identity
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"title": "composição 日本語", "pull_request": {
+        "head": {"sha": "2" * 40}, "base": {"sha": "1" * 40},
+    }}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    original = Path.read_text
+    def legacy_default(path, encoding=None, **kwargs):
+        return original(path, encoding=encoding or "cp1252", **kwargs)
+    monkeypatch.setattr(Path, "read_text", legacy_default)
+    assert identity()["pr_head_sha"] == "2" * 40
+
+
 def evidence(tmp_path, monkeypatch):
     base, head, tested = "1" * 40, "2" * 40, "3" * 40
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")

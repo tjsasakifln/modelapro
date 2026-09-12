@@ -147,13 +147,11 @@ class TestWebsocketIsolation:
         job_a = job_store.create()
         job_b = job_store.create()
         client = TestClient(app)
-        with client.websocket_connect(
-            f"/ws?job_id={job_a['job_id']}&token={job_a['access_token']}"
-        ) as ws_a:
+        with client.websocket_connect("/ws") as ws_a:
+            ws_a.send_json({"job_id": job_a["job_id"], "token": job_a["access_token"]})
             msg_a = ws_a.receive_json()
-            with client.websocket_connect(
-                f"/ws?job_id={job_b['job_id']}&token={job_b['access_token']}"
-            ) as ws_b:
+            with client.websocket_connect("/ws") as ws_b:
+                ws_b.send_json({"job_id": job_b["job_id"], "token": job_b["access_token"]})
                 msg_b = ws_b.receive_json()
                 assert msg_a["job_id"] == job_a["job_id"]
                 assert msg_b["job_id"] == job_b["job_id"]
@@ -180,9 +178,8 @@ class TestWebsocketIsolation:
     def test_wrong_token_is_rejected(self, job_store):
         job = job_store.create()
         client = TestClient(app)
-        with client.websocket_connect(
-            f"/ws?job_id={job['job_id']}&token=not-the-token"
-        ) as ws:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"job_id": job["job_id"], "token": "not-the-token"})
             msg = ws.receive_json()
             assert msg["status"] == "error"
         assert WebSocketNotifier().connections_for(job["job_id"]) == []

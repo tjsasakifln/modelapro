@@ -537,6 +537,17 @@ def header() -> None:
 def sidebar() -> dict:
     with st.sidebar:
         st.header("Trabalho")
+        from importlib.metadata import PackageNotFoundError, version
+        from importlib.resources import files
+        try:
+            product_version = version("modelapro")
+        except PackageNotFoundError:
+            product_version = "checkout de desenvolvimento"
+        st.caption(f"MODELA PRO · {product_version}")
+        with st.expander("Ajuda e sobre esta instalação"):
+            manual = files("frontend").joinpath("assets/manual.md").read_text(encoding="utf-8")
+            st.markdown(manual)
+            st.download_button("Baixar manual desta instalação", manual, "MODELA-PRO-manual.md", "text/markdown")
         st.caption(
             "Percurso profissional. Use Tab e as setas. O estado também está escrito, "
             "não só colorido. Duplo clique no disparo é bloqueado."

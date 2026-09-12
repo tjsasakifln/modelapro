@@ -47,12 +47,12 @@ def test_ws_connect_does_not_interrupt_live_running_job(tmp_path, monkeypatch):
         store.update_transition(job["job_id"], "queued", "running")
         assert store.get(job["job_id"])["state"] == "running"
 
-        from backend.api import app
+        from backend.api import app, bind_runtime
+        bind_runtime(job_store=store)
 
         client = TestClient(app)
-        with client.websocket_connect(
-            f"/ws?job_id={job['job_id']}&token={job['access_token']}"
-        ) as ws:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"job_id": job["job_id"], "token": job["access_token"]})
             msg = ws.receive_json()
             assert msg["job_id"] == job["job_id"]
             assert msg.get("state") == "running"
@@ -63,5 +63,7 @@ def test_ws_connect_does_not_interrupt_live_running_job(tmp_path, monkeypatch):
         assert after_ctor["state"] == "running"
         assert after_ctor["state"] != "interrupted"
     finally:
+        from backend.api import reset_runtime
+        reset_runtime()
         WebSocketNotifier().reset_connections()
         JobStore.reset_default()

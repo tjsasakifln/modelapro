@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
+import tempfile
 
 from .security import LocalSecurityPolicy
 
@@ -21,19 +23,37 @@ def _credentials() -> dict:
         return {"bearer": token, "csrf_secret": secret}
     root = runtime_root()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root_stat = root.stat()
+    if os.name == "posix" and (root_stat.st_uid != os.getuid() or root_stat.st_mode & 0o077):
+        raise ValueError("credential directory must be private and owned by the current user")
     path = root / "local-credentials.json"
-    if path.is_symlink():
-        raise ValueError("credential path must not be a symbolic link")
     if not path.exists():
         data = {"bearer": secrets.token_urlsafe(32), "csrf_secret": secrets.token_urlsafe(32)}
+        fd, temporary = tempfile.mkstemp(prefix=".credentials-", dir=root)
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            pass
-        else:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(data, handle)
-    return json.loads(path.read_text(encoding="utf-8"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                # Publish complete bytes without replacing another process's
+                # winning identity. Both files are on the same local volume.
+                os.link(temporary, path)
+            except FileExistsError:
+                pass
+        finally:
+            os.unlink(temporary)
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+        metadata = os.fstat(handle.fileno())
+        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("credentials must be a regular non-symlink file")
+        if os.name == "posix" and (metadata.st_uid != os.getuid() or metadata.st_mode & 0o077):
+            raise ValueError("credentials must be private and owned by the current user")
+        data = json.load(handle)
+    if not isinstance(data, dict) or not isinstance(data.get("bearer"), str) or not isinstance(data.get("csrf_secret"), str):
+        raise ValueError("invalid credential record")
+    return data
 
 
 def local_origin() -> str:

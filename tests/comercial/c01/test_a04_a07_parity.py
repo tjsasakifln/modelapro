@@ -100,11 +100,11 @@ def test_compose_batch_subprocess_share_monetary_blocks(isolated_c01_runtime, tm
     frozen_path.write_text(json.dumps(frozen, default=str), encoding="utf-8")
     subjects_path.write_text(json.dumps(subjects), encoding="utf-8")
     proc = subprocess.run(
-        [sys.executable, "-c", PROC, str(Path("/home/tjsasakifln/code/modela-pro-com-c01")), str(frozen_path), str(subjects_path), str(out_path)],
+        [sys.executable, "-c", PROC, str(Path(__file__).resolve().parents[3]), str(frozen_path), str(subjects_path), str(out_path)],
         check=True,
         capture_output=True,
         text=True,
-        cwd="/home/tjsasakifln/code/modela-pro-com-c01",
+        cwd=tmp_path,
         env={**dict(**{k: v for k, v in __import__("os").environ.items() if k != "PYTHONPATH"}), "PYTHONPATH": ""},
     )
     assert proc.returncode == 0

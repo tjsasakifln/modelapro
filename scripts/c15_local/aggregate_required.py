@@ -336,7 +336,7 @@ def check_identity(root: Path, job: str, expected_sha: str | None) -> list[str]:
     if len(str(data.get("tree_sha", ""))) != 40:
         problems.append(f"{job}: missing tree SHA")
     event_path = os.environ.get("GITHUB_EVENT_PATH")
-    event = json.loads(Path(event_path).read_text()) if event_path else {}
+    event = json.loads(Path(event_path).read_text(encoding="utf-8")) if event_path else {}
     pr = event.get("pull_request") or {}
     if data.get("event") == "pull_request":
         head, base = (pr.get("head") or {}).get("sha"), (pr.get("base") or {}).get("sha")

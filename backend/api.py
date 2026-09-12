@@ -18,7 +18,7 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
@@ -676,17 +676,13 @@ async def current_license():
 
 @app.post("/operations/license")
 async def import_buyer_license(request: Request):
-    import base64
-    from modules.commercial_license import install_license, LicenseError
+    from modules.commercial_license import install_license, trusted_vendor_public_key
     from modules.operacao_local.runtime import runtime_root
     body = await request.body()
     if len(body) > 65536:
         raise HTTPException(413, "license envelope exceeds limit")
     try:
-        key = os.environ.get("MODELA_LICENSE_PUBLIC_KEY", "")
-        if not key:
-            raise LicenseError("vendor public key not configured")
-        install_license(json.loads(body), base64.urlsafe_b64decode(key + "=" * (-len(key) % 4)),
+        install_license(json.loads(body), trusted_vendor_public_key(),
                         os.environ.get("MODELA_LICENSE_PATH") or runtime_root() / "entitlement.json")
     except (ValueError, TypeError, OSError) as exc:
         raise HTTPException(400, "invalid buyer entitlement") from exc
@@ -857,6 +853,7 @@ async def create_job(
             "idempotent_replay": not record.get("created"),
             "access_token": record.get("access_token"),
         },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -876,7 +873,7 @@ async def get_job(job_id: str):
 @app.get("/jobs/{job_id}/result")
 async def get_job_result(
     job_id: str,
-    access_token: Optional[str] = None,
+    access_token: Optional[str] = Header(None, alias="X-Job-Token"),
     expected_fingerprint: Optional[str] = None,
 ):
     job_store, _runner = _require_c11()
@@ -1019,9 +1016,12 @@ async def get_job_artifact(job_id: str, name: str):
         media = "application/pdf"
     elif safe.endswith(".zip"):
         media = "application/zip"
+    elif safe.endswith(".docx"):
+        media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
         media = "application/json"
-    return Response(content=data, media_type=media)
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{safe}"', "Cache-Control": "no-store"})
 
 
 @app.get("/projects")

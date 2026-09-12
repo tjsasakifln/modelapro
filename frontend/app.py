@@ -190,31 +190,39 @@ def _preview_provider_for(client: JobClient):
     return _preview
 
 
-def _maybe_listen_websocket(job_id: str, ws_url: str) -> None:
+def _maybe_listen_websocket(job_id: str, ws_url: str, access_token: Optional[str] = None) -> dict:
     """Notificação opcional. Falha aqui NÃO descarta job_id nem substitui o GET."""
     if os.environ.get("MODELA_DISABLE_WS", "").lower() in {"1", "true", "yes"}:
-        return
+        return {"status": "disabled", "fallback": "GET"}
+    from urllib.parse import urlsplit
+    destination = urlsplit(ws_url)
+    if destination.scheme != "ws" or destination.hostname not in {"localhost", "127.0.0.1", "::1"} or destination.query:
+        return {"status": "rejected_destination", "fallback": "GET"}
+    if not access_token:
+        return {"status": "missing_job_token", "fallback": "GET"}
     try:
         import asyncio
         import websockets
     except ImportError:
-        return
+        return {"status": "unavailable", "fallback": "GET"}
 
     async def _once():
         try:
-            async with websockets.connect(ws_url, max_size=10 * 1024 * 1024, open_timeout=2) as websocket:
-                await websocket.send(json.dumps({"job_id": job_id}))
-                try:
-                    await asyncio.wait_for(websocket.recv(), timeout=1.0)
-                except Exception:
-                    return
-        except Exception:
-            return
+            from modules.operacao_local.runtime import local_client_headers
+            async with websockets.connect(ws_url, additional_headers=local_client_headers(),
+                                          max_size=10 * 1024 * 1024, open_timeout=2) as websocket:
+                await websocket.send(json.dumps({"job_id": job_id, "token": access_token}))
+                event = json.loads(await asyncio.wait_for(websocket.recv(), timeout=1.0))
+                if event.get("job_id") != job_id or event.get("status") == "error":
+                    return {"status": "rejected_job", "fallback": "GET"}
+                return {"status": "connected", "job_id": job_id}
+        except (OSError, TimeoutError, ValueError, websockets.exceptions.WebSocketException):
+            return {"status": "connection_failed", "fallback": "GET"}
 
     try:
-        asyncio.run(_once())
-    except Exception:
-        return
+        return asyncio.run(_once())
+    except RuntimeError:
+        return {"status": "event_loop_unavailable", "fallback": "GET"}
 
 
 def main() -> None:
@@ -358,8 +366,10 @@ def main() -> None:
                 st.session_state["p02_last_request_spec"] = spec
                 persist_client_to_session(st.session_state, client)
                 st.info(f"Trabalho aceito: {response.get('job_id')}. Recuperação pelo identificador, não pelo WebSocket.")
-                ws_url = os.environ.get("MODELA_WS_URL", "ws://127.0.0.1:8000/ws")
-                _maybe_listen_websocket(client.job_id, ws_url)
+                ws_url = os.environ.get("MODELA_WS_URL", client.base_url.replace("http://", "ws://", 1) + "/ws")
+                websocket_state = _maybe_listen_websocket(client.job_id, ws_url, client.access_token)
+                if websocket_state.get("status") != "connected":
+                    st.caption("Canal de progresso indisponível; estado e resultado serão consultados por GET.")
                 try:
                     client.recover(client.job_id)
                 except (ApiConnectionError, ApiResponseError) as exc:

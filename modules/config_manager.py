@@ -120,10 +120,10 @@ def _display_host(bind_host: str) -> str:
 def _validate_local_token(token: str) -> None:
     if token == "":
         return
-    if token.lower() in _PLACEHOLDER_TOKENS or len(token) < 8:
+    if token.lower() in _PLACEHOLDER_TOKENS or len(token) < 16:
         raise ValueError(
-            "LOCAL_AUTH_TOKEN is set but is a placeholder or shorter than 8 characters. "
-            "Leave it empty for single-user loopback use, or set a non-guessable token. "
+            "LOCAL_AUTH_TOKEN is set but is a placeholder or shorter than 16 characters. "
+            "Leave it empty for private first-use credentials, or set a non-guessable token. "
             "Do not commit the token."
         )
 

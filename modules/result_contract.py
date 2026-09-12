@@ -90,6 +90,7 @@ ALLOWED_ARTIFACT_NAMES = frozenset(
         "output_manifest.json",
         "normative_assessment.json",
         "document_state.json",
+        "document_attachments.json",
         "signature_request.json",
         "signed_report.pdf",
         "submission.zip",

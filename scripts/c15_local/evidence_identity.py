@@ -15,7 +15,7 @@ def git(*args: str) -> str:
 
 def identity() -> dict:
     event_path = os.environ.get("GITHUB_EVENT_PATH")
-    event = json.loads(Path(event_path).read_text()) if event_path else {}
+    event = json.loads(Path(event_path).read_text(encoding="utf-8")) if event_path else {}
     pr = event.get("pull_request") or {}
     return {
         "schema": "MP-C06-EVIDENCE/1",
@@ -46,7 +46,7 @@ def main() -> int:
         data = identity()  # Inspect cleanliness before creating any output.
         args.output.mkdir(parents=True, exist_ok=True)
     else:
-        data = json.loads(target.read_text())
+        data = json.loads(target.read_text(encoding="utf-8"))
         data["tracked_source_dirty_after"] = bool(git("diff", "HEAD", "--name-only"))
         output_relative = args.output.resolve().relative_to(Path.cwd().resolve()).as_posix()
         untracked = git("ls-files", "--others", "--exclude-standard").splitlines()
