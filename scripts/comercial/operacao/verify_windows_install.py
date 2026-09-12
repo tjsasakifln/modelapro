@@ -310,7 +310,7 @@ def _browser_probe(browser_python: Path, ui: str, evidence_dir: Path, phase: str
         capture_output=True,
         text=True,
         check=False,
-        timeout=180,
+        timeout=360,
     )
     evidence_path = evidence_dir / f"{phase}-installed-ui.json"
     if not evidence_path.is_file():
