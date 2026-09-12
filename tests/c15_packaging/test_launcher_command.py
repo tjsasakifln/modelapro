@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from c15_local.launcher import (
+    _entrypoint,
     backend_command,
     frontend_app_path,
     frontend_command,
@@ -34,6 +35,7 @@ def test_frontend_command_is_streamlit_cli_not_app_main():
     assert str(app_path) in cmd
     assert "--server.address" in cmd
     assert cmd[cmd.index("--server.address") + 1] == "127.0.0.1"
+    assert cmd[cmd.index("--global.developmentMode") + 1] == "false"
     joined = " ".join(cmd)
     assert "frontend.app:main" not in joined
     assert "app:main" not in joined
@@ -155,3 +157,11 @@ def test_health_wait_fails_immediately_when_product_child_exits(monkeypatch):
             timeout=30,
             processes={"frontend": ExitedProcess()},
         )
+
+
+def test_entrypoint_reports_child_failure_without_unhandled_window(capsys):
+    def fail():
+        raise RuntimeError("concrete child failure")
+
+    assert _entrypoint(fail) == 1
+    assert "RuntimeError: concrete child failure" in capsys.readouterr().err

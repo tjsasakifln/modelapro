@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -72,12 +73,17 @@ def frontend_command(app_path: Path, host: str, port: int) -> List[str]:
     """Streamlit must be launched as its own process, never frontend.app:main()."""
     if is_frozen_product():
         return [sys.executable, "--internal-frontend"]
+    return [sys.executable, "-m", "streamlit", *_streamlit_run_arguments(app_path, host, port)]
+
+
+def _streamlit_run_arguments(app_path: Path, host: str, port: int) -> List[str]:
     return [
-        sys.executable,
-        "-m",
-        "streamlit",
         "run",
         str(app_path),
+        # Frozen entrypoints have no Streamlit source checkout.  Explicitly
+        # disable its auto-detected development mode before setting a port.
+        "--global.developmentMode",
+        "false",
         "--server.address",
         host,
         "--server.port",
@@ -200,16 +206,7 @@ def _main_frozen_frontend() -> int:
     # frozen, so construct Streamlit's own argv for its in-process CLI here.
     sys.argv = [
         "streamlit",
-        "run",
-        str(app_path),
-        "--server.address",
-        cfg.FRONTEND_HOST,
-        "--server.port",
-        str(cfg.FRONTEND_PORT),
-        "--server.headless",
-        "true",
-        "--browser.gatherUsageStats",
-        "false",
+        *_streamlit_run_arguments(app_path, cfg.FRONTEND_HOST, cfg.FRONTEND_PORT),
     ]
     from streamlit.web import cli as streamlit_cli
 
@@ -335,5 +332,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise
 
 
+def _entrypoint(run=main) -> int:
+    """Turn frozen child failures into stderr and an observable exit code."""
+    try:
+        return run()
+    except Exception:
+        traceback.print_exc()
+        return 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_entrypoint())
