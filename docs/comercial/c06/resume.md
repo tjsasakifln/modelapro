@@ -1,5 +1,25 @@
 # C06 — handoff retomável
 
+## Estado corrente da retomada — 2026-09-12
+
+As cinco frentes C01–C05 publicadas já foram incorporadas nesta mesma PR #20.
+Ancestralidade/propriedade: [composition-20260912.md](composition-20260912.md).
+Matriz de consumidores, testes, execuções, artefatos e dependências externas:
+[integration-matrix.md](integration-matrix.md). Não usar as pendências de produtor
+não commitado abaixo para recomeçar as frentes: são histórico anterior à composição.
+
+C05 real é consumida pelo cálculo e pela emissão; os defaults documentais foram
+removidos. C16/P04 e wheel instalado passaram no run 34711657293, mas lint falhou
+e a suíte ampla ainda estava em curso nesta redação. Windows 34711657330 falhou
+no caminho do launcher antes de instalar; correção incorporada, nova prova pendente.
+Custo, navegador até assinatura e revisão do artefato final continuam como trabalho
+técnico C06. Não encerrar a integração por ausência de casos/revisores externos.
+
+O objetivo segue sendo produto profissional comercializável nos perfis anunciados.
+`COMMERCIAL_RELEASE_READY=false`; não houve merge, deploy ou submissão institucional.
+
+## Histórico anterior à composição — não é instrução corrente
+
 Campanha `MP-COM-20260912/C06` — validação independente, consolidação e
 liberação comercial. Frente integradora e dona da prova final.
 

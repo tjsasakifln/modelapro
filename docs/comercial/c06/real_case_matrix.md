@@ -17,10 +17,14 @@
 O aceite C06-A04 pede validação do produto contra **trabalhos de avaliação reais
 autorizados**, revisados por **revisor independente**. Nesta sessão:
 
-- não existe base de dados real autorizada no repositório nem fora dele;
-- não existe revisor independente contratado, identificado ou consultado;
-- não existe autorização do titular dos dados para uso dos laudos/amostras;
-- não existe autorização para submeter material a qualquer instituição.
+- não foi fornecida uma base real com autorização documentada para este protocolo;
+- não foi fornecido um parecer nem a identificação de revisor independente responsável pelo protocolo;
+- não foi fornecida a autorização do titular para uso dos laudos/amostras nos dez casos;
+- a autoridade desta retomada não permite submeter material a instituições.
+
+Essas afirmações descrevem os insumos disponíveis à C06, não a inexistência desses
+dados ou profissionais fora da sessão. Não impedem implementar, integrar e testar
+o software com casos sintéticos claramente rotulados.
 
 Portanto o aceite está **BLOCKED_EXTERNAL_EVIDENCE**. O entregável desta sessão é
 o protocolo congelado e a lista precisa de dependências — não o resultado.

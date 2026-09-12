@@ -1,0 +1,78 @@
+# C06 — matriz da composição, não dos componentes isolados
+
+Atualização em trabalho em 2026-09-12. Referência publicada desta execução:
+`a2f094f9f848aadb56d580f30eed4a52aa7606cf`. Os commits posteriores da mesma PR
+precisam de execução própria antes de serem aprovados. Os oito aceites de cada
+produtor permanecem nos arquivos originais como histórico do componente; esta
+matriz identifica seus consumidores na composição. Não declara conclusão pelo
+número de testes.
+
+## Execução → artefato
+
+| Referência | Execução e evidência exigida | Situação registrada |
+|---|---|---|
+| E1 | [C15 PR 34711657293](https://github.com/tjsasakifln/modelapro/actions/runs/34711657293): JUnit, collection.json, status, identity.json e inventário de bytes por namespace | C15 Linux/Windows, C16, P04 e wheel instalado passaram; lint falhou; suíte ampla/agregador pendentes nesta redação |
+| E2 | [Windows 34711657330](https://github.com/tjsasakifln/modelapro/actions/runs/34711657330): lock resolvido no Windows, fechamento de DLLs, hashes, manifesto de falha | Falhou antes da instalação: caminho do launcher relativo ao .spec. Correção incorporada, ainda sem nova prova instalada |
+| E3 | Serviço C03 e rotas reais: `pytest tests/comercial/test_c06_document_flow.py tests/comercial/test_c06_security_routes.py` | 28 passed local; ambiente diagnóstico com pacotes de sistema, não substitui E1/E2 |
+| E4 | Catálogo C05 e distribuição: `pytest tests/comercial/c05 tests/comercial/c06/test_catalog_distribution.py` | 553 passed local após fontes versionadas; wheel ampliado precisa nova execução candidata |
+| E5 | NIST e qualificação integrada + coleção: `pytest` respectivos arquivos | 122 passed local, incluindo Decimal independente e mutantes materiais; orçamento em numeric_verification.md |
+
+Cada identidade deve distinguir pr_head_sha, base_sha, tested_commit_sha, tree_sha,
+pais, evento, run_id, tentativa, checkout limpo e hashes dos pacotes. Um número de
+run nesta tabela não aprova seu conteúdo: o agregador lê e verifica os arquivos.
+Build/testes falhos continuam a produzir evidência; artefatos não se sobrepõem.
+
+## Requisito → implementação → teste → execução → artefato
+
+| Aceites abrangidos | Consumidor/implementação na composição | Testes executáveis / evidência | Execução |
+|---|---|---|---|
+| C01-A01 | data_loader → preparação → worker; IDs e amostra efetiva | comercial/c01/test_a01_ingest.py; ledger e feature_schema no frozen_project/dossiê | E1 |
+| C01-A02, A05; C06-A02 | regressão, seleção, escala e intervalos; orçamento prévio + oráculo Decimal | c01/test_a02_a05_fit_selection.py; p04/test_nist_strd.py; numeric_verification.md | E1/E5 |
+| C01-A03, A07; C05-A03, A04, A07; C06-A03 | resolver real C05 + assess_qualification com contexto; C05 mantém decisão/bloqueios/história; revalidação preserva graus/proveniência | test_c06_qualification_integration.py, c05; snapshot/normative_assessment/document_state | E1/E3/E4 |
+| C01-A04 | estado congelado, lote e reprodução independente do processo | c01/test_a04_a07_parity.py e testes P04/C03 de reprodução; frozen_project/evidence_bundle | E1/E3 |
+| C01-A06; C05-A06 | BOM de custo e Tabelas 6/7 com fonte, BDI e depreciação; mesmo /jobs, sem regressão fictícia | test_c06_cost_consumer.py + testes do motor de custo em fechamento; memória cost_result | PENDENTE — integração técnica em andamento |
+| C01-A08; C02-A01, A02, A03 | UI encomenda/perfil → API → cálculo; evidência documental sem defaults atestadores | c01/test_a08*, c02/test_a01_a02*, c02/test_a03*; request_spec/response persistidos | E1; novo formulário requer nova execução |
+| C02-A04, A07 | snapshot único em tela, projeto, revisão, lote e recuperação; valor/política sem cópia aprovadora | c02, c17, p04; projetos/revisões + comparação com snapshot | E1 |
+| C02-A05; C03-A01, A06 | /documents/review → exportação dos bytes PDF → importação/verificação pyHanko com trust roots do servidor | test_c06_document_flow.py; assinatura TESTE, assinatura antiga e PDF adulterado | E3; UI integral pendente |
+| C02-A06; C03-A07; C06-A05 | pacote de submissão local, mapa de requisitos/saída C05; nenhum envio externo | submission.zip, output_manifest; negativos de campos sem bytes e perfil desconhecido | E3; ato institucional NOT_RUN |
+| C02-A08 | Streamlit real + navegador lançado, autenticação HTTP/WS habilitada | c02/test_playwright_path.py; falha/NOT_RUN bloqueante se navegador não inicia | E1; extensão até assinatura em andamento |
+| C03-A02, A05 | presenter único → PDF/DOCX; comparação substantiva de valores/intervalos/política/perfil | test_c06_document_flow.py e c03; report.pdf/report.docx | E3/E1 |
+| C03-A03, A04 | anexos integrais autorizados, registro hash, dossiê/reprodução; completude separada de integridade | upload de bytes, adulteração, inventário de representações; evidence_bundle.zip | E3 |
+| C03-A08; C06-A07 | verificadores de saída e guardas ligados às rotas, não campo inventado pelo teste | c03/p04 mutation tests + test_c06_security_routes.py | E1/E3 |
+| C04-A01, A07; C06-A07 | locks/SBOM/licenças por versão e binário; âncora de comprador no artefato | inventário Python/native, notices/manifest/hash; NOASSERTION permanece investigação | E2; revisão final pendente |
+| C04-A02; C06-A06 | wheel/sdist/catalog/manual + bundle/instalador Windows | wheel fora do checkout; Windows install/launch/calc/docs/save/reopen/restore/update/rollback | E1/E2; Windows NOT_VERIFIED |
+| C04-A03, A06 | middleware e bootstrap real: Origin/Bearer/CSRF/path/workspace/limites; credencial atômica e privada | test_c06_security_routes.py, test_c06_runtime_bootstrap.py; guardas habilitadas no positivo | E1/E3; ACL Windows pendente |
+| C04-A04, A08 | backup/hash/restauração sob exclusão de admissão; fila/cancelamento/recuperação | testes C04 e rotas, barreira concorrente; ciclo Windows entre árvores distintas | E1/E2 |
+| C04-A05 | licença comprador separada; expiração bloqueia novo cálculo, preserva leitura/exportação | importação com âncora fixada; negativo de chave fornecida pelo cliente; fluxo legítimo | E1/E3; termos/titular externos |
+| C05-A01, A02 | fontes autorizadas parafraseadas, catálogo versionado dentro do pacote; ausência não produz catálogo vazio | c05/test_a01*, inventário regras, catalog_distribution; comparação fonte=wheel | E1/E4 |
+| C05-A05, A08 | requisitos por perfil e limitações explícitas, sem selo de banco ou universalidade | c05/output_conformance + profile-process-verification-20260912.md | E4; atualidade/aplicabilidade por encomenda |
+| C06-A01 | accept-candidate, pipefail, extensões e agregação fail-closed com coleta obrigatória | c15_packaging/test_ci_aggregator.py, test_evidence_identity.py, test_collection_evidence.py | E1 |
+| C06-A04 | protocolo congelado de dez ou mais casos autorizados + parecer independente | real_case_matrix.md; nenhum resultado ou identidade fictícia | NOT_RUN externo |
+| C06-A08 | dez estados separados, pacote identificado e aprovação sustentada por prova | esta matriz, estados na #20 e evidência candidata | COMMERCIAL_RELEASE_READY=false |
+
+## Dependências externas exatas (não são desculpa para código faltante)
+
+- Titular: autoridade/direitos sobre contribuições e materiais efetivamente distribuídos;
+  termos do comprador, privacidade/suporte e identidade/chave pública legítima de
+  emissão de entitlement. Não escolher licença aberta; não solicitar chave privada.
+- Dados: para cada RC-01…RC-10 do protocolo, autorização de uso/armazenamento,
+  amostra integral com fontes/datas/unidades, identificação do bem/encomenda e
+  trabalho de referência. Dez é parâmetro do protocolo, não norma universal.
+- Revisão: profissional independente identificado, competência/conselho e escopo
+  aplicáveis, declaração de independência e parecer real sobre os casos/resultados.
+- Normas/perfis: confirmação verificável da edição aplicável quando se pretender
+  alegar vigência; instruções/ordem/contrato do destinatário concreto. SUSEP/BCB
+  não substituem as condições de uma seguradora ou banco. Processo consultado e
+  fontes exatas constam de profile-process-verification-20260912.md.
+- Assinatura real: certificado e política do profissional/destinatário, cadeia e
+  mecanismos de revogação/carimbo exigidos. PDF/A só quando exigido e validado por
+  validador efetivo. Certificado TESTE não é ICP-Brasil nem parecer.
+- Submissão/aceite: autorização específica e ato real do destinatário. Esta retomada
+  prepara/verifica o pacote local; não transmite, protocola ou inventa homologação.
+
+## Impedimentos internos ainda abertos nesta redação
+
+Percurso custo integral; navegador até assinatura; revisão adversarial C03 final;
+nova suíte ampla/agregador sem falhas; Windows instalado e ciclo entre versões
+realmente distintas; inventário/revisão do artefato final. Esses itens continuam
+sendo trabalho C06, não handoffs sem consumidores nem dependências humanas.

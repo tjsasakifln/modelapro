@@ -1,5 +1,22 @@
 # C06 — tabela dos oito aceites
 
+## Composição corrente de 2026-09-12
+
+O estado integrado está em [integration-matrix.md](integration-matrix.md), com os
+48 aceites dos produtores/composição mapeados a consumidores e evidências. Abaixo
+fica preservado o diagnóstico anterior à integração; afirmações de que C05 não
+existe ou produtores não foram commitados estão superadas. As cinco ancestralidades
+estão em [composition-20260912.md](composition-20260912.md).
+
+A01: agregação estrita implementada, candidata final ainda precisa passar.
+A02/A03: prova numérica/qualificação reais conectadas e testadas, custo em fechamento.
+A04/A05: atos/dados reais não fornecidos; pesquisa atual por perfil em
+[profile-process-verification-20260912.md](profile-process-verification-20260912.md).
+A06/A07: composição em validação e Windows ainda não verificado.
+A08: `COMMERCIAL_RELEASE_READY=false`, sem rebaixar a oferta a uso assistido.
+
+## Histórico dos oito aceites antes da composição
+
 Campanha `MP-COM-20260912/C06`. Estado do **produto** e estado da **frente**
 são coisas diferentes e estão separados de propósito.
 
