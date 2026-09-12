@@ -1,5 +1,24 @@
 # MODELA PRO — Supply chain, secrets hygiene and CI security posture
 
+## Status deste registro na composição C06
+
+O conteúdo abaixo é histórico da inspeção de 2026-09-11, não inventário do
+artefato candidato atual. Quantidades, versões, ausência de locks/guardas e
+pendências descritas abaixo não podem ser reutilizadas como diagnóstico corrente.
+As cinco frentes estão compostas; guardas HTTP/WebSocket/upload/export/backup,
+bootstrap e entitlement foram conectadas e testadas na C06.
+
+O inventário atual deve ser lido nos artefatos identificados pela execução
+candidata da #20: SBOM Python, lock resolvido no Windows, fechamento de DLLs,
+fontes/fontes tipográficas, textos de licença e hashes efetivamente empacotados.
+O manual e a [matriz de integração](integration-matrix.md) distinguem essa prova
+de uma auditoria humana ou jurídica. `NOASSERTION` exige investigação; não prova
+incompatibilidade. Zero CVEs reportadas não prova segurança absoluta. Termos e
+titularidade do código próprio são decisões do titular, sem licença aberta
+escolhida por esta retomada.
+
+## Histórico preservado
+
 **Campaign:** MP-COM-20260912/C06 — aceite C06-A07
 **Worktree inspected:** `/home/tjsasakifln/code/modela-pro-p04`
 **Branch / commit shipping this document:** `mp-pro-20260911/p04-referencia-consolidacao` @ `be464a2`
