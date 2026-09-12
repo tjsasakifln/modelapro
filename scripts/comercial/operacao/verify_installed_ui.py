@@ -96,7 +96,9 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
             page.on("pageerror", lambda error: result["page_errors"].append(str(error)))
             page.goto(url, wait_until="domcontentloaded", timeout=90000)
             page.get_by_text("MODELA PRO", exact=True).first.wait_for(timeout=90000)
-            page.get_by_text("1. Encomenda e perfil", exact=False).first.wait_for(timeout=60000)
+            page.get_by_role(
+                "heading", name="1. Encomenda e perfil", exact=True
+            ).wait_for(state="visible", timeout=60000)
             page.get_by_text(TEST_BUILD_LABEL, exact=True).first.wait_for(timeout=30000)
 
             profile = page.locator("[data-testid='stSelectbox']").filter(
