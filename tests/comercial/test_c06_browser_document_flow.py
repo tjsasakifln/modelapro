@@ -8,6 +8,7 @@ opinion, an ICP-Brasil certificate nor institutional acceptance.
 from __future__ import annotations
 
 import io
+import json
 import os
 import socket
 import subprocess
@@ -137,10 +138,70 @@ def _field(page, label: str):
 
 
 def _fill(page, label: str, value: str) -> None:
-    control = _field(page, label)
-    control.fill(value, force=True)
-    page.keyboard.press("Tab")
-    page.wait_for_timeout(150)
+    for _ in range(4):
+        control = _field(page, label)
+        control.fill(value, force=True)
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(350)
+        try:
+            if _field(page, label).input_value() == value:
+                return
+        except Exception:
+            pass
+    raise AssertionError(f"UI field did not retain confirmed value: {label}")
+
+
+def _fill_subject_area(page, value: str) -> None:
+    for _ in range(4):
+        control = page.get_by_placeholder("ex.: 73,5").first
+        control.fill(value, force=True)
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(500)
+        current = page.get_by_placeholder("ex.: 73,5").first
+        try:
+            if current.input_value() == value:
+                return
+        except Exception:
+            pass
+    raise AssertionError("evaluating-subject area did not survive the Streamlit rerun")
+
+
+def _wait_json(path: Path, predicate, *, timeout: float = 60.0):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        try:
+            last = json.loads(path.read_text(encoding="utf-8"))
+            if predicate(last):
+                return last
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        time.sleep(0.25)
+    raise AssertionError(f"persisted state did not reach expected condition: {path}\n{last}")
+
+
+def _wait_job_dir(store_root: Path, *, timeout: float = 30.0) -> Path:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        jobs = sorted((store_root / "jobs").glob("job_*"))
+        if len(jobs) == 1:
+            return jobs[0]
+        time.sleep(0.25)
+    raise AssertionError(f"expected exactly one persisted job under {store_root}")
+
+
+def _wait_for_visible_state(page, expected: str, *, timeout: float = 30.0) -> str:
+    deadline = time.time() + timeout
+    body = ""
+    while time.time() < deadline:
+        body = page.inner_text("body")
+        if expected in body:
+            return body
+        refresh = page.get_by_role("button", name="Atualizar estado")
+        if refresh.count() and refresh.first.is_enabled():
+            refresh.first.click()
+        page.wait_for_timeout(500)
+    raise AssertionError(f"document state {expected!r} not visible after persistence\n{body[-4000:]}")
 
 
 def _select(page, label: str, option: str, *, steps: int = 1) -> None:
@@ -388,12 +449,22 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                     _fill(page, "Conselho (CREA/CAU/…)", "CREA-TESTE")
                     _fill(page, "ART/RRT ou referência documental", "ART-TESTE-000")
 
-                    area = page.get_by_placeholder("ex.: 73,5").first
-                    area.fill("73,5")
-                    page.keyboard.press("Tab")
+                    _fill_subject_area(page, "73,5")
                     page.get_by_role("button", name="Executar avaliação").first.click()
                     body = _wait_for_calculation(page)
                     assert "TESTE SINTÉTICO" in body
+                    job_dir = _wait_job_dir(tmp_path / "store")
+                    frozen = _wait_json(
+                        job_dir / "artifacts" / "frozen_project.json",
+                        lambda value: isinstance(value.get("request_spec"), dict),
+                    )
+                    report_context = _wait_json(
+                        job_dir / "artifacts" / "report_context.json",
+                        lambda value: isinstance(value.get("subject"), dict),
+                    )
+                    assert frozen["request_spec"]["candidate_cols"] == ["bairro", "area"]
+                    assert frozen["request_spec"]["synthetic_test_only"] is True
+                    assert str(report_context["subject"]["area"]).replace(",", ".") == "73.5"
                     _wait_for_dossier_ready(page)
 
                     _expand(page, "Arquivos integrais e procedência")
@@ -442,6 +513,11 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                     page.wait_for_selector(
                         "text=Documentos gerados", state="attached", timeout=60000
                     )
+                    _wait_json(
+                        job_dir / "artifacts" / "report_context.json",
+                        lambda value: value.get("asset_identification")
+                        == "SYNTHETIC_TEST — imóvel urbano fictício",
+                    )
 
                     _fill(page, "Profissional responsável pela decisão", "CREA-TESTE-REVISOR-000")
                     _fill(
@@ -452,7 +528,13 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                     _fill(page, "Identificador da revisão documental", "SYNTHETIC-TEST-REV-1")
                     page.get_by_role("button", name="Registrar revisão (não assina o laudo)").click()
                     page.wait_for_selector("text=Revisão registrada pelo serviço", timeout=60000)
-                    assert "ready_for_professional_signoff" in page.inner_text("body")
+                    reviewed = _wait_json(
+                        job_dir / "artifacts" / "document_state.json",
+                        lambda value: (value.get("event") or {}).get("revision_id")
+                        == "SYNTHETIC-TEST-REV-1",
+                    )
+                    assert reviewed["case_release_status"] == "ready_for_professional_signoff"
+                    _wait_for_visible_state(page, "ready_for_professional_signoff")
 
                     page.get_by_role("button", name="Exportar para assinador externo").click()
                     download_pdf = page.get_by_role(

@@ -12,6 +12,7 @@ aqui: /preview e o esquema de C02 são a fonte. Este módulo apenas:
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from typing import Any, Callable, Mapping, MutableMapping, Optional, Sequence
@@ -238,7 +239,10 @@ def preview_to_form_model(preview: Optional[Mapping[str, Any]]) -> dict:
             if isinstance(meta, Mapping):
                 column_map[str(name)] = dict(meta)
     if not column_map:
-        column_map = {str(k): dict(v) if isinstance(v, Mapping) else {"original_name": str(k)} for k, v in schema_cols.items()}
+        column_map = {
+            str(key): dict(value) if isinstance(value, Mapping) else {"original_name": str(key)}
+            for key, value in schema_cols.items()
+        }
     issues = list(preview.get("issues") or [])
     columns = list(column_map.keys())
     if not columns:
@@ -602,7 +606,10 @@ def build_subject_payload(
                     supported = False
                     _record_unsupported(
                         "unsupported_category",
-                        f"Categoria '{value}' de '{original}' não suportada; disparo interrompido por decisão explícita.",
+                        (
+                            f"Categoria '{value}' de '{original}' não suportada; "
+                            "disparo interrompido por decisão explícita."
+                        ),
                         original,
                         {"value": value, "categories": list(categories)},
                         True,
@@ -722,12 +729,18 @@ def validate_dispatch(
     if not (request_spec or {}).get("reference_date"):
         pending.append({
             "code": "pending_reference_date",
-            "message": "Data da avaliação (data-base) não informada — permanece pendente. Não se presume a data de hoje.",
+            "message": (
+                "Data da avaliação (data-base) não informada — permanece pendente. "
+                "Não se presume a data de hoje."
+            ),
         })
     if not (request_spec or {}).get("inspection_date"):
         pending.append({
             "code": "pending_inspection_date",
-            "message": "Data da vistoria não informada — permanece pendente. Não confundir com a data-base nem com a emissão.",
+            "message": (
+                "Data da vistoria não informada — permanece pendente. "
+                "Não confundir com a data-base nem com a emissão."
+            ),
         })
 
     subject = subject_payload or {}
@@ -1336,19 +1349,425 @@ def _iso_or_none(value: Any) -> Optional[str]:
     return text or None
 
 
-def _geolocation(latitude: Any, longitude: Any, address: str, source: str) -> dict:
-    """Keep operator-provided location context out of model predictors."""
-    result = {"address": address.strip() or None, "source": source.strip() or None}
-    for name, value in (("latitude", latitude), ("longitude", longitude)):
-        try:
-            numeric = float(str(value).replace(",", ".")) if str(value).strip() else None
-        except (TypeError, ValueError):
-            numeric = None
-        if numeric is not None and ((name == "latitude" and -90 <= numeric <= 90) or (name == "longitude" and -180 <= numeric <= 180)):
-            result[name] = numeric
+def _coordinate(value: Any, *, latitude: bool) -> tuple[Optional[float], Optional[str]]:
+    """Parse one declared WGS84 coordinate without turning bad input into absence."""
+    if value is None or str(value).strip() == "":
+        return None, None
+    try:
+        numeric = float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None, "deve ser um número em graus decimais"
+    limit = 90.0 if latitude else 180.0
+    if not math.isfinite(numeric) or not -limit <= numeric <= limit:
+        return None, f"deve estar entre {-int(limit)} e {int(limit)} graus"
+    return numeric, None
+
+
+def normalize_geolocation(
+    latitude: Any,
+    longitude: Any,
+    address: Any,
+    source: Any,
+    *,
+    label: str,
+) -> tuple[Optional[dict], list[str]]:
+    """Validate a complete declared location; partial input is a visible error."""
+    address_text = str(address or "").strip()
+    source_text = str(source or "").strip()
+    supplied = any(str(value or "").strip() for value in (latitude, longitude, address, source))
+    if not supplied:
+        return None, []
+
+    lat, lat_error = _coordinate(latitude, latitude=True)
+    lon, lon_error = _coordinate(longitude, latitude=False)
+    errors = []
+    if lat_error:
+        errors.append(f"{label}: latitude {lat_error}.")
+    elif lat is None:
+        errors.append(f"{label}: informe a latitude em graus decimais.")
+    if lon_error:
+        errors.append(f"{label}: longitude {lon_error}.")
+    elif lon is None:
+        errors.append(f"{label}: informe a longitude em graus decimais.")
+    if not address_text:
+        errors.append(f"{label}: informe o endereço completo.")
+    if not source_text:
+        errors.append(f"{label}: informe a fonte da localização; o endereço não substitui a fonte.")
+    if errors:
+        return None, errors
+    return {
+        "latitude": lat,
+        "longitude": lon,
+        "address": address_text,
+        "source": source_text,
+    }, []
+
+
+def sample_rows_with_row_ids(preview: Optional[Mapping[str, Any]], *, limit: int = 8) -> list[dict]:
+    """Join preview rows to the authoritative row ledger by their shared order."""
+    rows = interpreted_sample_rows(preview, limit=limit)
+    ledger = (preview or {}).get("row_ledger") or []
+    ledger_rows = list(ledger) if isinstance(ledger, (list, tuple)) else []
+    joined = []
+    for index, raw in enumerate(rows):
+        row = dict(raw) if isinstance(raw, Mapping) else {"value": raw}
+        ledger_row = ledger_rows[index] if index < len(ledger_rows) and isinstance(ledger_rows[index], Mapping) else {}
+        row_id = row.get("row_id") or ledger_row.get("row_id")
+        if row_id is None:
+            continue
+        row["row_id"] = str(row_id)
+        joined.append(row)
+    return joined
+
+
+def _context_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return "\n".join(str(item) for item in value if item is not None)
+    if value is not None and not isinstance(value, Mapping):
+        return str(value)
+    return ""
+
+
+def _restore_text_shape(value: str, original: Any) -> Any:
+    text = str(value or "").strip()
+    if isinstance(original, (list, tuple)):
+        return [line.strip() for line in text.splitlines() if line.strip()]
+    return text or None
+
+
+def render_sample_evidence_column_mapping(
+    *,
+    namespace: str,
+    column_map: Mapping[str, Any],
+    context: Optional[Mapping[str, Any]] = None,
+    excluded_columns: Sequence[str] = (),
+) -> tuple[dict, list[str]]:
+    """Map already-ingested columns to documentary evidence without re-reading data."""
+    stored_mapping = (context or {}).get("sample_evidence_columns") or {}
+    errors = []
+    if not isinstance(stored_mapping, Mapping):
+        errors.append("Mapeamento de colunas da amostra armazenado tem tipo inválido; revise as associações.")
+        stored_mapping = {}
+    current = dict(stored_mapping)
+    columns = [name for name in column_map if name not in set(excluded_columns)]
+    options = [""] + columns
+    mapping: dict[str, str] = {}
+    labels = {
+        "address": "Coluna do endereço da amostra",
+        "latitude": "Coluna da latitude da amostra",
+        "longitude": "Coluna da longitude da amostra",
+        "source": "Coluna da fonte da amostra",
+        "justification": "Coluna da justificativa (opcional)",
+    }
+    st.caption(
+        "Associe colunas da prévia já interpretada. A tela não relê o arquivo; "
+        "as colunas associadas passam a metadados documentais e saem dos preditores."
+    )
+    for field, label in labels.items():
+        default = str(current.get(field) or "")
+        if default not in options:
+            options_for_field = options + [default]
         else:
-            result[name] = None
+            options_for_field = options
+        chosen = st.selectbox(
+            label,
+            options=options_for_field,
+            index=options_for_field.index(default) if default in options_for_field else 0,
+            format_func=lambda value, cm=column_map: (
+                "Não associar" if not value else str((cm.get(value) or {}).get("original_name") or value)
+            ),
+            key=f"{namespace}_sample_column_{field}",
+        )
+        if chosen:
+            mapping[field] = chosen
+
+    required = ("address", "latitude", "longitude", "source")
+    if any(mapping.get(field) for field in required) and not all(mapping.get(field) for field in required):
+        errors.append(
+            "Mapeamento da amostra: endereço, latitude, longitude e fonte devem ser associados em conjunto."
+        )
+    mapped_required = [mapping[field] for field in required if mapping.get(field)]
+    if len(mapped_required) != len(set(mapped_required)):
+        errors.append("Mapeamento da amostra: cada campo obrigatório deve usar uma coluna própria.")
+    return mapping, errors
+
+
+def _sample_evidence_seed(sample_rows: Sequence[Mapping[str, Any]], context: Mapping[str, Any]) -> list[dict]:
+    current = context.get("sample_evidence") or {}
+    evidence = {str(key): value for key, value in current.items()} if isinstance(current, Mapping) else {}
+    row_ids = []
+    for row in sample_rows:
+        if isinstance(row, Mapping) and row.get("row_id") is not None:
+            row_ids.append(str(row["row_id"]))
+    for row_id in evidence:
+        if str(row_id) not in row_ids:
+            row_ids.append(str(row_id))
+    result = []
+    for row_id in row_ids:
+        location = evidence.get(row_id) or {}
+        if not isinstance(location, Mapping):
+            location = {}
+        result.append({
+            "row_id": row_id,
+            "address": _context_text(location.get("address")),
+            "latitude": _context_text(location.get("latitude")),
+            "longitude": _context_text(location.get("longitude")),
+            "source": _context_text(location.get("source")),
+            "justification": _context_text(location.get("justification")),
+        })
     return result
+
+
+def _sample_evidence_from_editor(
+    edited: Any,
+    *,
+    allowed_row_ids: Sequence[str],
+) -> tuple[dict, list[str]]:
+    if isinstance(edited, pd.DataFrame):
+        records = edited.to_dict(orient="records")
+    elif isinstance(edited, list):
+        records = edited
+    else:
+        return {}, ["Localização da amostra: a tabela editável devolveu um tipo inválido."]
+    allowed = {str(row_id) for row_id in allowed_row_ids}
+    evidence: dict[str, dict] = {}
+    errors = []
+    for raw in records:
+        if not isinstance(raw, Mapping):
+            errors.append("Localização da amostra: uma linha da tabela tem formato inválido.")
+            continue
+        row_id = str(raw.get("row_id") or "").strip()
+        values = [raw.get(field) for field in ("address", "latitude", "longitude", "source", "justification")]
+        if not any(str(value or "").strip() for value in values):
+            continue
+        if not row_id or row_id not in allowed:
+            errors.append(f"Localização da amostra: identificador {row_id or 'ausente'} não pertence à amostra aberta.")
+            continue
+        location, row_errors = normalize_geolocation(
+            raw.get("latitude"), raw.get("longitude"), raw.get("address"), raw.get("source"),
+            label=f"Amostra {row_id}",
+        )
+        errors.extend(row_errors)
+        if location is not None:
+            justification = str(raw.get("justification") or "").strip()
+            if justification:
+                location["justification"] = justification
+            evidence[row_id] = location
+    return evidence, errors
+
+
+def render_professional_report_fields(
+    *,
+    namespace: str,
+    variable_names: Sequence[str],
+    sample_rows: Sequence[Mapping[str, Any]],
+    context: Optional[Mapping[str, Any]] = None,
+    sample_evidence_columns: Optional[Mapping[str, str]] = None,
+    include_professional_identity: bool = False,
+) -> tuple[dict, list[str]]:
+    """Render professional report inputs as native controls and validate their shape."""
+    current = dict(context or {})
+    fields: dict[str, Any] = {}
+    errors: list[str] = []
+    fields["objective"] = st.text_input(
+        "Objetivo da avaliação",
+        value=_context_text(current.get("objective")),
+        key=f"{namespace}_objective",
+        help="Resultado de valor buscado; é um campo próprio, distinto da finalidade da encomenda.",
+    ).strip() or None
+    fields["market_diagnosis"] = st.text_area(
+        "Diagnóstico de mercado",
+        value=_context_text(current.get("market_diagnosis")),
+        key=f"{namespace}_market_diagnosis",
+    ).strip() or None
+    fields["grade_i_justification"] = st.text_area(
+        "Justificativa para adoção do Grau I",
+        value=_context_text(current.get("grade_i_justification")),
+        key=f"{namespace}_grade_i_justification",
+    ).strip() or None
+    observations = st.text_area(
+        "Observações do laudo",
+        value=_context_text(current.get("observations")),
+        key=f"{namespace}_observations",
+    )
+    fields["observations"] = _restore_text_shape(observations, current.get("observations"))
+
+    purpose = str(current.get("purpose") or "").strip()
+    if fields["objective"] and purpose and fields["objective"].casefold() == purpose.casefold():
+        errors.append("Objetivo da avaliação deve ser informado separadamente da finalidade da encomenda.")
+
+    current_classification = current.get("variable_classification") or {}
+    if not isinstance(current_classification, Mapping):
+        errors.append("Classificação das variáveis armazenada tem tipo inválido; revise os campos antes de continuar.")
+        current_classification = {}
+    classification: dict[str, dict] = {}
+    st.markdown("##### Critério e codificação das variáveis do modelo")
+    st.caption("Somente variáveis autorizadas como preditoras aparecem aqui; colunas documentais ficam de fora.")
+    for variable in variable_names:
+        existing = current_classification.get(variable) or {}
+        if not isinstance(existing, Mapping):
+            errors.append(f"Variável {variable}: classificação armazenada tem tipo inválido.")
+            existing = {}
+        criterion_col, coding_col = st.columns(2)
+        with criterion_col:
+            criterion = st.text_input(
+                f"Critério de enquadramento — {variable}",
+                value=_context_text(existing.get("criterion")),
+                key=f"{namespace}_variable_{variable}_criterion",
+            ).strip()
+        with coding_col:
+            coding_value = existing.get("coding")
+            if isinstance(coding_value, Mapping):
+                coding_default = "; ".join(f"{key} → {value}" for key, value in coding_value.items())
+            elif isinstance(coding_value, (list, tuple)):
+                coding_default = "; ".join(str(value) for value in coding_value)
+            else:
+                coding_default = _context_text(coding_value)
+            coding = st.text_input(
+                f"Codificação ou escala — {variable}",
+                value=coding_default,
+                key=f"{namespace}_variable_{variable}_coding",
+            ).strip()
+        alternative_scale = bool(existing.get("categories") or existing.get("scale_values"))
+        if criterion or coding or alternative_scale:
+            if not criterion:
+                errors.append(f"Variável {variable}: informe o critério de enquadramento.")
+            if not coding and not alternative_scale:
+                errors.append(f"Variável {variable}: informe a codificação ou escala.")
+            entry = dict(existing)
+            entry["criterion"] = criterion
+            if coding:
+                preserves_structure = coding == coding_default and isinstance(
+                    coding_value, (Mapping, list, tuple)
+                )
+                entry["coding"] = coding_value if preserves_structure else coding
+            else:
+                entry.pop("coding", None)
+            classification[variable] = entry
+    fields["variable_classification"] = classification
+
+    raw_subject = current.get("subject")
+    if raw_subject not in (None, {}) and not isinstance(raw_subject, Mapping):
+        errors.append("Dados do avaliando armazenados têm tipo inválido; revise a localização.")
+    subject = dict(raw_subject or {}) if isinstance(raw_subject, Mapping) else {}
+    current_location = subject.get("geolocation") or {}
+    if not isinstance(current_location, Mapping):
+        errors.append("Localização do avaliando armazenada tem tipo inválido; revise os campos.")
+        current_location = {}
+    st.markdown("##### Localização do imóvel avaliando")
+    geo_cols = st.columns(2)
+    with geo_cols[0]:
+        subject_latitude = st.text_input(
+            "Latitude do avaliando (graus decimais)",
+            value=_context_text(current_location.get("latitude")),
+            key=f"{namespace}_subject_latitude",
+        )
+        subject_address = st.text_input(
+            "Endereço completo do avaliando",
+            value=_context_text(current_location.get("address")),
+            key=f"{namespace}_subject_address",
+        )
+    with geo_cols[1]:
+        subject_longitude = st.text_input(
+            "Longitude do avaliando (graus decimais)",
+            value=_context_text(current_location.get("longitude")),
+            key=f"{namespace}_subject_longitude",
+        )
+        subject_source = st.text_input(
+            "Fonte da localização do avaliando",
+            value=_context_text(current_location.get("source")),
+            key=f"{namespace}_subject_source",
+        )
+    location, geo_errors = normalize_geolocation(
+        subject_latitude, subject_longitude, subject_address, subject_source,
+        label="Imóvel avaliando",
+    )
+    errors.extend(geo_errors)
+    if location is not None:
+        subject["geolocation"] = location
+    else:
+        subject.pop("geolocation", None)
+    fields["subject"] = subject
+
+    if include_professional_identity:
+        professional = current.get("professional_identity") or {}
+        if not isinstance(professional, Mapping):
+            errors.append("Identidade profissional armazenada tem tipo inválido; revise os campos.")
+            professional = {}
+        st.markdown("##### Identidade profissional e responsabilidade técnica")
+        name = st.text_input(
+            "Nome do profissional no laudo",
+            value=_context_text(professional.get("name")),
+            key=f"{namespace}_professional_name",
+        )
+        council = st.text_input(
+            "Conselho profissional no laudo",
+            value=_context_text(professional.get("council")),
+            key=f"{namespace}_professional_council",
+        )
+        registration = st.text_input(
+            "Registro profissional no laudo",
+            value=_context_text(professional.get("registration")),
+            key=f"{namespace}_professional_registration",
+        )
+        art_rrt = st.text_input(
+            "ART/RRT ou documento de responsabilidade",
+            value=_context_text(
+                professional.get("art_rrt") or professional.get("responsibility_document")
+            ),
+            key=f"{namespace}_professional_art_rrt",
+        )
+        documentary_reference = st.text_input(
+            "Referência documental da qualificação",
+            value=_context_text(professional.get("documentary_reference")),
+            key=f"{namespace}_professional_documentary_reference",
+        )
+        fields["professional_identity"] = {
+            **dict(professional),
+            "name": name.strip(),
+            "council": council.strip(),
+            "registration": registration.strip(),
+            "art_rrt": art_rrt.strip(),
+            "documentary_reference": documentary_reference.strip(),
+        }
+
+    st.markdown("##### Localização dos elementos da amostra")
+    st.caption(
+        "Edite por row_id. Linha parcialmente preenchida ou coordenada inválida bloqueia a geração; "
+        "metadados não são usados como preditores."
+    )
+    stored_sample_evidence = current.get("sample_evidence") or {}
+    if not isinstance(stored_sample_evidence, Mapping):
+        errors.append("Localização da amostra armazenada tem tipo inválido; revise a tabela.")
+    elif any(not isinstance(value, Mapping) for value in stored_sample_evidence.values()):
+        errors.append("Localização da amostra contém linha com tipo inválido; revise a tabela.")
+    seed = _sample_evidence_seed(sample_rows, current)
+    allowed_row_ids = [row["row_id"] for row in seed]
+    edited = st.data_editor(
+        pd.DataFrame(seed, columns=["row_id", "address", "latitude", "longitude", "source", "justification"]),
+        disabled=["row_id"],
+        hide_index=True,
+        width="stretch",
+        num_rows="fixed",
+        key=f"{namespace}_sample_evidence_table",
+        column_config={
+            "row_id": st.column_config.TextColumn("row_id"),
+            "address": st.column_config.TextColumn("Endereço completo"),
+            "latitude": st.column_config.TextColumn("Latitude"),
+            "longitude": st.column_config.TextColumn("Longitude"),
+            "source": st.column_config.TextColumn("Fonte"),
+            "justification": st.column_config.TextColumn("Justificativa (opcional)"),
+        },
+    )
+    sample_evidence, sample_errors = _sample_evidence_from_editor(
+        edited, allowed_row_ids=allowed_row_ids
+    )
+    fields["sample_evidence"] = sample_evidence
+    fields["sample_evidence_columns"] = dict(sample_evidence_columns or {})
+    errors.extend(sample_errors)
+    return fields, errors
 
 
 def _encomenda_widgets() -> dict:
@@ -1785,7 +2204,12 @@ def upload_form(
             "uploaded_file": uploaded_file,
             "request_spec": None,
             "subject": None,
-            "dispatch": {"ok": False, "can_dispatch": False, "blocking": [{"code": "connection", "message": connection_error}], "pending": []},
+            "dispatch": {
+                "ok": False,
+                "can_dispatch": False,
+                "blocking": [{"code": "connection", "message": connection_error}],
+                "pending": [],
+            },
             "preview": None,
             "connection_error": connection_error,
             "preview_error": preview_error,
@@ -1874,7 +2298,10 @@ def upload_form(
     columns = model["columns"]
     suggested = suggest_roles(model["column_map"])
     target_options = columns or [""]
-    default_target = next((c for c, role in suggested.items() if role == "target"), target_options[0] if target_options else "")
+    default_target = next(
+        (column for column, role in suggested.items() if role == "target"),
+        target_options[0] if target_options else "",
+    )
     target_col = st.selectbox(
         "Variável-alvo (valor)",
         options=target_options,
@@ -1939,10 +2366,30 @@ def upload_form(
         if candidate_cols == []:
             st.warning(EMPTY_SELECTION_MESSAGE)
 
+    st.markdown("##### Colunas documentais da amostra")
+    sample_evidence_columns, sample_mapping_errors = render_sample_evidence_column_mapping(
+        namespace=f"p02_{ns}",
+        column_map=model["column_map"],
+        excluded_columns=[target_col],
+    )
+    documentary_columns = set(sample_evidence_columns.values())
+    for column in documentary_columns:
+        if column in roles:
+            roles[column] = "source"
+    if candidate_cols is not None:
+        removed_documentary = [column for column in candidate_cols if column in documentary_columns]
+        candidate_cols = [column for column in candidate_cols if column not in documentary_columns]
+        if removed_documentary:
+            st.info(
+                "Colunas usadas como localização/procedência foram retiradas das variáveis do modelo: "
+                + ", ".join(removed_documentary)
+                + "."
+            )
+
     unused = unused_columns_view(
         model["column_map"],
         roles=roles,
-        candidate_cols=None if auto_candidates else selected_candidates,
+        candidate_cols=candidate_cols,
         target_col=target_col,
         preview_issues=model.get("issues"),
     )
@@ -2042,7 +2489,10 @@ def upload_form(
 
     applicant = encomenda_state.get("applicant") or ""
     purpose = encomenda_state.get("purpose") or ""
-    st.caption(f"Solicitante e finalidade vêm da encomenda: {applicant or 'não informado'} / {purpose or 'não informada'}.")
+    st.caption(
+        "Solicitante e finalidade vêm da encomenda: "
+        f"{applicant or 'não informado'} / {purpose or 'não informada'}."
+    )
 
     degree_choice = st.selectbox(
         "Grau mínimo solicitado",
@@ -2127,30 +2577,16 @@ def upload_form(
     item3_ref = st.text_input("Evidência da identificação dos dados de mercado", key=f"p02_{ns}_item3_ref")
     st.markdown("#### Contexto documental do caso")
     st.caption("Campos declarados pelo responsável; não alteram as variáveis do modelo.")
-    objective = st.text_input("Objetivo do trabalho (distinto da finalidade)", key=f"p02_{ns}_objective")
-    market_diagnosis = st.text_area("Diagnóstico de mercado", key=f"p02_{ns}_market_diagnosis")
-    variable_classification_text = st.text_area(
-        "Classificação das variáveis (JSON)",
-        key=f"p02_{ns}_variable_classification",
-        help='Ex.: {"area":{"criterion":"área privativa","coding":"numérica contínua"}}',
+    report_variables = [name for name, role in roles.items() if role == "predictor"]
+    if candidate_cols is not None:
+        report_variables = [name for name in report_variables if name in candidate_cols]
+    report_context, report_field_errors = render_professional_report_fields(
+        namespace=f"p02_{ns}_report",
+        variable_names=report_variables,
+        sample_rows=sample_rows_with_row_ids(preview),
+        context={"purpose": purpose},
+        sample_evidence_columns=sample_evidence_columns,
     )
-    grade_i_justification = st.text_area("Justificativa do grau I", key=f"p02_{ns}_grade_i")
-    observations = st.text_area("Observações", key=f"p02_{ns}_observations")
-    sample_evidence_text = st.text_area(
-        "Evidências de localização da amostra por linha (JSON)",
-        key=f"p02_{ns}_sample_evidence",
-        help='Ex.: {"linha-1":{"address":"…","latitude":-23.5,"longitude":-46.6,"source":"declaração"}}',
-    )
-    try:
-        variable_classification = json.loads(variable_classification_text) if variable_classification_text.strip() else {}
-    except json.JSONDecodeError:
-        variable_classification = {}
-        st.error("Classificação das variáveis deve ser JSON válido; não será enviada.")
-    try:
-        sample_evidence = json.loads(sample_evidence_text) if sample_evidence_text.strip() else {}
-    except json.JSONDecodeError:
-        sample_evidence = {}
-        st.error("Evidências da amostra devem ser JSON válido; não serão enviadas.")
     qualification_evidence = _qualification_evidence_widgets(
         ns=ns,
         profile=encomenda_state.get("profile") or {},
@@ -2173,8 +2609,14 @@ def upload_form(
             "item1_grade_declared": grau_item1,
             "item3_grade_declared": grau_item3,
             "provenance": "declared_by_user",
-            "item1_provenance": {"source": "professional_declaration", "evidence_ref": item1_ref} if item1_ref else None,
-            "item3_provenance": {"source": "professional_declaration", "evidence_ref": item3_ref} if item3_ref else None,
+            "item1_provenance": (
+                {"source": "professional_declaration", "evidence_ref": item1_ref}
+                if item1_ref else None
+            ),
+            "item3_provenance": (
+                {"source": "professional_declaration", "evidence_ref": item3_ref}
+                if item3_ref else None
+            ),
         },
         rights=encomenda_state.get("rights"),
         recipient_id=encomenda_state.get("recipient_id"),
@@ -2186,14 +2628,7 @@ def upload_form(
         professional_findings=qualification_evidence["professional_findings"],
         value_policy=value_policy,
         synthetic_test_only=bool(encomenda_state.get("synthetic_test_only")),
-        report_context={
-            "objective": objective.strip() or None,
-            "market_diagnosis": market_diagnosis.strip() or None,
-            "variable_classification": variable_classification,
-            "grade_i_justification": grade_i_justification.strip() or None,
-            "observations": observations.strip() or None,
-            "sample_evidence": sample_evidence,
-        },
+        report_context=report_context,
     )
 
     policies = policies_on_the_wire(request_spec)
@@ -2301,22 +2736,12 @@ def upload_form(
             if extra_res != "pendente":
                 resolutions[extra_unsupported] = {"action": extra_res}
 
-        st.markdown("Localização do imóvel avaliando (contexto, fora da regressão)")
-        subject_latitude = st.text_input("Latitude do avaliando", key=f"p02_{ns}_subject_latitude")
-        subject_longitude = st.text_input("Longitude do avaliando", key=f"p02_{ns}_subject_longitude")
-        subject_address = st.text_input("Endereço do avaliando", key=f"p02_{ns}_subject_address")
-        subject_source = st.text_input("Fonte da localização do avaliando", key=f"p02_{ns}_subject_source")
-
         execute_clicked = st.form_submit_button(
             "Executar avaliação",
             help="Envia o avaliando preenchido neste passo. Não dispara com campos ainda não confirmados.",
         )
 
     subject = build_subject_payload(feature_schema, raw_values, resolutions=resolutions)
-    subject["geolocation"] = _geolocation(
-        subject_latitude, subject_longitude, subject_address, subject_source
-    )
-    request_spec["report_context"]["subject"] = {"geolocation": subject["geolocation"]}
     for iss in subject.get("issues") or []:
         if iss.get("requires_resolution"):
             st.error(iss.get("message"))
@@ -2326,6 +2751,11 @@ def upload_form(
             st.warning(iss.get("message"))
 
     dispatch = validate_dispatch(request_spec, subject, preview=preview)
+    for message in [*sample_mapping_errors, *report_field_errors]:
+        dispatch["blocking"].append({"code": "invalid_report_context", "message": message})
+    if sample_mapping_errors or report_field_errors:
+        dispatch["ok"] = False
+        dispatch["can_dispatch"] = False
     if dispatch["blocking"]:
         for item in dispatch["blocking"]:
             st.error(item["message"])
