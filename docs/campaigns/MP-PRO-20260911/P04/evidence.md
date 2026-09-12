@@ -18,13 +18,13 @@ HEAD deste texto é gravado no comentário da PR **depois** do commit.
 - P04-A02: metrics distinguish machine time, robot actions, and unrun human time.
 - P04-A03: previous incorporation of P01 `18a2dc0` / P02 `a0b4b4a` / P03 `4cb6937` **invalidated** (REOPENED). Current SEALED merged `--no-ff`: P01 `ec691bd`, P03 `ec7b8db`, P02 `b8e846c`. No writes to main/#17/producer branches.
 - P04-A04: HTTP/worker/PDF/mutation/restore/batch (104 passed × 2 on `200816f`). Playwright+Chromium installed locally; composed browser path passed in `tests/pro_workflow/p04` (29 passed including browser). Screenshot: combined-browser.png.
-- P04-A05: C18 triggers fire. GHA green on `32bd871`/`b0391bd` does **not** count for COMBINED: those SHAs did not contain current SEALED HEADs. Local combined suite on `c055272` (after ec691bd/ec7b8db/b8e846c): **113 passed**. Wheel `wheel_eval_ok` ~735000 from `site-packages`. Remote GHA on this composition is the remaining A05 gate.
+- P04-A05: C18 triggers fire. GHA on `f4842ca2c187608df23666bd66a8f36a22142ad5` (contains current SEALED P01 `ec691bd`, P02 `b8e846c`, P03 `ec7b8db`) runs [34660498699](https://github.com/tjsasakifln/modelapro/actions/runs/34660498699) (pull_request) and [34660495596](https://github.com/tjsasakifln/modelapro/actions/runs/34660495596) (push) **success**. Wide suite **704 passed / 1 skipped**. Local combined 113 passed; wheel_eval_ok ~735000 from site-packages. Prior COMBINED on `b0391bd` does not count (REOPENED producer HEADs).
 
 ## What remains
 
 - Human pilot 5–10 authorized real cases: **not run**.
 - Absolute readiness / full NBR / Windows PDF: **not claimed**.
-- STATUS=`PARTIAL_EVIDENCE` until GHA is green on the current-SEALED composition. Prior COMBINED on `b0391bd` is invalidated. This status does **not** authorize merge or laudo.
+- STATUS=`COMBINED_INCREMENT_VERIFIED` on the current-SEALED composition (GHA-green `f4842ca`). Prior COMBINED on `b0391bd` stays invalidated. This status does **not** authorize merge or laudo.
 
 ## Commands and exit codes
 
