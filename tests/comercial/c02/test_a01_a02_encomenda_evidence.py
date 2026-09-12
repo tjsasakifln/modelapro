@@ -235,3 +235,11 @@ def test_request_spec_carries_only_an_explicit_value_policy():
 
     assert declared["value_policy"] == value_policy
     assert "value_policy" not in omitted
+
+
+def test_synthetic_case_marker_is_explicit_and_never_the_default():
+    marked = validate_request_spec(_spec(synthetic_test_only=True))
+    ordinary = validate_request_spec(_spec())
+
+    assert marked["synthetic_test_only"] is True
+    assert "synthetic_test_only" not in ordinary

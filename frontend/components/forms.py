@@ -368,6 +368,7 @@ def build_request_spec(
     profile_evidence: Optional[Mapping[str, Any]] = None,
     professional_findings: Optional[Mapping[str, Any]] = None,
     value_policy: Optional[Mapping[str, Any]] = None,
+    synthetic_test_only: bool = False,
 ) -> dict:
     """Monta RequestSpec MP/1. Não presume BRL, BRL/m² nem data de hoje.
 
@@ -467,6 +468,8 @@ def build_request_spec(
         }
     if value_policy:
         spec["value_policy"] = dict(value_policy)
+    if synthetic_test_only:
+        spec["synthetic_test_only"] = True
     return spec
 
 
@@ -1333,6 +1336,20 @@ def _encomenda_widgets() -> dict:
         key="c02_recipient",
     )
     applicant = st.text_input("Solicitante", value="", key="c02_applicant")
+    synthetic_test_only = st.checkbox(
+        "Caso composto exclusivamente com dados e atos sintéticos de TESTE",
+        value=False,
+        key="c02_synthetic_test_only",
+        help=(
+            "Rotula documentos, revisões e assinatura como evidência interna de teste. "
+            "Não representa caso real, parecer profissional ou aceite institucional."
+        ),
+    )
+    if synthetic_test_only:
+        st.warning(
+            "TESTE SINTÉTICO — sem validade externa, sem parecer profissional e sem "
+            "aceite institucional."
+        )
     resolved = select_qualification_profile(
         profile_id,
         purpose=purpose,
@@ -1389,6 +1406,7 @@ def _encomenda_widgets() -> dict:
         "recipient_id": recipient_id,
         "value_basis": value_basis,
         "asset_scope": asset_scope,
+        "synthetic_test_only": synthetic_test_only,
     }
 
 
@@ -2033,6 +2051,7 @@ def upload_form(
         profile_evidence=qualification_evidence["profile_evidence"],
         professional_findings=qualification_evidence["professional_findings"],
         value_policy=value_policy,
+        synthetic_test_only=bool(encomenda_state.get("synthetic_test_only")),
     )
 
     policies = policies_on_the_wire(request_spec)
