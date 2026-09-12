@@ -1,74 +1,26 @@
-"""Adversarial detectors for the ten commercial claims (C06-A07 + C06-A01).
+"""Adversarial audit companions for the ten C06 commercial defects.
 
-Each controlled defect is injected into a COPY of a real artifact or payload
--- a snapshot produced by the shipped HTTP/worker path, a runner artifact
-directory, an on-disk evidence bundle -- never into product source. Every
-detector is exercised twice: it must accept the clean artifact (empty problem
-list) and reject the mutated one naming the intended cause.
+The original detectors in this module intentionally remain small and useful
+for diagnosis.  They are not, by themselves, proof that the product rejects a
+mutation: several operate on audit-only dictionaries such as
+``_clean_profile_document`` and ``_clean_reuse_manifest``.  Product evidence
+now lives in ``tests/comercial/test_c06_commercial_surfaces.py``.  That suite
+starts from artifacts actually emitted by the worker/document pipeline and
+exercises the acceptance aggregator, PDF/dossier consistency checks,
+qualification decision, installed-component SBOM queue and recipient-return
+record.
 
-Two cases are deliberately NOT injected into a real artifact, and say so on
-the spot: ``test_defect04_non_identity_y_transformation_is_not_verified``
-(a one-field variant of the real S01 snapshot) and the synthetic acceptance
-record. Both are labelled in their own docstrings.
+``PRODUCT_SIDE_GUARD_STATUS`` records the current implementation, while
+``PRODUCT_SIDE_GUARD_LAYER`` names the consumer that rejects or safely
+presents each defect.  Nine defects have a shipped product/tooling guard.
+``method_none`` remains PARTIAL: the UI derives an honest "não executada"
+label from the real request/result, but the general claim detector below is
+still audit-only because the product has no arbitrary
+``claims_external_validation`` field.  We do not invent such a field merely
+to turn this status green.
 
-Extends, and does not duplicate, tests/fixtures/pro_workflow/mutations.py:
-that module covers wrong_coefficient_order, missing_ci,
-percent_band_replacing_uncertainty, none_instead_of_holdout, swapped_unit,
-omitted_row and incompatible_recommendation on the snapshot. The defects here
-are the commercial-claim surface (CI evidence, dossier, qualification
-profile, normative rules, third-party reuse, external acceptance).
-
-PRODUCT-SIDE GUARD STATUS (a real finding for the C06 parent). The machine
-readable form is ``PRODUCT_SIDE_GUARD_STATUS`` below; this prose and that
-mapping must agree, and ``test_defect_inventory_is_complete_and_partitioned``
-enforces it.
-
-GUARD_SHIPPED -- a product/tooling guard exists in the repo and is exercised
-here end to end:
-  1. lost_exit_code      -> scripts/c15_local/aggregate_required.py
-                            (check_p04_run / check_junit / check_c16 /
-                            verify_artifacts).
-  6. missing_attachments -> modules.evidence_bundle.verify_bundle, run
-                            against a real on-disk bundle.
-
-GUARD_PARTIAL -- product code constrains part of the surface, but not the
-step the defect exploits:
-  7. wrong_profile       -- modules/report_presenter/verifier.py
-     ::verify_report_consistency does bind document to snapshot, but only
-     over value.point, target.unit, formula, used/excluded row ids and
-     validation.fundamentacao.grade. Verified by grep: the word
-     "profile"/"perfil" does not appear in that file, so
-     qualification_profile.id / .version printed in the document is bound to
-     nothing.
-  8. unverified_rule_passed -- modules/normative_rules.py withholds the
-     Tabela 2 grade whenever pending_items is non-empty ("absence is not
-     approval") and stamps evidence_status = pending. What is missing is the
-     rule-level guard: no code refuses a rule_result that carries
-     counts_as_passed (or appears in an approval tally) while its own status
-     is "unverified" / "pending_manual" / "error".
-
-GUARD_NONE -- the detector below is a TEST-side validator written for this
-campaign; nothing in modules/, backend/ or frontend/ refuses the mutated
-artifact at runtime:
-  2. empty_result                    -- result_contract documents value.point
-     null as a legitimate outcome (Issue + JSON null, never 0) and
-     ISSUANCE_STATUSES accepts "ready_for_professional_review" without any
-     cross-check that a finite point and a non-empty used sample exist.
-  3. method_none                     -- evaluation_policy.method = "none" is
-     the documented way to skip C07; no product code refuses a commercial
-     "externally validated" claim raised over a method-none run.
-  4. tampered_coefficient            -- no product re-derivation of
-     value.point from the frozen coefficients + subject design.
-  5. tampered_confidence_interval    -- the snapshot records no standard
-     error, so interval bounds cannot be re-derived product-side at all.
-  9. missing_license                 -- a reuse/licence manifest now exists as
-     documentation (docs/comercial/c06/reuse.json, written by a sibling C06
-     agent), but no code in modules/, backend/, frontend/ or scripts/ reads
-     or enforces it: a component added with no SPDX id would be refused by
-     nothing at build or run time.
- 10. nonexistent_external_acceptance -- there is no institution_acceptance
-     schema in the repo at all; nothing forbids an approval record with no
-     external act, evidence ref, date or scope.
+The following historical findings about the real S01 worker surface remain
+regression evidence for the method-none boundary.
 
 FINDINGS about where the effective evaluation policy is observable (defect 3;
 established by running the shipped FastAPI/worker path over corpus S01 and
@@ -159,24 +111,36 @@ COMMERCIAL_DEFECTS = (
     "nonexistent_external_acceptance",
 )
 
-# Programmatic form of the PRODUCT-SIDE GUARD STATUS section of the module
-# docstring. Three values, not two: a consumer reading this mapping must get
-# exactly the status the prose claims, and never a harsher one.
+# Product/runtime status.  The pure functions below remain audit companions;
+# the matching emitted-surface regression tests are in C06's integration suite.
 GUARD_SHIPPED = "shipped"   # product/tooling code refuses the mutated artifact
 GUARD_PARTIAL = "partial"   # product code binds part of the surface, not this step
 GUARD_NONE = "none"         # the only detector today is the one in this module
 
 PRODUCT_SIDE_GUARD_STATUS: Dict[str, str] = {
     "lost_exit_code": GUARD_SHIPPED,
-    "empty_result": GUARD_NONE,
-    "method_none": GUARD_NONE,
-    "tampered_coefficient": GUARD_NONE,
-    "tampered_confidence_interval": GUARD_NONE,
+    "empty_result": GUARD_SHIPPED,
+    "method_none": GUARD_PARTIAL,
+    "tampered_coefficient": GUARD_SHIPPED,
+    "tampered_confidence_interval": GUARD_SHIPPED,
     "missing_attachments": GUARD_SHIPPED,
-    "wrong_profile": GUARD_PARTIAL,
-    "unverified_rule_passed": GUARD_PARTIAL,
-    "missing_license": GUARD_NONE,
-    "nonexistent_external_acceptance": GUARD_NONE,
+    "wrong_profile": GUARD_SHIPPED,
+    "unverified_rule_passed": GUARD_SHIPPED,
+    "missing_license": GUARD_SHIPPED,
+    "nonexistent_external_acceptance": GUARD_SHIPPED,
+}
+
+PRODUCT_SIDE_GUARD_LAYER: Dict[str, str] = {
+    "lost_exit_code": "acceptance_aggregator",
+    "empty_result": "document_consistency",
+    "method_none": "presentation_only",
+    "tampered_coefficient": "document_and_dossier_consistency",
+    "tampered_confidence_interval": "document_consistency",
+    "missing_attachments": "dossier_integrity",
+    "wrong_profile": "document_qualification_binding",
+    "unverified_rule_passed": "qualification_release_and_document_binding",
+    "missing_license": "release_sbom_review_queue",
+    "nonexistent_external_acceptance": "recipient_receipt_and_claim_registry",
 }
 
 GUARD_STATUSES = (GUARD_SHIPPED, GUARD_PARTIAL, GUARD_NONE)
@@ -865,30 +829,18 @@ def test_defect_inventory_is_complete_and_partitioned():
 
 
 def test_guard_status_matches_the_docstring_prose():
-    """The programmatic status may not be harsher than the prose it summarises.
-
-    Defects 7 and 8 are described as "PARTIAL guard only"; a consumer reading
-    the mapping must get PARTIAL, not "no guard at all".
-    """
-    assert defects_with_guard_status(GUARD_SHIPPED) == {"lost_exit_code", "missing_attachments"}
-    assert defects_with_guard_status(GUARD_PARTIAL) == {"wrong_profile", "unverified_rule_passed"}
-    assert defects_with_guard_status(GUARD_NONE) == {
-        "empty_result",
-        "method_none",
-        "tampered_coefficient",
-        "tampered_confidence_interval",
-        "missing_license",
-        "nonexistent_external_acceptance",
+    """Keep audit helpers distinct from the product consumers they accompany."""
+    assert defects_with_guard_status(GUARD_SHIPPED) == set(COMMERCIAL_DEFECTS) - {
+        "method_none"
     }
+    assert defects_with_guard_status(GUARD_PARTIAL) == {"method_none"}
+    assert defects_with_guard_status(GUARD_NONE) == set()
+    assert set(PRODUCT_SIDE_GUARD_LAYER) == set(COMMERCIAL_DEFECTS)
+    assert PRODUCT_SIDE_GUARD_LAYER["method_none"] == "presentation_only"
     doc = __doc__ or ""
-    for heading in ("GUARD_SHIPPED --", "GUARD_PARTIAL --", "GUARD_NONE --"):
-        assert heading in doc, heading
-    partial_section = doc.split("GUARD_PARTIAL --")[1].split("GUARD_NONE --")[0]
-    for defect in defects_with_guard_status(GUARD_PARTIAL):
-        assert defect in partial_section, defect
-    none_section = doc.split("GUARD_NONE --")[1]
-    for defect in defects_with_guard_status(GUARD_NONE):
-        assert defect in none_section, defect
+    assert "Nine defects have a shipped product/tooling guard" in doc
+    assert "method_none`` remains PARTIAL" in doc
+    assert "audit-only" in doc
 
 
 # --- Defect 1: lost exit code (product-side guard: aggregate_required) -----
