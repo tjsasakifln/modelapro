@@ -28,7 +28,7 @@ from ..report_presenter.qualification import (
 from ..report_presenter.verifier import verify_report_consistency
 from ..results_generator import render_report
 from .docx import build_docx, verify_docx_equivalence
-from .submission import build_submission_package, verify_submission_package
+from .submission import build_submission_package, verify_submission_package, _verify_dossier_archive
 
 
 class DocumentWorkflowError(RuntimeError):
@@ -521,16 +521,26 @@ def create_signature_request(store: Any, job_id: str, *, revision_id: str) -> Di
     if docx is None:
         raise DocumentWorkflowError("DOCUMENT_ARTIFACT_MISSING", "controlled DOCX is required before signature export")
     try:
-        preflight = build_submission_package(
-            snapshot, context, pdf_bytes=pdf,
-            docx_bytes=docx,
-            dossier_bytes=store.get_artifact(job_id, "evidence_bundle.zip"),
-            requirement_map=_requirement_map(snapshot),
-        )
-        if not verify_submission_package(preflight).get("ok"):
-            raise ValueError("unsigned package consistency failed")
-    except ValueError as exc:
-        raise DocumentWorkflowError("SIGNATURE_EXPORT_INCONSISTENT", str(exc)) from exc
+        if not verify_report_consistency(pdf, snapshot, context).get("ok"):
+            raise ValueError("controlled PDF differs from the reviewed content")
+        if not verify_docx_equivalence(docx, snapshot, context).get("equivalent"):
+            raise ValueError("controlled DOCX differs from the reviewed content")
+        dossier = store.get_artifact(job_id, "evidence_bundle.zip")
+        check = _verify_dossier_archive(dossier, expected_snapshot=snapshot, require_complete=False)
+        if not check.get("ok"):
+            raise ValueError("dossier integrity or snapshot binding failed")
+        with zipfile.ZipFile(io.BytesIO(dossier)) as archive:
+            ledger = json.loads(archive.read("completeness/ledger.json"))
+        missing = set(ledger.get("missing") or [])
+        manifest = check["manifest"]
+        if missing != set(manifest.get("completeness_missing") or []):
+            raise ValueError("dossier completeness records disagree")
+        # The bytes being requested cannot already have a signature. This is
+        # the only stage-specific pending item; every other obligation remains.
+        if missing - {"signature_record"} or manifest.get("numerical_reproduction_status") not in {"ready", "verified"}:
+            raise ValueError("unsigned dossier is incomplete")
+    except Exception as exc:
+        raise DocumentWorkflowError("SIGNATURE_EXPORT_INCONSISTENT", "controlled documents failed pre-signature verification") from exc
     profile_id = str((state.get("profile") or {}).get("id") or "")
     request = prepare_signature_request(
         pdf,
