@@ -1,0 +1,4 @@
+# The recorded sha256 values are of the bytes NIST serves, CRLF included.
+# Any EOL normalisation on checkout would change those bytes and break the
+# integrity check for a reason that has nothing to do with the data.
+*.dat -text
