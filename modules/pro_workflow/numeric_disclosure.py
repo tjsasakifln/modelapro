@@ -341,7 +341,9 @@ def _original_target(prepared: Any, used_ids: Sequence[Any]) -> Optional[np.ndar
     if y is None or len(y) != len(prepared_ids):
         return None
     positions = {str(row_id): position for position, row_id in enumerate(prepared_ids)}
-    if any(str(row_id) not in positions for row_id in used_ids):
+    if (len(positions) != len(prepared_ids)
+            or len(set(map(str, used_ids))) != len(used_ids)
+            or any(str(row_id) not in positions for row_id in used_ids)):
         return None
     out = np.asarray([y[positions[str(row_id)]] for row_id in used_ids], dtype=float)
     return out if np.isfinite(out).all() else None
@@ -361,13 +363,23 @@ def _correlation_matrix(winner_fit: Any, prepared: Any) -> Dict[str, Any]:
     target = _original_target(prepared, used_ids)
     target_name = str(getattr(_get(prepared, "y"), "name", None) or "target")
     base = _get(winner_fit, "base_frame")
-    base_frame = pd.DataFrame(base).reset_index(drop=True) if base is not None else pd.DataFrame()
+    base_frame = pd.DataFrame(base).copy() if base is not None else pd.DataFrame()
+    base_frame.index = base_frame.index.map(str)
+    ordered_ids = list(map(str, used_ids))
+    rows_match = bool(
+        ordered_ids and len(set(ordered_ids)) == len(ordered_ids)
+        and base_frame.index.is_unique
+        and set(base_frame.index) == set(ordered_ids)
+        and target is not None
+    )
+    if rows_match:
+        base_frame = base_frame.loc[ordered_ids].reset_index(drop=True)
     spec = _mapping(_get(winner_fit, "candidate_spec"))
     base_variables = list(spec.get("base_variables") or spec.get("features") or [])
     kinds = _base_kinds(winner_fit)
     excluded: List[Dict[str, str]] = []
     original = pd.DataFrame()
-    if target is not None and len(base_frame) == len(target):
+    if rows_match:
         original[target_name] = target
         for variable in base_variables:
             name = str(variable)
@@ -384,6 +396,9 @@ def _correlation_matrix(winner_fit: Any, prepared: Any) -> Dict[str, Any]:
                 continue
             original[name] = numeric
     block = _matrix_block(original, scale="original")
+    block["used_row_ids"] = ordered_ids
+    if not rows_match:
+        block["reason"] = "effective_sample_row_identity_mismatch"
     block["excluded_variables"] = excluded
     missing_numeric = [
         item
@@ -600,11 +615,46 @@ def _outlier_count(winner_fit: Any, *, numerically_exact_fit: bool = False) -> D
         if _finite(value) is not None
     }
     missing_studentized_ids = sorted(set(used_ids) - finite_studentized_ids)
+    expected = set(used_ids)
+    maps = {
+        name: _mapping(influence.get(name))
+        for name in ("studentized_residuals", "cooks_distance", "leverage")
+    }
+    map_coverage = {}
+    for name, values in maps.items():
+        finite_ids = {str(key) for key, value in values.items() if _finite(value) is not None}
+        keys = {str(key) for key in values}
+        map_coverage[name] = {
+            "missing_row_ids": sorted(expected - finite_ids),
+            "unexpected_row_ids": sorted(keys - expected),
+            "complete": bool(expected) and finite_ids == keys == expected and len(keys) == len(values),
+        }
+    threshold_names = ("studentized_abs", "cooks_4_over_n", "cooks_absolute", "leverage_2p_over_n")
+    checked_thresholds = {name: _finite(thresholds.get(name)) for name in threshold_names}
+    thresholds_valid = all(value is not None and value > 0 for value in checked_thresholds.values())
+    maps_complete = all(item["complete"] for item in map_coverage.values())
+    maps = {name: {str(key): value for key, value in values.items()} for name, values in maps.items()}
+    derived_union = set()
+    if maps_complete and thresholds_valid:
+        for row_id in expected:
+            if (abs(float(maps["studentized_residuals"][row_id])) > cutoff
+                    or float(maps["cooks_distance"][row_id]) > checked_thresholds["cooks_4_over_n"]
+                    or float(maps["cooks_distance"][row_id]) > checked_thresholds["cooks_absolute"]
+                    or float(maps["leverage"][row_id]) > checked_thresholds["leverage_2p_over_n"]):
+                derived_union.add(row_id)
+    union_valid = bool(
+        maps_complete and thresholds_valid
+        and isinstance(influence.get("influential_row_ids"), (list, tuple))
+        and len(set(influential_ids)) == len(influential_ids)
+        and set(influential_ids) <= expected
+        and set(influential_ids) == derived_union
+    )
+    complete = bool(
+        maps_complete and thresholds_valid and union_valid
+        and len(expected) == len(used_ids) and not expected.intersection(excluded_ids)
+    )
     available = bool(
-        cutoff is not None
-        and used_ids
-        and not missing_studentized_ids
-        and not numerically_exact_fit
+        complete and not numerically_exact_fit
     )
     return {
         "detected": len(set(detected_ids)) if available else None,
@@ -625,23 +675,26 @@ def _outlier_count(winner_fit: Any, *, numerically_exact_fit: bool = False) -> D
                 "internally studentized residual, or leverage)"
             ),
         },
-        "detected_row_ids": sorted(set(detected_ids)),
+        "detected_row_ids": sorted(set(detected_ids)) if available else [],
         "excluded_row_ids": sorted(set(excluded_ids)),
-        "influential_row_ids": sorted(set(influential_ids)),
+        "influential_row_ids": sorted(set(influential_ids)) if available else [],
         "influence_authorizes_exclusion": False,
         "available": available,
         "coverage": {
             "expected_used_rows": len(set(used_ids)),
             "finite_studentized_rows": len(finite_studentized_ids & set(used_ids)),
             "missing_row_ids": missing_studentized_ids,
-            "complete": bool(used_ids) and not missing_studentized_ids,
+            "maps": map_coverage,
+            "thresholds_valid": thresholds_valid,
+            "influence_union_valid": union_valid,
+            "complete": complete,
         },
         "reason": (
             None
             if available
             else "numerically_exact_fit_influence_not_informative"
             if numerically_exact_fit
-            else "studentized_residual_influence_diagnostics_unavailable"
+            else "influence_maps_thresholds_or_union_not_verified"
         ),
     }
 

@@ -485,3 +485,105 @@ def test_reviewed_exclusion_is_distinct_and_non_finite_values_become_null():
     assert outliers["excluded_row_ids"] == ["r0"]
     assert outliers["influence_authorizes_exclusion"] is False
     assert disclosure["diagnostics"]["elasticities"]["available"] is False
+
+
+def _row_contract_fit():
+    x = np.arange(1.0, 13.0)
+    prepared = {
+        "X": pd.DataFrame({"x": x}),
+        "y": pd.Series(5 + 2 * x + np.asarray([0, .2, -.1] * 4), name="y"),
+        "row_ids": [f"r{i}" for i in range(len(x))],
+        "feature_schema": {"version": 1, "target": {"column": "y"}},
+        "encoder_state": {"column_order": ["x"], "base_variables": [
+            {"original_name": "x", "kind": "numeric"}]},
+        "base_frame": pd.DataFrame({"x": x}),
+    }
+    fit = fit_candidate(prepared, CandidateSpec(
+        candidate_id="row-contract", features=["x"], base_variables=["x"],
+        feature_groups={}, x_transformations={}, y_transformation="identity", intercept=True,
+    ), {})
+    assert fit.status == "fitted"
+    return fit, prepared
+
+
+def test_correlation_joins_frozen_sample_by_row_identity_and_rejects_ambiguous_rows():
+    fit, prepared = _row_contract_fit()
+    expected = build_numeric_disclosure(fit, prepared)["diagnostics"]["correlation_matrix"]
+    fit.base_frame = fit.base_frame.iloc[::-1]
+    reordered = build_numeric_disclosure(fit, prepared)["diagnostics"]["correlation_matrix"]
+    assert reordered["available"] is True
+    assert np.allclose(reordered["values"], expected["values"])
+    for invalid_index in (["NOT_USED"] + fit.used_row_ids[1:], [fit.used_row_ids[1]] + fit.used_row_ids[1:]):
+        fit.base_frame.index = invalid_index
+        invalid = build_numeric_disclosure(fit, prepared)["diagnostics"]["correlation_matrix"]
+        assert invalid["available"] is False
+        assert invalid["reason"] == "effective_sample_row_identity_mismatch"
+
+
+def test_outlier_counts_require_all_finite_maps_and_exact_used_row_coverage():
+    fit, prepared = _row_contract_fit()
+    valid = build_numeric_disclosure(fit, prepared)["diagnostics"]["outlier_count"]
+    assert valid["available"] is True
+    original = copy.deepcopy(fit.diagnostics["influence"])
+    for field in ("cooks_distance", "leverage", "studentized_residuals"):
+        for mutation in ("missing", "extra", "nonfinite"):
+            changed = copy.deepcopy(original)
+            if mutation == "missing":
+                changed.pop(field)
+            elif mutation == "extra":
+                changed[field]["NOT_USED"] = 999
+            else:
+                changed[field][fit.used_row_ids[0]] = float("nan")
+            fit.diagnostics["influence"] = changed
+            result = build_numeric_disclosure(fit, prepared)["diagnostics"]["outlier_count"]
+            assert result["available"] is False, (field, mutation)
+            assert result["coverage"]["complete"] is False
+            assert result["coverage"]["influence_union_valid"] is False
+            assert result["detected"] is None and result["influential"] is None
+    for mutation in ("missing", "extra", "incorrect_union"):
+        changed = copy.deepcopy(original)
+        if mutation == "missing":
+            changed.pop("influential_row_ids")
+        elif mutation == "extra":
+            changed["influential_row_ids"].append("NOT_USED")
+        else:
+            changed["influential_row_ids"] = list(fit.used_row_ids)
+        fit.diagnostics["influence"] = changed
+        result = build_numeric_disclosure(fit, prepared)["diagnostics"]["outlier_count"]
+        assert result["available"] is False, mutation
+
+
+def test_material_disclosure_change_invalidates_review_of_real_worker_result(tmp_path):
+    from modules.pro_workflow.report_context import build_output_manifest
+    from modules.valuation_policy.qualification import reassess_qualification_context
+
+    spec = _professional_spec()
+    store = JobStore(tmp_path / "store", recover_abandoned=False)
+    job = store.create(request_spec=spec, payload={"filename": "SINTETICO.csv"})
+    snapshot = compose_valuation_job(
+        job_id=job["job_id"], file_bytes=_noisy_linear_csv()[0], filename="SINTETICO.csv",
+        request_spec=spec, subject_raw={"area": 73.5, "bairro": "Centro"},
+        project_id=None, peers=resolve_peers(), job_store=store,
+    )["snapshot"]
+    normative = json.loads(store.get_artifact(job["job_id"], "normative_assessment.json"))
+    report_context = json.loads(store.get_artifact(job["job_id"], "report_context.json"))
+    manifest = build_output_manifest(snapshot, report_context)
+
+    def assess(subject, reviews=()):
+        return reassess_qualification_context(
+            snapshot=subject, request_spec=spec, output_manifest=manifest,
+            report_content_fingerprint="a" * 64, normative_assessment=normative,
+            review_events=reviews,
+        )
+
+    baseline = assess(snapshot)
+    event = {"fingerprint": baseline["result_fingerprint"], "professional_id": "TESTE",
+             "motive": "Revisão sintética", "version": "TESTE-1", "decision": "approved"}
+    assert assess(snapshot, [event])["stale_review_events"] == []
+    for name in ("standardized_residuals", "normal_frequency_comparison", "correlation_matrix",
+                 "elasticities", "outlier_count"):
+        changed = copy.deepcopy(snapshot)
+        changed["validation"]["statistical"]["diagnostics"].pop(name)
+        assessment = assess(changed, [event])
+        assert assessment["result_fingerprint"] != baseline["result_fingerprint"], name
+        assert assessment["stale_review_events"] == [event], name

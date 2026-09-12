@@ -392,6 +392,13 @@ def compose_qualification_context(
         "search_audit": dict(search_audit or {}),
         "cost_result": dict(cost_result or {}),
     }
+    statistical = _as_mapping(_as_mapping(snapshot_draft.get("validation")).get("statistical"))
+    if "diagnostics" in statistical:
+        # These fitted disclosures are reviewed material, not qualification
+        # output. Bind them without importing the derived assessment/review
+        # block (which would introduce a fingerprint cycle). Historical
+        # snapshots without this field retain their existing material shape.
+        material["statistical_diagnostics"] = statistical["diagnostics"]
     context = {
         "normative_assessment": dict(normative_assessment or {}),
         "requested_minimum_grade": requested_grade,
