@@ -13,19 +13,56 @@ SOURCE_URL_TEMPLATE = "https://www.itl.nist.gov/div898/strd/lls/data/LINKS/DATA/
 
 # --- pre-registered accuracy rule (frozen before any comparison was executed) ---
 #   digits(A)  = max(0, 15 - log10(A))     [15 ~ IEEE-754 double decimal digits]
-#   rel_floor  = 10 ** -(digits(A) - 1.0)   [1.0 digit of engineering margin]
+#   rel_floor  = min(1.0, 10 ** -(digits(A) - 1.0))   [1.0 digit of engineering margin]
 # The amplification factor A differs by quantity class (Higham, ASNA Thm 20.1):
 #   beta : A = kappa_eq + kappa_eq**2 * rho   (rho = ||r|| / (||X_eq|| ||beta_eq||))
 #   sigma-hat and R^2 : A = kappa_eq         (projection onto col(X) is far better
 #                                            determined than the coordinates in it)
-#   parameter std devs : A = kappa_eq**2     (they come from diag((X'X)^-1))
+#   parameter std devs : A = kappa_eq**2     (WORST CASE, for an implementation that
+#                                            forms and inverts X'X; see the note on
+#                                            `sd_rel_floor_qr` below)
+#
+# THE min(1.0, ...) CLAMP IS PART OF THE RULE, not a silent adjustment. Once
+# digits(A) saturates at 0 (A >= 1e15) the raw expression returns 10**1 = 10, and a
+# "relative error must be at most 10" assertion is not a bound on anything: relative
+# error 1.0 already means "not one correct significant digit". Clamping at 1.0 keeps
+# the literal a relative error and is the conservative direction. Exactly one literal
+# in this file is produced by the clamp rather than by the bare expression -- Filip's
+# `sd_rel_floor`, where A = kappa_eq**2 = 2.711e19 gives 1.000e+01 unclamped. The
+# clamp is documented here so that
+# tests/pro_workflow/p04/test_nist_strd.py::test_every_frozen_floor_reproduces_the_stated_rule
+# can re-derive all 44 floors mechanically and fail on any literal that disagrees.
+#
 # rho uses only NIST-certified quantities (residual SS, certified beta) and the raw
 # data - never an oracle output - so the floors below are a genuine pre-registration.
 # kappa_eq is the 2-norm condition number of the COLUMN-EQUILIBRATED design matrix
 # (each column scaled to unit norm). It is a property of the input data alone, so it
 # was computed from the fetched data before any oracle output existed.
+#
+# --- `sd_rel_floor_qr`: A SECOND, TIGHTER FLOOR, DERIVED *AFTER* THE FIRST RUN ---
+# Labelled honestly: this one is NOT pre-registered. It was added once it was clear
+# that the pre-registered kappa_eq**2 floor is vacuous for Filip (it clamps to 1.0,
+# so eleven comparisons asserted nothing). It is derived from the ALGORITHM, not
+# from the observed errors:
+#   `ols_oracle.fit_ols` never forms X'X. It computes a Householder QR of X and sets
+#   xtx_inv = R^-1 R^-T, so sd_j = sigma * ||row_j(R^-1)||_2. Substitution/triangular
+#   inversion is COMPONENTWISE backward stable (Higham, ASNA 2nd ed., ch. 8 on
+#   triangular systems: the computed solution of Tx = b satisfies (T + dT)x = b with
+#   |dT| <= gamma_n |T|), which yields the componentwise forward bound
+#   |R^-1_hat - R^-1| <~ gamma_n |R^-1| |R| |R^-1|. The kappa_eq**2 amplification is
+#   realised only by explicitly squaring the design into X'X, which this oracle does
+#   not do; the attainable amplification here is one factor of kappa_eq.
+#   So: sd_rel_floor_qr = min(1.0, 10 ** -(max(0, 15 - log10(kappa_eq)) - 1.0)).
+# That is the same A as the projection class, so the literal coincides with
+# `proj_rel_floor` on every dataset. It is written out separately anyway, so the
+# rule-re-derivation test checks it as an independent literal.
+# It is not fitted to the observed errors: Filip's observed worst sd error is
+# 3.41e-09 against this floor of 5.21e-05, four orders of margin. A fitted number
+# would sit just above 3.41e-09. See EMPIRICAL_REGRESSION_CEILINGS for the tier that
+# IS derived from observation, and is labelled as such.
 DOUBLE_PRECISION_DIGITS = 15.0
 MARGIN_DIGITS = 1.0
+MAX_MEANINGFUL_RELATIVE_FLOOR = 1.0
 
 DATASETS = {
     "Norris": {
@@ -49,6 +86,8 @@ DATASETS = {
         "proj_rel_floor": 2.801e-14,
         "sd_expected_digits": 14.106,
         "sd_rel_floor": 7.843e-14,
+        "sd_qr_expected_digits": 14.553,
+        "sd_rel_floor_qr": 2.801e-14,
         "certified": {
             "parameters": [
                 ("B0", -0.262323073774029, 0.232818234301152),
@@ -163,6 +202,8 @@ DATASETS = {
         "proj_rel_floor": 1.845e-13,
         "sd_expected_digits": 12.468,
         "sd_rel_floor": 3.403e-12,
+        "sd_qr_expected_digits": 13.734,
+        "sd_rel_floor_qr": 1.845e-13,
         "certified": {
             "parameters": [
                 ("B0", 0.673565789473684e-03, 0.107938612033077e-03),
@@ -286,6 +327,8 @@ DATASETS = {
         "proj_rel_floor": 1.000e-14,
         "sd_expected_digits": 15.000,
         "sd_rel_floor": 1.000e-14,
+        "sd_qr_expected_digits": 15.000,
+        "sd_rel_floor_qr": 1.000e-14,
         "certified": {
             "parameters": [
                 ("B1", 2.07438016528926, 0.165289256198347e-01),
@@ -349,6 +392,8 @@ DATASETS = {
         "proj_rel_floor": 1.000e-14,
         "sd_expected_digits": 15.000,
         "sd_rel_floor": 1.000e-14,
+        "sd_qr_expected_digits": 15.000,
+        "sd_rel_floor_qr": 1.000e-14,
         "certified": {
             "parameters": [
                 ("B1", 0.727272727272727, 0.420827318078432e-01),
@@ -396,6 +441,8 @@ DATASETS = {
         "proj_rel_floor": 4.328e-10,
         "sd_expected_digits": 5.728,
         "sd_rel_floor": 1.873e-05,
+        "sd_qr_expected_digits": 10.364,
+        "sd_rel_floor_qr": 4.328e-10,
         "certified": {
             "parameters": [
                 ("B0", -3482258.63459582, 890420.383607373),
@@ -565,6 +612,8 @@ DATASETS = {
         "proj_rel_floor": 2.220e-11,
         "sd_expected_digits": 8.307,
         "sd_rel_floor": 4.929e-08,
+        "sd_qr_expected_digits": 11.654,
+        "sd_rel_floor_qr": 2.220e-11,
         "certified": {
             "parameters": [
                 ("B0", 1.00000000000000, 0.000000000000000),
@@ -653,6 +702,8 @@ DATASETS = {
         "proj_rel_floor": 2.220e-11,
         "sd_expected_digits": 8.307,
         "sd_rel_floor": 4.929e-08,
+        "sd_qr_expected_digits": 11.654,
+        "sd_rel_floor_qr": 2.220e-11,
         "certified": {
             "parameters": [
                 ("B0", 1.00000000000000, 0.000000000000000),
@@ -741,6 +792,8 @@ DATASETS = {
         "proj_rel_floor": 2.220e-11,
         "sd_expected_digits": 8.307,
         "sd_rel_floor": 4.929e-08,
+        "sd_qr_expected_digits": 11.654,
+        "sd_rel_floor_qr": 2.220e-11,
         "certified": {
             "parameters": [
                 ("B0", 1.00000000000000, 2152.32624678170),
@@ -829,6 +882,8 @@ DATASETS = {
         "proj_rel_floor": 2.220e-11,
         "sd_expected_digits": 8.307,
         "sd_rel_floor": 4.929e-08,
+        "sd_qr_expected_digits": 11.654,
+        "sd_rel_floor_qr": 2.220e-11,
         "certified": {
             "parameters": [
                 ("B0", 1.00000000000000, 215232.624678170),
@@ -917,6 +972,8 @@ DATASETS = {
         "proj_rel_floor": 2.220e-11,
         "sd_expected_digits": 8.307,
         "sd_rel_floor": 4.929e-08,
+        "sd_qr_expected_digits": 11.654,
+        "sd_rel_floor_qr": 2.220e-11,
         "certified": {
             "parameters": [
                 ("B0", 1.00000000000000, 21523262.4678170),
@@ -1005,6 +1062,8 @@ DATASETS = {
         "proj_rel_floor": 5.207e-05,
         "sd_expected_digits": 0.000,
         "sd_rel_floor": 1.000e00,
+        "sd_qr_expected_digits": 5.283,
+        "sd_rel_floor_qr": 5.207e-05,
         "certified": {
             "parameters": [
                 ("B0", -1467.48961422980, 298.084530995537),
@@ -1200,3 +1259,66 @@ DATASETS = {
         ],
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# EMPIRICAL REGRESSION CEILINGS -- *NOT* PRE-REGISTERED. READ THIS LABEL.
+# ---------------------------------------------------------------------------
+# Everything above this line is a bound derived from the input data (and, for
+# `sd_rel_floor_qr`, from the oracle's algorithm) with no reference to any observed
+# error. The numbers below are the opposite: they were MEASURED on 2026-09-11, from
+# this oracle, on one machine, and then multiplied by 100 and rounded up to one
+# significant figure. They carry no theoretical authority whatsoever.
+#
+# Why they exist. The pre-registered floors are the bound that double-precision
+# arithmetic could not be expected to beat; the oracle in fact beats them by factors
+# of 1e2 to 2e5 (see PROVENANCE.md section 4.3). A suite asserting only the
+# pre-registered floors therefore verifies "not catastrophically wrong", not
+# "reproduces the certified digits": corrupting Longley's certified B1 by 1e-6
+# relative still passed every pre-registered assertion. These ceilings close that
+# gap. They are recorded only for the datasets where the pre-registered margin
+# exceeds ~1e2; where the pre-registered floor already binds within two orders
+# (Norris, NoInt1, NoInt2, Pontius) nothing is added, because a second literal there
+# would be flake surface without resolution.
+#
+# What a failure here means. NOT automatically a defect: 100x is intended to absorb
+# LAPACK/BLAS differences across platforms, but it is an engineering guess, not a
+# proof. The correct response to a trip is to record the new platform's measurement
+# and decide explicitly, in writing, whether it is a numerical regression or a
+# legitimate platform difference. It is NOT to widen the literal silently, and a
+# trip must never be presented as "expected".
+#
+# What it must never be called. Pre-registered. Certified. A NIST tolerance. It is a
+# tripwire tied to one observation, and its only job is to go red when this oracle's
+# arithmetic changes.
+#
+# Keys: "beta_rel_eq"  equilibrated normwise beta error (the v2 primary metric)
+#       "sigma_rel"    residual standard deviation, relative
+#       "r2_rel"       R^2, relative
+#       "sd_rel_max"   worst parameter standard deviation over j, relative
+# None means the quantity is certified exactly zero/one on that dataset and is
+# already compared on an absolute scale elsewhere.
+EMPIRICAL_CEILING_MARGIN = 100.0
+EMPIRICAL_CEILING_MEASURED_ON = "2026-09-11"
+EMPIRICAL_REGRESSION_CEILINGS = {
+    # measured: beta=5.661e-13 sigma=2.834e-13 r2=3.011e-15 sd=3.704e-13
+    "Longley": {"beta_rel_eq": 6e-11, "sigma_rel": 3e-11, "r2_rel": 4e-13, "sd_rel_max": 4e-11},
+    # measured: beta=1.097e-14; exact fit, so sigma/R^2/sds are certified zero/one
+    "Wampler1": {"beta_rel_eq": 2e-12, "sigma_rel": None, "r2_rel": None, "sd_rel_max": None},
+    # measured: beta=2.151e-14; exact fit, so sigma/R^2/sds are certified zero/one
+    "Wampler2": {"beta_rel_eq": 3e-12, "sigma_rel": None, "r2_rel": None, "sd_rel_max": None},
+    # measured: beta=1.016e-13 sigma=1.214e-14 r2=1.110e-16 sd=5.849e-14
+    "Wampler3": {"beta_rel_eq": 2e-11, "sigma_rel": 2e-12, "r2_rel": 2e-14, "sd_rel_max": 6e-12},
+    # measured: beta=4.339e-12 sigma=1.356e-15 r2=1.160e-16 sd=4.790e-14
+    "Wampler4": {"beta_rel_eq": 5e-10, "sigma_rel": 2e-13, "r2_rel": 2e-14, "sd_rel_max": 5e-12},
+    # measured: beta=4.341e-10 sigma=1.578e-15 r2=6.814e-14 sd=4.807e-14
+    "Wampler5": {"beta_rel_eq": 5e-08, "sigma_rel": 2e-13, "r2_rel": 7e-12, "sd_rel_max": 5e-12},
+    # measured: beta=6.239e-10 sigma=1.183e-08 r2=7.765e-11 sd=3.412e-09
+    "Filip": {"beta_rel_eq": 7e-08, "sigma_rel": 2e-06, "r2_rel": 8e-09, "sd_rel_max": 4e-07},
+}
+
+# Directory holding the eleven raw NIST .dat files as fetched (CRLF preserved).
+# Vendored so that the sha256 values above are checkable against bytes rather than
+# against another string in this repository. Resolved by the test from this module's
+# own path; `datasets.py` deliberately imports nothing, including pathlib.
+VENDORED_DATA_DIRNAME = "data"
