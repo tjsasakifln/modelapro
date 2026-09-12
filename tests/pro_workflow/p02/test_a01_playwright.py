@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -178,11 +179,12 @@ def _drive_two_files(sync_playwright, ui_port: int, csv_path: Path, xlsx_path: P
             state="visible", timeout=45000
         )
         page.screenshot(path=str(shots / "desktop-empty.png"))
-        _upload_and_run(page, csv_path, "csv")
+        csv_job_id = _upload_and_run(page, csv_path, "csv")
         page.set_viewport_size({"width": 390, "height": 720})
         page.screenshot(path=str(shots / "narrow-result.png"))
         page.set_viewport_size({"width": 1366, "height": 768})
-        _upload_and_run(page, xlsx_path, "xlsx")
+        xlsx_job_id = _upload_and_run(page, xlsx_path, "xlsx")
+        assert xlsx_job_id != csv_job_id, "CSV and XLSX must execute as distinct jobs"
         context.tracing.stop(path=str(shots / "trace.zip"))
         browser.close()
 
@@ -202,7 +204,7 @@ def _market_file_input(page):
     return page.locator("input[type='file']").first
 
 
-def _upload_and_run(page, path: Path, tag: str) -> None:
+def _upload_and_run(page, path: Path, tag: str) -> str:
     from playwright.sync_api import expect
 
     expect(page.get_by_role("heading", name="1. Encomenda e perfil", exact=True)).to_be_visible(
@@ -214,9 +216,6 @@ def _upload_and_run(page, path: Path, tag: str) -> None:
     expect(
         page.locator("[data-testid='stFileUploader']").filter(has_text=path.name)
     ).to_be_visible(timeout=45000)
-    # The prior result must be invalidated before the second file can count as
-    # an exercised XLSX path.
-    expect(result_region).to_have_count(0, timeout=90000)
     expect(
         page.get_by_role("heading", name="Interpretação recebida", exact=True)
     ).to_be_visible(timeout=90000)
@@ -231,11 +230,22 @@ def _upload_and_run(page, path: Path, tag: str) -> None:
     expect(execute).to_be_enabled(timeout=45000)
     execute.click()
 
+    accepted = page.get_by_text(re.compile(r"^Trabalho aceito: job_[a-f0-9]+\."))
+    expect(accepted.first).to_be_visible(timeout=90000)
+    accepted_text = accepted.first.inner_text()
+    accepted_match = re.search(r"(job_[a-f0-9]+)", accepted_text)
+    assert accepted_match is not None, accepted_text
+    job_id = accepted_match.group(1)
+    current_job = page.get_by_text(
+        f"Identificador do trabalho: {job_id}", exact=True
+    )
+
     # GET refresh is intentionally explicit in this WebSocket-disabled path.
     # Locator waits span Streamlit's DOM replacement instead of sampling a
     # transient count or sleeping after a stale element was found.
     for _ in range(12):
         try:
+            expect(current_job).to_be_visible(timeout=10000)
             expect(result_region).to_be_visible(timeout=10000)
             break
         except AssertionError:
@@ -243,8 +253,10 @@ def _upload_and_run(page, path: Path, tag: str) -> None:
             expect(refresh).to_be_visible(timeout=20000)
             expect(refresh).to_be_enabled(timeout=20000)
             refresh.click()
+    expect(current_job).to_be_visible(timeout=10000)
     expect(result_region).to_be_visible(timeout=10000)
     body = page.inner_text("body")
     page.screenshot(path=str(_evidence_dir() / f"result-{tag}.png"))
     assert "Valor da avaliação" in body or "Cálculo disponível" in body, body[:2000]
     assert "735.000" in body or "735000" in body or "735.000,00" in body, body[:1500]
+    return job_id
