@@ -178,7 +178,9 @@ def _drive_twice(sync_playwright, ui_port: int, csv_path: Path, *, api_port: int
             except Exception:
                 page.reload(wait_until="domcontentloaded")
                 page.wait_for_selector("text=MODELA PRO", timeout=60000)
-            page.wait_for_selector("text=Encomenda", timeout=30000)
+            page.get_by_role(
+                "heading", name="1. Encomenda e perfil", exact=True
+            ).wait_for(state="visible", timeout=30000)
             page.wait_for_selector("text=não homologado", timeout=30000)
             body = page.inner_text("body")
             assert "Encomenda" in body or "encomenda" in body.lower(), body[:1500]
