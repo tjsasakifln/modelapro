@@ -9,7 +9,8 @@ existe ou produtores não foram commitados estão superadas. As cinco ancestrali
 estão em [composition-20260912.md](composition-20260912.md).
 
 A01: agregação estrita implementada, candidata final ainda precisa passar.
-A02/A03: prova numérica/qualificação reais conectadas e testadas, custo em fechamento.
+A02/A03: prova numérica/qualificação reais conectadas; custo e mercado chegam a
+documentos e assinatura TESTE, e ambos percursos de navegador passaram localmente.
 A04/A05: atos/dados reais não fornecidos; pesquisa atual por perfil em
 [profile-process-verification-20260912.md](profile-process-verification-20260912.md).
 A06/A07: composição em validação e Windows ainda não verificado.
