@@ -49,7 +49,7 @@ do Grau I** quando aplicável e **Observações do laudo**. Esses textos são
 declarações profissionais; o cálculo não os produz automaticamente.
 
 Quando o perfil exigir geolocalização, informe endereço, fonte e coordenadas do
-avaliando e de cada elemento da amostra em graus decimais. Confira latitude entre
+avaliando e de cada elemento da amostra em graus decimais (WGS84). Confira latitude entre
 −90 e 90 e longitude entre −180 e 180. Preserve o vínculo de cada informação com
 o elemento correto. Zero é uma coordenada válida; os campos nativos aceitam
 vírgula decimal. Ao iniciar uma localização, preencha endereço completo, fonte,

@@ -14,6 +14,9 @@ def test_collection_cross_checks_obligations_and_execution(tmp_path, monkeypatch
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
     files = [
         "tests/comercial/test_c06_numeric_disclosure.py",
+        "tests/comercial/test_c06_arbitration_policy.py",
+        "tests/comercial/test_c06_output_conformance.py",
+        "tests/comercial/test_c06_professional_report_ui.py",
         "tests/comercial/test_c06_commercial_surfaces.py",
         "tests/comercial/test_c06_qualification_integration.py",
         "tests/comercial/test_c06_document_flow.py",

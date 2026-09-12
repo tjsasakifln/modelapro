@@ -238,6 +238,9 @@ def check_collection(root: Path, expected_sha: str | None) -> list[str]:
             problems.append(f"wide collection: obligation did not pass: {node}")
     required_files = {
         "tests/comercial/test_c06_numeric_disclosure.py",
+        "tests/comercial/test_c06_arbitration_policy.py",
+        "tests/comercial/test_c06_output_conformance.py",
+        "tests/comercial/test_c06_professional_report_ui.py",
         "tests/comercial/test_c06_commercial_surfaces.py",
         "tests/comercial/test_c06_qualification_integration.py",
         "tests/comercial/test_c06_document_flow.py",
