@@ -219,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if summary["violacoes_a04"] or not summary["counts"]["disjoint"]:
         return 2
-    if summary["reprovados"]:
+    if summary["reprovados"] or summary["nao_executados"] or proc.returncode != 0 or not cases:
         return 1
     return 0
 

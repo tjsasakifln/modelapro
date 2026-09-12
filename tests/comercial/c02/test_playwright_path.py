@@ -88,7 +88,7 @@ def test_playwright_real_path_or_honest_unavailable(tmp_path):
             "reason": f"playwright import failed: {exc}",
             "note": "A08 browser not fabricated.",
         })
-        return
+        raise AssertionError("NOT_RUN: Playwright import failed") from exc
 
     api_port = ui_port = None
     for candidate in range(18400, 18480, 2):
@@ -97,7 +97,7 @@ def test_playwright_real_path_or_honest_unavailable(tmp_path):
             break
     if api_port is None:
         _record("c02-playwright-unavailable.log", {"status": "UNAVAILABLE", "reason": "no free ports"})
-        return
+        raise AssertionError("NOT_RUN: no free local ports")
 
     csv_path = tmp_path / "SYNTHETIC_mercado_ptbr.csv"
     csv_path.write_bytes(_ptbr_csv())
@@ -106,13 +106,15 @@ def test_playwright_real_path_or_honest_unavailable(tmp_path):
     env["MODELA_API_URL"] = f"http://127.0.0.1:{api_port}"
     env["MODELA_API_TIMEOUT"] = "120"
     env["MODELA_DISABLE_WS"] = "1"
+    env["MODELA_STORE_ROOT"] = str(tmp_path / "store")
+    env["MODELA_RUNTIME_ROOT"] = str(tmp_path / "runtime")
     env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
 
     api_proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "backend.api:app", "--host", "127.0.0.1", "--port", str(api_port)],
         cwd=str(ROOT),
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=(tmp_path / "api.log").open("w", encoding="utf-8"),
         stderr=subprocess.STDOUT,
     )
     ui_proc = subprocess.Popen(
@@ -124,16 +126,16 @@ def test_playwright_real_path_or_honest_unavailable(tmp_path):
         ],
         cwd=str(ROOT),
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=(tmp_path / "ui.log").open("w", encoding="utf-8"),
         stderr=subprocess.STDOUT,
     )
     try:
         if not _wait_http(f"http://127.0.0.1:{api_port}/health"):
             _record("c02-playwright-unavailable.log", {"status": "UNAVAILABLE", "reason": "API health did not become ready"})
-            return
+            raise AssertionError("NOT_RUN: API health unavailable")
         if not _wait_http(f"http://127.0.0.1:{ui_port}"):
             _record("c02-playwright-unavailable.log", {"status": "UNAVAILABLE", "reason": "Streamlit UI did not become ready"})
-            return
+            raise AssertionError("NOT_RUN: Streamlit unavailable")
         _drive_twice(sync_playwright, ui_port, csv_path, api_port=api_port)
     except Exception as exc:
         _record("c02-playwright-unavailable.log", {

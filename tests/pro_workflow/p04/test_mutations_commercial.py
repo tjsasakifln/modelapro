@@ -605,7 +605,8 @@ def _clean_run_payload(**over: Any) -> Dict[str, Any]:
         "skip_xfail_count": 0,
         "findings": [],
         "runs": [
-            {"name": "core", "returncode": 0, "passed": 120, "failed": 0},
+            {"name": "core-1", "returncode": 0, "passed": 120, "failed": 0},
+            {"name": "core-2", "returncode": 0, "passed": 120, "failed": 0},
             {"name": "extensions", "returncode": 0, "passed": 12, "failed": 0},
         ],
     }

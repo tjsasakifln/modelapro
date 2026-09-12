@@ -48,6 +48,11 @@ def main() -> int:
     else:
         data = json.loads(target.read_text())
         data["tracked_source_dirty_after"] = bool(git("diff", "HEAD", "--name-only"))
+        output_relative = args.output.resolve().relative_to(Path.cwd().resolve()).as_posix()
+        untracked = git("ls-files", "--others", "--exclude-standard").splitlines()
+        data["unexpected_untracked_source"] = [
+            name for name in untracked if not name.startswith(output_relative + "/")
+        ]
         data["files"] = {
             str(p.relative_to(args.output)).replace("\\", "/"): digest(p)
             for p in sorted(args.output.rglob("*")) if p.is_file() and p != target

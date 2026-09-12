@@ -85,7 +85,7 @@ def test_a01_playwright_real_path_or_record_unavailability(tmp_path):
         log_path = _record_block(f"playwright import failed: {exc}")
         assert log_path.is_file()
         assert "playwright" in log_path.read_text(encoding="utf-8").lower()
-        return
+        raise AssertionError("NOT_RUN: browser obligation unavailable; see recorded evidence")
 
     api_port = ui_port = None
     for candidate in range(18200, 18280, 2):
@@ -95,7 +95,7 @@ def test_a01_playwright_real_path_or_record_unavailability(tmp_path):
     if api_port is None:
         log_path = _record_block("no free loopback ports in 18200-18280")
         assert log_path.is_file()
-        return
+        raise AssertionError("NOT_RUN: browser obligation unavailable; see recorded evidence")
 
     csv_path = tmp_path / "mercado_ptbr.csv"
     csv_path.write_bytes(_ptbr_csv())
@@ -105,19 +105,21 @@ def test_a01_playwright_real_path_or_record_unavailability(tmp_path):
     except Exception as exc:
         log_path = _record_block(f"excel writer failed: {exc}")
         assert log_path.is_file()
-        return
+        raise AssertionError("NOT_RUN: browser obligation unavailable; see recorded evidence")
 
     env = os.environ.copy()
     env["MODELA_API_URL"] = f"http://127.0.0.1:{api_port}"
     env["MODELA_API_TIMEOUT"] = "120"
     env["MODELA_DISABLE_WS"] = "1"
+    env["MODELA_STORE_ROOT"] = str(tmp_path / "store")
+    env["MODELA_RUNTIME_ROOT"] = str(tmp_path / "runtime")
     env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
 
     api_proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "backend.api:app", "--host", "127.0.0.1", "--port", str(api_port)],
         cwd=str(ROOT),
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=(tmp_path / "api.log").open("w", encoding="utf-8"),
         stderr=subprocess.STDOUT,
     )
     ui_proc = subprocess.Popen(
@@ -129,16 +131,16 @@ def test_a01_playwright_real_path_or_record_unavailability(tmp_path):
         ],
         cwd=str(ROOT),
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=(tmp_path / "ui.log").open("w", encoding="utf-8"),
         stderr=subprocess.STDOUT,
     )
     try:
         if not _wait_http(f"http://127.0.0.1:{api_port}/health"):
             _record_block("API health did not become ready")
-            return
+            raise AssertionError("NOT_RUN: browser obligation unavailable; see recorded evidence")
         if not _wait_http(f"http://127.0.0.1:{ui_port}"):
             _record_block("Streamlit UI did not become ready")
-            return
+            raise AssertionError("NOT_RUN: browser obligation unavailable; see recorded evidence")
         try:
             _drive_two_files(sync_playwright, ui_port, csv_path, xlsx_path)
         except Exception as exc:

@@ -224,6 +224,8 @@ def check_c16(path: Path, expected_sha: str | None = None) -> list[str]:
         return problems
     if counts.get("reprovados"):
         problems.append(f"c16.json: {counts.get('reprovados')} reprovados")
+    if counts.get("nao_executados"):
+        problems.append(f"c16.json: {counts.get('nao_executados')} required cases not executed")
     if counts.get("violacoes_a04_skip_xfail"):
         problems.append(f"c16.json: {counts.get('violacoes_a04_skip_xfail')} skip/xfail classification violations")
     if not counts.get("aprovados"):
@@ -255,6 +257,7 @@ def verify_artifacts(
         "build-sdist-wheel": "dist", "c15-tests-linux": "c15-linux-evidence",
         "c15-tests-windows": "c15-windows-evidence",
     }
+
     def folder(job):
         return root / namespaces[job] if require_identity else root
     if require_identity:
@@ -277,6 +280,37 @@ def verify_artifacts(
         for job, filename in [("c15-tests-linux", "c15-linux.junit.xml"),
                               ("c15-tests-windows", "c15-windows.junit.xml")]:
             problems.extend(check_junit(folder(job) / filename, label=filename, separate_install_job=True))
+        problems.extend(check_junit(folder("c16-harness") / "c16.junit.xml", label="c16.junit.xml"))
+        for name in ("p04-core-1.junit.xml", "p04-core-2.junit.xml", "p04-extensions.junit.xml"):
+            problems.extend(check_junit(folder("p04-harness") / name, label=name))
+        p04 = _load_json(folder("p04-harness") / "run.json", problems, "p04 cross-check")
+        for record in (p04 or {}).get("runs", []):
+            name = record.get("name")
+            filename = {"core-1": "p04-core-1.junit.xml", "core-2": "p04-core-2.junit.xml",
+                        "extensions": "p04-extensions.junit.xml"}.get(name)
+            path = folder("p04-harness") / (filename or "missing")
+            if not path.is_file():
+                continue
+            try:
+                cases = list(ET.parse(path).iter("testcase"))
+                passed = sum(c.find("failure") is None and c.find("error") is None
+                             and c.find("skipped") is None for c in cases)
+                if record.get("passed") != passed:
+                    problems.append(f"p04 {name}: summary disagrees with JUnit collection")
+            except ET.ParseError:
+                pass  # Already rejected by check_junit.
+        c16 = _load_json(folder("c16-harness") / "c16.json", problems, "c16 exit status")
+        if (c16 or {}).get("pytest_exit_code") != 0:
+            problems.append("c16: pytest exit code lost or nonzero")
+        installed = _load_json(folder("install-eval-linux") / "installed-eval.json", problems, "installed evaluation")
+        dist = _load_json(folder("build-sdist-wheel") / "identity.json", problems, "distribution identity")
+        if installed is not None:
+            if (installed.get("status") != "PASS" or installed.get("tested_commit_sha") != expected_sha
+                    or installed.get("run_id") != os.environ.get("GITHUB_RUN_ID")):
+                problems.append("installed evaluation status or candidate/run identity differs")
+            wheel_hashes = {v for k, v in (dist or {}).get("package_hashes", {}).items() if k.endswith(".whl")}
+            if len(wheel_hashes) != 1 or installed.get("wheel_sha256") not in wheel_hashes:
+                problems.append("installed evaluation used another wheel")
     return problems
 
 
@@ -297,6 +331,8 @@ def check_identity(root: Path, job: str, expected_sha: str | None) -> list[str]:
             problems.append(f"{job}: identity mismatch {field}")
     if data.get("source_dirty") is not False or data.get("tracked_source_dirty_after") is not False:
         problems.append(f"{job}: dirty or unrecorded source checkout")
+    if data.get("unexpected_untracked_source"):
+        problems.append(f"{job}: unexpected untracked source files")
     if len(str(data.get("tree_sha", ""))) != 40:
         problems.append(f"{job}: missing tree SHA")
     event_path = os.environ.get("GITHUB_EVENT_PATH")

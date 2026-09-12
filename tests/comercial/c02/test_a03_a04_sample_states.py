@@ -145,7 +145,7 @@ def test_grade_statuses_stay_distinct_and_valid_not_released_stays_accessible():
 
 
 def test_unsupported_does_not_present_approved_value_or_global_green():
-    insurer = select_qualification_profile("urban-comparative-insurer-reconstruction")
+    insurer = select_qualification_profile("abnt-14653-2-custo-reedicao")
     view = present_aptidao(
         calculation_status="unsupported",
         profile=insurer,
@@ -159,7 +159,7 @@ def test_unsupported_does_not_present_approved_value_or_global_green():
 
 
 def test_legitimate_path_can_prepare_laudo_without_homologation_seal():
-    professional = select_qualification_profile("urban-comparative-market-professional")
+    professional = select_qualification_profile("abnt-14653-2-regressao-mercado")
     view = present_aptidao(
         grade_requirement_status="met",
         calculation_status="valid",

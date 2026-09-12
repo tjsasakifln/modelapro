@@ -27,9 +27,9 @@ def _spec(**kwargs):
         purpose="avaliacao_profissional",
         rights="plena_propriedade",
         recipient_id="solicitante",
-        value_basis="market_value",
-        asset_scope="urban_real_estate",
-        qualification_profile=select_qualification_profile("urban-comparative-market-professional"),
+        value_basis="valor_de_mercado",
+        asset_scope="imovel_urbano",
+        qualification_profile=select_qualification_profile("abnt-14653-2-regressao-mercado"),
         minimum_fundamentacao_grade=2,
     )
     base.update(kwargs)
@@ -42,14 +42,15 @@ def test_build_request_spec_emits_additive_qualification_profile_and_encomenda()
     assert spec["purpose"] == "avaliacao_profissional"
     assert spec["rights"] == "plena_propriedade"
     assert spec["recipient_id"] == "solicitante"
-    assert spec["value_basis"] == "market_value"
-    assert spec["asset_scope"] == "urban_real_estate"
+    assert spec["value_basis"] == "valor_de_mercado"
+    assert spec["asset_scope"] == "imovel_urbano"
     assert spec["applicant"] == "Solicitante sintético"
     assert spec["reference_date"] == "2024-01-15"
     assert spec["target_unit"] == "BRL"
     profile = spec["qualification_profile"]
-    assert profile["id"] == "urban-comparative-market-professional"
-    assert profile["version"] == "1"
+    assert profile["id"] == "abnt-14653-2-regressao-mercado"
+    assert profile["version"] == "1.0.0"
+    assert len(profile["source_set_sha256"]) == 64
     assert set(profile) == {
         "id",
         "version",
@@ -77,18 +78,21 @@ def test_unknown_profile_is_not_homologated_and_blocks_signoff():
 
 
 def test_bank_and_insurer_profiles_never_badge_acceptance_from_compatibility():
-    bank = select_qualification_profile("urban-comparative-bank-guarantee")
-    insurer = select_qualification_profile("urban-comparative-insurer-reconstruction")
+    bank = select_qualification_profile("bb-meci-avaliacao-imovel-pf")
+    insurer = select_qualification_profile("abnt-14653-2-custo-reedicao")
     assert bank["known"] is True
-    assert bank["compatibility_status"] == "unverified"
+    assert bank["compatibility_status"] == "verified"
     assert bank["homologation_status"] == "not_homologated"
     assert bank["homologation_badge"] is None
     assert bank["sold_as_homologated"] is False
-    assert bank["blocks_ready_for_professional_signoff"] is True
-    assert insurer["method"] == "cost_reconstruction"
-    assert insurer["method_supports_purpose"] is False
+    # The selected, verified profile does not demand an institutional act to
+    # calculate. C05 still assesses every actual case before document emission.
+    assert bank["blocks_ready_for_professional_signoff"] is False
+    assert insurer["method"] == "metodo_quantificacao_de_custo"
+    assert insurer["method_supports_purpose"] is True
+    assert insurer["blocks_ready_for_professional_signoff"] is True
     assert insurer["homologation_badge"] is None
-    assert "coeficiente" in (insurer.get("method_support") or {}).get("note", "").lower() or "custo" in insurer["notes"].lower()
+    assert insurer["required_value_basis"] == "custo_de_reedicao"
     fake_http_200 = {"status": "ok", "http": 200}
     assert homologation_badge_for(bank, institution_acceptance=fake_http_200) is None
 
@@ -96,25 +100,25 @@ def test_bank_and_insurer_profiles_never_badge_acceptance_from_compatibility():
 def test_encomenda_shows_method_support_immediately():
     professional = build_encomenda(
         purpose="avaliacao_profissional",
-        asset_scope="urban_real_estate",
+        asset_scope="imovel_urbano",
         rights="plena_propriedade",
         reference_date="2024-01-15",
         target_unit="BRL",
         applicant="Solicitante sintético",
         recipient_id="solicitante",
-        value_basis="market_value",
-        profile=select_qualification_profile("urban-comparative-market-professional"),
+        value_basis="valor_de_mercado",
+        profile=select_qualification_profile("abnt-14653-2-regressao-mercado"),
     )
     assert professional["method_supports_purpose"] is True
     seguro = build_encomenda(
         purpose="seguro",
-        value_basis="reconstruction_cost",
+        value_basis="custo_de_reedicao",
         recipient_id="seguradora",
-        profile=select_qualification_profile("urban-comparative-insurer-reconstruction"),
+        profile=select_qualification_profile("abnt-14653-2-custo-reedicao"),
     )
-    assert seguro["method_supports_purpose"] is False
+    assert seguro["method_supports_purpose"] is True
     assert seguro["homologation_badge"] is None
-    assert "mercado" in seguro["method_support_note"].lower() or "custo" in seguro["method_support_note"].lower()
+    assert seguro["value_basis"] == "custo_de_reedicao"
 
 
 def test_inspection_empty_is_not_attested_and_third_party_stays_received():
@@ -171,9 +175,9 @@ def test_art_format_is_not_conselho_authentication_and_defaults_are_empty():
 
 
 def test_wire_profile_does_not_embed_rules_or_homologation_seal():
-    resolved = select_qualification_profile("urban-comparative-bank-guarantee")
+    resolved = select_qualification_profile("bb-meci-avaliacao-imovel-pf")
     wire = qualification_profile_wire(resolved)
     assert "homologation_status" not in wire
     assert "checklist_ids" not in wire
-    assert wire["recipient_id"] == "banco"
-    assert "urban-comparative-bank-guarantee" in known_profile_ids()
+    assert wire["recipient_id"] == "banco-do-brasil"
+    assert "bb-meci-avaliacao-imovel-pf" in known_profile_ids()

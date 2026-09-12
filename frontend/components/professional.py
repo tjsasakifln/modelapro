@@ -123,6 +123,33 @@ KNOWN_RECIPIENTS = (
     ("seguradora", "Seguradora"),
 )
 
+CHECKLIST_LABELS = {
+    "purpose_method_fit": "Método suportado para a finalidade da encomenda",
+    "value_basis": "Base de valor identificada e coerente com o perfil",
+    "sample_review": "Amostra, exclusões e mapa de colunas revisados",
+    "inspection_record": "Vistoria registrada com procedência",
+    "professional_identity": "Identidade profissional informada (não é autenticação do conselho)",
+    "art_rrt": "ART/RRT ou referência documental exigida pelo perfil",
+    "distinct_reviewer": "Revisor distinto do responsável pela emissão",
+    "grade_requirement": "Pedido de grau e status (pending ≠ met)",
+    "limitations_visible": "Limitações e avisos visíveis, sem selo global",
+    "calculated_vs_adopted": "Valor calculado versus adotado (só se C05 admitir)",
+    "recipient_package": "Pacote/instruções do destinatário e comprovante de retorno",
+    "cost_route_c01": "Rota de custo de reconstrução/reposição (C01), não coeficiente de mercado",
+}
+
+BACKUP_NOTICE = (
+    "Rotina de produto vendido: faça cópia de segurança dos projetos e "
+    "revisões. Esta interface não envia dados a nuvem por padrão e não "
+    "substitui o arquivo do profissional."
+)
+
+SYNTHETIC_DEMO_NOTICE = (
+    "Demonstração com dados sintéticos explicitamente marcados — não é "
+    "caso real nem aceite institucional."
+)
+
+
 # Presentation is derived from the installed C05 catalog; no parallel rule catalog.
 def known_profiles() -> list:
     from modules.qualification_profile import known_profile_ids as catalog_ids, resolve_profile

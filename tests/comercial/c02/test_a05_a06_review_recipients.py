@@ -114,7 +114,7 @@ def test_adopted_value_refused_until_c05_admits():
 def test_local_http_200_is_not_institution_acceptance():
     event = record_institution_submission(
         recipient_id="banco",
-        package_name="urban-comparative-bank-guarantee@1",
+        package_name="bb-meci-avaliacao-imovel-pf@1",
         instructions_version="1",
         http_status=200,
         imported_proof=False,
@@ -135,11 +135,11 @@ def test_local_http_200_is_not_institution_acceptance():
 
 
 def test_seguro_mismatch_is_not_hidden():
-    insurer = select_qualification_profile("urban-comparative-insurer-reconstruction")
+    insurer = select_qualification_profile("abnt-14653-2-custo-reedicao")
     view = present_seguro_value_basis(insurer)
     assert view["mismatch_hidden"] is False
     assert view["market_converted_to_cost"] is False
-    assert view["required_value_basis"] == "reconstruction_cost"
+    assert view["required_value_basis"] == "custo_de_reedicao"
     assert "mercado" in view["note"].lower() or "custo" in view["note"].lower()
 
 
@@ -268,7 +268,7 @@ def test_job_client_uses_real_routes_and_does_not_treat_200_as_acceptance():
     try:
         base = f"http://127.0.0.1:{server.server_address[1]}"
         client = JobClient(base_url=base, timeout=5)
-        profile = select_qualification_profile("urban-comparative-market-professional")
+        profile = select_qualification_profile("abnt-14653-2-regressao-mercado")
         spec = build_request_spec(
             target_col="preco",
             candidate_cols=["area"],
@@ -276,8 +276,8 @@ def test_job_client_uses_real_routes_and_does_not_treat_200_as_acceptance():
             purpose="avaliacao_profissional",
             rights="plena_propriedade",
             recipient_id="solicitante",
-            value_basis="market_value",
-            asset_scope="urban_real_estate",
+            value_basis="valor_de_mercado",
+            asset_scope="imovel_urbano",
             qualification_profile=profile,
             reference_date="2024-01-15",
             target_unit="BRL",
@@ -289,7 +289,7 @@ def test_job_client_uses_real_routes_and_does_not_treat_200_as_acceptance():
         assert posted["job_id"] == "job-c02"
         body = server.jobs[-1]
         assert b"qualification_profile" in body
-        assert b"urban-comparative-market-professional" in body
+        assert b"abnt-14653-2-regressao-mercado" in body
         status = client.recover("job-c02")
         assert status["state"] == "succeeded"
         assert client.last_snapshot["value"]["point"] == SNAPSHOT_CLASSIFIED["value"]["point"]

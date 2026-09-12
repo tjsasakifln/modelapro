@@ -156,6 +156,7 @@ jobs:
       - name: Clean-venv wheel install smoke (boots /health off the installed dist)
         env:
           C15_INSTALL_SMOKE: "1"
+          C15_WHEEL_DIR: ${{ github.workspace }}/dist
         run: |
           # The runner interpreter needs the dev extras, not because the smoke
           # test wants the product importable -- it builds its own wheel and its
@@ -165,18 +166,9 @@ jobs:
           # The clean-venv guarantee lives in the smoke test's own venv, which
           # this install does not touch.
           python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+          export C15_WHEEL_PATH="$(find dist -maxdepth 1 -name 'modelapro-*.whl' -print -quit)"
           python -m pytest tests/c15_packaging/test_wheel_install_smoke.py -q --tb=short \
             --junitxml=artifacts/install-smoke.junit.xml
-      - name: Seal evidence including failures
-        if: ${{ !cancelled() }}
-        run: python scripts/c15_local/evidence_identity.py seal --output artifacts
-      - name: Upload install-smoke evidence
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: install-smoke
-          path: artifacts/
-          if-no-files-found: error
       - name: Evaluate from installed package until document
         working-directory: ${{ runner.temp }}
         env:
@@ -184,7 +176,7 @@ jobs:
           MODELA_SKIP_DOTENV: "1"
         run: |
           "$HOME/c15-smoke-venv/bin/python" - <<'PY'
-          import os
+          import os, json, hashlib
           from pathlib import Path
           assert not os.environ.get("PYTHONPATH")
           import backend, modules
@@ -247,8 +239,29 @@ jobs:
               assert "interval" in limits.lower() or "t_crit" in limits.lower(), repro
           assert abs(float(repro["point"]) - expected) < 1.0, repro
           assert (repro.get("comparison") or {}).get("point_within_tolerance") is True
+          wheel_files = list((Path(os.environ["GITHUB_WORKSPACE"]) / "dist").glob("*.whl"))
+          assert len(wheel_files) == 1
+          assert "site-packages" in str(backend.__file__)
+          installed_evidence = {
+              "status": "PASS", "point": point, "reproduced_point": repro["point"],
+              "tested_commit_sha": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
+              "wheel_sha256": hashlib.sha256(wheel_files[0].read_bytes()).hexdigest(),
+              "pdf_sha256": hashlib.sha256(pdf).hexdigest(), "backend": backend.__file__,
+          }
+          (Path(os.environ["GITHUB_WORKSPACE"]) / "artifacts" / "installed-eval.json").write_text(json.dumps(installed_evidence))
           print("wheel_eval_ok", point, repro["point"], backend.__file__, modules.__file__, evidence)
           PY
+
+      - name: Seal evidence including failures
+        if: ${{ !cancelled() }}
+        run: python scripts/c15_local/evidence_identity.py seal --output artifacts
+      - name: Upload install-smoke evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-smoke
+          path: artifacts/
+          if-no-files-found: error
 
   c15-tests-windows:
     name: C15 tests (Windows)

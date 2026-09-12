@@ -1,7 +1,6 @@
 """The tested merge is valid; stale runs, altered bytes and wrong parents are not."""
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 
 import pytest
@@ -38,8 +37,10 @@ def test_merge_sha_differs_from_pr_head_and_is_valid(tmp_path, monkeypatch):
     assert check_identity(root, "p04-harness", tested) == []
 
 
-@pytest.mark.parametrize("mutation", ["run", "attempt", "parents", "head", "base", "tree", "sha",
-                                     "dirty", "dirty_after", "bytes", "extra", "missing", "empty"])
+@pytest.mark.parametrize("mutation", [
+    "run", "attempt", "parents", "head", "base", "tree", "sha",
+    "dirty", "dirty_after", "bytes", "extra", "missing", "empty",
+])
 def test_identity_and_artifact_mutations_fail(tmp_path, monkeypatch, mutation):
     root, data, tested = evidence(tmp_path, monkeypatch)
     field = {"run": "run_id", "attempt": "run_attempt", "head": "pr_head_sha", "base": "base_sha",

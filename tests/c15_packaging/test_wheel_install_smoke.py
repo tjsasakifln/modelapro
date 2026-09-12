@@ -38,16 +38,18 @@ def _free_port() -> int:
 def test_clean_venv_install_imports_resources_and_health(tmp_path: Path):
     dist = tmp_path / "dist"
     dist.mkdir()
+    supplied = os.environ.get("C15_WHEEL_PATH")
     build = subprocess.run(
         [sys.executable, "-m", "pip", "wheel", ".", "--no-deps", "-w", str(dist)],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
         check=False,
-    )
-    assert build.returncode == 0, build.stderr[-4000:]
-    wheels = list(dist.glob("modelapro-*.whl"))
-    assert wheels
+    ) if not supplied else None
+    if build is not None:
+        assert build.returncode == 0, build.stderr[-4000:]
+    wheels = [Path(supplied).resolve()] if supplied else list(dist.glob("modelapro-*.whl"))
+    assert len(wheels) == 1 and wheels[0].is_file()
 
     venv_dir = tmp_path / "venv"
     venv.create(venv_dir, with_pip=True)
