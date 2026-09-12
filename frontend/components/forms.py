@@ -874,7 +874,7 @@ class JobClient:
 
     def submit_job(
         self,
-        file_bytes: bytes,
+        file_bytes: Optional[bytes],
         filename: str,
         request_spec: Mapping[str, Any],
         subject: Optional[Mapping[str, Any]] = None,
@@ -904,7 +904,11 @@ class JobClient:
                 "Já existe uma execução em andamento para este trabalho. "
                 "Aguarde, cancele ou recupere o resultado antes de disparar outra."
             )
-        files = {"file": (filename, file_bytes, content_type)}
+        files = (
+            {"file": (filename, file_bytes, content_type)}
+            if file_bytes is not None
+            else None
+        )
         data = {"request_json": request_spec_json(request_spec)}
         if project_id:
             data["project_id"] = project_id

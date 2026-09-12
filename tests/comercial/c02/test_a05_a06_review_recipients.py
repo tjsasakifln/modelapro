@@ -319,3 +319,30 @@ def test_job_client_uses_real_routes_and_does_not_treat_200_as_acceptance():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_job_client_posts_cost_request_without_fabricating_an_upload():
+    server = _start()
+    try:
+        client = JobClient(
+            base_url=f"http://127.0.0.1:{server.server_address[1]}", timeout=5
+        )
+        spec = build_request_spec(
+            target_col="custo_total",
+            candidate_cols=[],
+            roles={"custo_total": "target"},
+        )
+        spec["cost_bom"] = {
+            "reference_location": "SYNTHETIC_TEST",
+            "reference_date": "2026-09-01",
+            "currency": "BRL",
+        }
+
+        posted = client.submit_job(None, "", spec)
+
+        assert posted["job_id"] == "job-c02"
+        assert b"cost_bom" in server.jobs[-1]
+        assert b'filename=""' not in server.jobs[-1]
+    finally:
+        server.shutdown()
+        server.server_close()
