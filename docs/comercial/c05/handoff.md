@@ -159,10 +159,16 @@ Para reexecutar o aceite desta frente:
 ```bash
 cd <worktree>
 PYTHONPATH= python3 -m pytest tests/comercial/c05 tests/c03_normative tests/test_nbr14653.py -q
+# Coerência interna limiar<->proveniência (sempre executável):
+PYTHONPATH= python3 scripts/comercial/referencia/verify_sources.py
+
+# Integridade SHA-256 das fontes (só onde os exemplares licenciados existem):
 PYTHONPATH= python3 scripts/comercial/referencia/verify_sources.py \
-  --normas-dir docs/normas --require-sources
+  --normas-dir /caminho/para/docs/normas --require-sources
 ```
 
-A segunda linha só verifica integridade das fontes onde os exemplares licenciados estejam
-presentes localmente; em CI público ela roda apenas a coerência interna, porque as normas
-**não** são versionadas.
+`docs/normas/` é git-ignored e **não** existe em worktree novo: os exemplares vivem apenas
+na cópia de trabalho de quem detém a licença. Por isso o caminho é explícito. Com
+`--require-sources` e nenhum exemplar encontrado o script **falha** (exit 1) em vez de
+passar silenciosamente — a verificação de integridade não pode parecer feita quando não
+foi. Em CI público roda-se apenas a primeira linha.

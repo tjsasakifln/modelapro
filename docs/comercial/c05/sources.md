@@ -10,8 +10,15 @@ Cada limiar que o produto aplica tem de vir do **texto da edição**, não de RE
 fonte secundária, não de memória de modelo. A conferência é reexecutável:
 
 ```bash
+# --normas-dir aponta para o diretório que contém os exemplares licenciados.
+# Em worktree novo esse diretório NÃO existe (docs/normas/ é git-ignored e vive
+# só na cópia de trabalho de quem tem a licença), e --require-sources então
+# falha com exit 1 em vez de passar silenciosamente.
 PYTHONPATH= python3 scripts/comercial/referencia/verify_sources.py \
-  --normas-dir docs/normas --require-sources
+  --normas-dir /caminho/para/docs/normas --require-sources
+
+# Sem os exemplares (p. ex. em CI público), rode apenas a coerência interna:
+PYTHONPATH= python3 scripts/comercial/referencia/verify_sources.py
 ```
 
 O script faz duas verificações independentes: (i) cada constante aplicada pelo código

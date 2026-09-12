@@ -84,8 +84,18 @@ def _grade_requirement_status(
         return GRADE_ERROR
     if requested is None:
         return GRADE_NOT_REQUESTED
+    if isinstance(requested, bool):
+        # bool is an int subclass; True would otherwise pass as Grau I.
+        return GRADE_ERROR
     try:
         req = int(requested)
+    except (TypeError, ValueError):
+        return GRADE_ERROR
+    # A fractional request is an error, not a truncation: silently reading 3.5
+    # as Grau III would grant a grade that was never requested.
+    try:
+        if float(requested) != float(req):
+            return GRADE_ERROR
     except (TypeError, ValueError):
         return GRADE_ERROR
     if req not in (1, 2, 3):
@@ -103,8 +113,10 @@ def _tabela1_rule_results(assessment: Mapping[str, Any]) -> List[Dict[str, Any]]
         grade = item.get("grade")
         if ev == rules.EVIDENCE_PENDING or grade is None:
             status = RULE_PENDING_MANUAL if item["item"] in (1, 3) else RULE_UNVERIFIED
-        elif ev == rules.EVIDENCE_DECLARED and not item.get("provenance"):
-            # Declared without provenance: an assertion, not evidence.
+        elif ev == rules.EVIDENCE_DECLARED and not item.get("provenance_verified"):
+            # Declared without verifiable provenance: an assertion, not
+            # evidence. classify_documentary_item is the single place that
+            # decides this; we consume its flag rather than re-deriving it.
             status = RULE_PENDING_MANUAL
         elif int(grade) <= 0:
             status = RULE_FAILED
@@ -572,8 +584,10 @@ def _evaluate_profile_claims(
     version = ctx.get("software_version") or "não identificada"
     out: List[Dict[str, Any]] = []
 
+    state = profile.get("state")
     out.append(claims_mod.evaluate_claim(
         claims_mod.CLAIM_IMPLEMENTS_REQUIREMENTS,
+        profile_state=state,
         evidence=evidence.get(claims_mod.CLAIM_IMPLEMENTS_REQUIREMENTS),
         subject={
             "requirements": profile.get("implemented_requirements_label")
@@ -583,6 +597,7 @@ def _evaluate_profile_claims(
     ))
     out.append(claims_mod.evaluate_claim(
         claims_mod.CLAIM_PROFILE_COMPATIBLE,
+        profile_state=state,
         evidence=evidence.get(claims_mod.CLAIM_PROFILE_COMPATIBLE),
         subject={"profile": profile.get("id"), "profile_version": profile.get("version")},
     ))
@@ -596,6 +611,7 @@ def _evaluate_profile_claims(
     acceptance = ctx.get("institution_acceptance") or {}
     out.append(claims_mod.evaluate_claim(
         claims_mod.CLAIM_INSTITUTION_ACCEPTED,
+        profile_state=state,
         evidence=evidence.get(claims_mod.CLAIM_INSTITUTION_ACCEPTED),
         subject={
             "institution": acceptance.get("institution") or profile.get("recipient_id") or "?",
