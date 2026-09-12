@@ -284,6 +284,44 @@ def _semantic_result_evidence(snapshot: dict, destination: Path) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _browser_probe(browser_python: Path, ui: str, evidence_dir: Path, phase: str) -> dict:
+    script = Path(__file__).resolve().with_name("verify_installed_ui.py")
+    if not browser_python.is_file() or not script.is_file():
+        raise VerificationError("installed-UI browser controller is absent")
+    completed = subprocess.run(
+        [
+            str(browser_python),
+            str(script),
+            "--url",
+            ui,
+            "--evidence",
+            str(evidence_dir),
+            "--phase",
+            phase,
+        ],
+        cwd=Path(__file__).resolve().parents[3],
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    evidence_path = evidence_dir / f"{phase}-installed-ui.json"
+    if not evidence_path.is_file():
+        raise VerificationError(
+            "installed-UI browser probe produced no evidence; "
+            f"exit={completed.returncode}; stderr={completed.stderr[-1000:]}"
+        )
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    if completed.returncode != 0 or payload.get("status") != "PASSED":
+        raise VerificationError(
+            "installed-UI browser probe failed: "
+            f"exit={completed.returncode}; evidence={payload.get('error')}; "
+            f"stderr={completed.stderr[-1000:]}"
+        )
+    return payload
+
+
 def _run_job(
     api: str,
     evidence_dir: Path,
@@ -393,6 +431,16 @@ def verify(args: argparse.Namespace) -> dict:
     try:
         health, ui_size = _wait_ready(api, ui)
         result["checks"]["backend_and_ui"] = {"status": "PASSED", "health": health, "ui_bytes": ui_size}
+        browser_result = _browser_probe(args.browser_python.resolve(), ui, evidence_dir, args.phase)
+        result["checks"]["installed_ui_catalog_and_preview"] = {
+            "status": "PASSED",
+            "scope": browser_result["scope"],
+            "playwright_version": browser_result["playwright_version"],
+            "browser_version": browser_result["browser_version"],
+            "profile_labels": browser_result["profile_labels"],
+            "preview_visible": browser_result["preview_visible"],
+            "screenshot": browser_result["screenshot"],
+        }
         if args.phase == "initial":
             job_id, snapshot, saved, semantic_hash = _run_job(api, evidence_dir, 0, "initial")
             result["checks"]["calculate_documents_save_reopen"] = {
@@ -446,6 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--backup", type=Path, required=True)
+    parser.add_argument("--browser-python", type=Path, required=True)
     parser.add_argument("--phase", choices=("initial", "upgrade", "restore"), required=True)
     args = parser.parse_args(argv)
     verify(args)

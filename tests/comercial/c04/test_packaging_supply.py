@@ -17,6 +17,7 @@ from scripts.comercial.operacao import (
     prepare_test_entitlement,
     prepare_windows_native,
     sbom,
+    verify_installed_ui,
     verify_windows_install,
 )
 from scripts.comercial.operacao.operational_harness import run_harness
@@ -259,6 +260,16 @@ def test_windows_bundle_requires_native_runtime_and_hardens_distribution_evidenc
     assert "previous candidate is not a distinct source tree" in workflow
     assert "windows_distribution_verified = ($phasesPassed -and $distinctTrees)" in workflow
     assert "installed A cannot render PDF" in workflow
+    assert '"playwright==1.62.0"' in workflow
+    assert "--browser-python $env:C06_BROWSER_PYTHON" in workflow
+
+
+def test_installed_ui_probe_uses_six_profiles_and_labels_only_synthetic_data() -> None:
+    csv_bytes = verify_installed_ui._synthetic_csv()
+    assert csv_bytes.startswith(b"id;bairro;area;preco\nUI-TESTE-")
+    assert len(csv_bytes.splitlines()) == 37
+    assert len(verify_installed_ui.EXPECTED_PROFILE_LABELS) == 6
+    assert verify_installed_ui.TEST_BUILD_LABEL == "BUILD SINTÉTICO DE TESTE — NÃO COMERCIAL"
 
 
 def test_windows_update_semantic_comparison_ignores_only_execution_identity(tmp_path: Path) -> None:

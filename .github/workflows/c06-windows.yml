@@ -380,6 +380,19 @@ jobs:
             build_host_fontconfig_hidden = $true
           } | ConvertTo-Json | Set-Content "$env:C06_EVIDENCE\bundle-isolation.json" -Encoding utf8
 
+      - name: Install an exact external browser controller
+        shell: pwsh
+        run: |
+          $browserVenv = Join-Path $env:RUNNER_TEMP "c06-browser-controller"
+          python -m venv $browserVenv
+          $browserPython = Join-Path $browserVenv "Scripts\python.exe"
+          & $browserPython -m pip install "playwright==1.62.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $browserPython -m playwright install chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $browserPython -m pip freeze --all | Set-Content "$env:C06_EVIDENCE\windows-ui-controller-lock.txt" -Encoding utf8
+          "C06_BROWSER_PYTHON=$browserPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Install A into a clean per-user path
         shell: pwsh
         run: |
@@ -406,6 +419,7 @@ jobs:
             --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
             --evidence $env:C06_EVIDENCE `
             --backup $backup `
+            --browser-python $env:C06_BROWSER_PYTHON `
             --phase initial
 
       - name: Update installed product to B and verify saved state
@@ -422,6 +436,7 @@ jobs:
             --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
             --evidence $env:C06_EVIDENCE `
             --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
+            --browser-python $env:C06_BROWSER_PYTHON `
             --phase upgrade
 
       - name: Return to A and restore the verified backup in a clean profile
@@ -438,6 +453,7 @@ jobs:
             --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
             --evidence $env:C06_EVIDENCE `
             --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
+            --browser-python $env:C06_BROWSER_PYTHON `
             --phase restore
 
       - name: Verify Windows ACLs on private runtime and entitlement paths
