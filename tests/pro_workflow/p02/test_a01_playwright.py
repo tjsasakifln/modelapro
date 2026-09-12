@@ -48,13 +48,13 @@ def _wait_http(url: str, timeout: float = 40.0) -> bool:
 
 
 def _ptbr_csv() -> bytes:
-    lines = ["id;bairro;area;preco"]
+    lines = ["bairro;area;preco"]
     for i in range(24):
         area = 50.0 + i * 2.0
         price = 10000.0 * area
         area_txt = f"{area:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         price_txt = f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        lines.append(f"IM-{i+1:02d};Centro;{area_txt};{price_txt}")
+        lines.append(f"Centro;{area_txt};{price_txt}")
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
@@ -62,10 +62,10 @@ def _write_excel(path: Path) -> None:
     from openpyxl import Workbook
     book = Workbook()
     sheet = book.active
-    sheet.append(["id", "bairro", "area", "preco"])
+    sheet.append(["bairro", "area", "preco"])
     for i in range(24):
         area = 50.0 + i * 2.0
-        sheet.append([f"IM-{i+1:02d}", "Centro", area, 10000.0 * area])
+        sheet.append(["Centro", area, 10000.0 * area])
     book.save(path)
 
 
@@ -277,7 +277,17 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
     expect(current_job).to_be_visible(timeout=10000)
     expect(terminal_state).to_be_visible(timeout=10000)
     expect(result_region).to_be_visible(timeout=10000)
+    stale_result = page.get_by_text(
+        "O arquivo mudou. O resultado abaixo pertence à versão anterior.", exact=True
+    )
+    expect(stale_result).to_have_count(0, timeout=10000)
+    # The visible result carries the same immutable job identity as the JSON
+    # downloaded below. This rejects a preserved snapshot from the prior upload.
+    technical_ids = page.get_by_text("Identificadores técnicos", exact=True)
+    expect(technical_ids).to_be_visible(timeout=10000)
+    technical_ids.click()
     body = page.inner_text("body")
+    assert re.search(rf'"job_id"\s*:\s*"{re.escape(job_id)}"', body), body[-3000:]
     page.screenshot(path=str(_evidence_dir() / f"result-{tag}.png"))
     assert "Valor da avaliação" in body or "Cálculo disponível" in body, body[:2000]
     assert "735.000" in body or "735000" in body or "735.000,00" in body, body[:1500]

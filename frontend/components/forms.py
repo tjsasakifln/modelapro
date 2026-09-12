@@ -930,6 +930,10 @@ class JobClient:
         self.job_id = str(payload["job_id"])
         self.access_token = payload.get("access_token")
         self.status_url = payload.get("status_url") or f"/jobs/{self.job_id}"
+        # A new job has no result yet.  Keeping the previous frozen snapshot
+        # here makes the next Streamlit rerun render old data under this job's
+        # status (and can leave its invalidation notice on screen).
+        self.last_snapshot = None
         if "state" in payload:
             self.last_status = {
                 "job_id": self.job_id,
@@ -1678,13 +1682,19 @@ def upload_form(
     ns = widget_namespace(binding_token) if uploaded_file is not None else "none"
 
     if uploaded_file is not None:
-        previous_token = st.session_state.get("p02_preview_token") or st.session_state.get("c09_preview_token")
-        if previous_token != binding_token:
+        # ``p02_preview_token`` is enriched with the API schema fingerprint
+        # below.  Comparing it to this pre-preview token invalidated the
+        # result on every Streamlit rerun, even when the uploaded bytes had
+        # not changed.  Keep a separate identity for the uploaded source.
+        source_token = binding_token
+        previous_source_token = st.session_state.get("p02_upload_source_token")
+        if previous_source_token != source_token:
             flags, dropped = merge_invalidation(dict(st.session_state), "file")
             for key, value in flags.items():
                 st.session_state[key] = value
             for key in dropped:
                 st.session_state.pop(key, None)
+            st.session_state["p02_upload_source_token"] = source_token
             preview = None
         if preview is None:
             if preview_provider is None:
@@ -1735,6 +1745,21 @@ def upload_form(
                     st.session_state["c09_preview_exception"] = repr(exc)
                     st.session_state.pop("c09_preview", None)
                     st.session_state.pop("p02_preview", None)
+
+        # Use the same schema-bound widget namespace on the first render and
+        # every subsequent render.  Without this recomputation, entering an
+        # evaluating-subject value after preview could write a different
+        # Streamlit key and disappear before the submit rerun.
+        if preview is not None:
+            fingerprint = schema_fingerprint(preview)
+            binding_token = mapping_binding_token(
+                filename=uploaded_file.name,
+                nbytes=len(uploaded_file.getvalue()),
+                import_options=import_options,
+                input_sha256=(preview or {}).get("input_sha256"),
+                schema_fingerprint=fingerprint,
+            )
+            ns = widget_namespace(binding_token)
 
     if connection_error:
         st.error(connection_error)
