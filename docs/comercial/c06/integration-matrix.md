@@ -1,7 +1,7 @@
 # C06 — matriz da composição, não dos componentes isolados
 
-Retomada em trabalho em 2026-09-12. Última candidata publicada, ainda reprovada:
-`1b57df2ccdce2c79852a3f731afad8131374e09a`. Os commits posteriores da mesma PR
+Retomada em trabalho em 2026-09-12. Última candidata publicada A2:
+`df6b7b786f91b7a545d4c925d954cbedb9fbdf17`, com C15 aprovado e Windows reprovado. Os commits posteriores da mesma PR
 precisam de execução própria antes de serem aprovados. Os oito aceites de cada
 produtor permanecem nos arquivos originais como histórico do componente; esta
 matriz identifica seus consumidores na composição. Não declara conclusão pelo
@@ -24,6 +24,25 @@ A correção fixa developmentMode=false e registra exceções do processo filho 
 stderr, mas ainda exige nova prova instalada. Não existe A operacional aprovada
 para a transição entre árvores distintas. As referências E1/E2 abaixo preservam
 o histórico anterior; não aprovam os commits locais posteriores.
+
+A2: C15 PR **34721474693** e push **34721472670** terminaram SUCCESS,
+cada um com **1.755 passed, 0 failed, 1 skipped**. A coleta corresponde aos
+1.756 nodeids congelados; o skip do smoke isolado é coberto pelo job próprio.
+Foram baixados e comparados os hashes de **50 arquivos em sete namespaces por
+run**, todos com checkout limpo antes/depois e sem alterações rastreadas.
+A PR testou merge `e4b82bed6c3e0ad5987ccc92d16e1bcef9b4588a`, o push testou
+seu HEAD, ambos na árvore `d15c8f7356323952a8e391650cceb75137c169c8`.
+Identidades: [PR A2](evidence-run-34721474693.json) e
+[push A2](evidence-run-34721472670.json). A alteração histórica de A1 não foi
+reproduzida na sondagem local e não reapareceu em A2; sua causa não está
+estabelecida. A aprovação de A2 não se estende aos commits posteriores.
+
+Windows A2 **34721474609** terminou FAILURE antes de `/health`. A reprodução
+local confirmou problemas adicionais do pacote windowed: configuração do logger
+com stderr ausente, assets e módulos dinâmicos Streamlit omitidos e cliente HTTP
+usado pela interface ausente das dependências runtime. Correções locais passam
+por reconstrução e verificação integral antes de nova publicação. Ainda não há
+A operacional aprovada para o ciclo entre árvores distintas.
 
 ## Execução → artefato
 
