@@ -15,6 +15,8 @@ def test_collection_cross_checks_obligations_and_execution(tmp_path, monkeypatch
     files = [
         "tests/comercial/test_c06_qualification_integration.py",
         "tests/comercial/test_c06_document_flow.py",
+        "tests/comercial/test_c06_cost_flow.py",
+        "tests/comercial/test_c06_cost_consumer.py",
         "tests/comercial/test_c06_security_routes.py",
         "tests/comercial/test_c06_runtime_bootstrap.py",
         "tests/comercial/c06/test_catalog_distribution.py",

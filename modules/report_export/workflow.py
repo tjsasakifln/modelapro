@@ -496,6 +496,8 @@ def record_review(
         "case_release_status": state.get("case_release_status"),
         "document_state": state,
         "unsigned_pdf_sha256": _sha(pdf),
+        "docx_sha256": _sha(docx),
+        "dossier_sha256": _sha(dossier),
     }
     _save_json(store, job_id, "document_state.json", result)
     return result
@@ -520,6 +522,13 @@ def create_signature_request(store: Any, job_id: str, *, revision_id: str) -> Di
     docx = store.get_artifact(job_id, "report.docx")
     if docx is None:
         raise DocumentWorkflowError("DOCUMENT_ARTIFACT_MISSING", "controlled DOCX is required before signature export")
+    reviewed_bytes = _load_json_artifact(store, job_id, "document_state.json")
+    dossier = store.get_artifact(job_id, "evidence_bundle.zip")
+    if (reviewed_bytes.get("schema_version") != "MP-REVIEW/1"
+            or reviewed_bytes.get("unsigned_pdf_sha256") != _sha(pdf)
+            or reviewed_bytes.get("docx_sha256") != _sha(docx)
+            or reviewed_bytes.get("dossier_sha256") != _sha(dossier)):
+        raise DocumentWorkflowError("SIGNATURE_EXPORT_INCONSISTENT", "current bytes differ from the recorded professional review")
     try:
         if not verify_report_consistency(pdf, snapshot, context).get("ok"):
             raise ValueError("controlled PDF differs from the reviewed content")

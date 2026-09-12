@@ -32,7 +32,7 @@ from modules.job_store import (
     utc_now,
 )
 
-ALLOWED_MODEL_SCOPES = frozenset({"subject_specific", "population_model"})
+ALLOWED_MODEL_SCOPES = frozenset({"subject_specific", "population_model", "cost_inputs"})
 KNOWN_CONTRACTS = frozenset({CONTRACT_VERSION})
 
 
