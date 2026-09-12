@@ -333,6 +333,7 @@
     "tests/c10_pipeline/test_a04_isolation.py::test_two_jobs_do_not_mix_subject_snapshot_or_artifacts",
     "tests/c10_pipeline/test_a05_security_peers.py::test_artifact_path_traversal_rejected",
     "tests/c10_pipeline/test_a05_security_peers.py::test_empty_file_is_400",
+    "tests/c10_pipeline/test_a05_security_peers.py::test_evaluate_fitted_policy_adapter_delegates_live_fit_to_c04",
     "tests/c10_pipeline/test_a05_security_peers.py::test_frozen_peer_import_paths_match_contract",
     "tests/c10_pipeline/test_a05_security_peers.py::test_impossible_result_is_not_200_empty_json",
     "tests/c10_pipeline/test_a05_security_peers.py::test_labeled_simulators_are_distinct_from_real_imports",
