@@ -35,6 +35,44 @@ comprador habilita funcionalidades, não qualifica casos nem assina laudos.
 5. Salve o projeto e anote seu identificador para reabertura. Lotes e reprodução
    conservam suas políticas; revise individualmente itens inválidos ou pendentes.
 
+### Dados profissionais e interpretação dos diagnósticos
+
+Preencha **Contexto documental do caso** durante a preparação. Depois do cálculo
+ou da reabertura do projeto, use **Completar conteúdo e anexos do laudo** para
+conferir e complementar os dados persistidos, a identidade profissional e a
+responsabilidade técnica antes de gerar as representações.
+
+Declare o objetivo da avaliação separadamente da finalidade da encomenda.
+Registre o diagnóstico do mercado, o **Critério de enquadramento** e a
+**Codificação ou escala** de cada variável. Complete **Justificativa para adoção
+do Grau I** quando aplicável e **Observações do laudo**. Esses textos são
+declarações profissionais; o cálculo não os produz automaticamente.
+
+Quando o perfil exigir geolocalização, informe endereço, fonte e coordenadas do
+avaliando e de cada elemento da amostra em graus decimais. Confira latitude entre
+−90 e 90 e longitude entre −180 e 180. Preserve o vínculo de cada informação com
+o elemento correto. Zero é uma coordenada válida; os campos nativos aceitam
+vírgula decimal. Ao iniciar uma localização, preencha endereço completo, fonte,
+latitude e longitude juntos. Endereço não substitui fonte. Entrada parcial,
+booleana, não numérica, não finita ou fora da faixa bloqueia cálculo ou nova
+geração documental; ausência total continua registrada como pendência.
+Se esses dados já estiverem na planilha, use **Colunas documentais da amostra**
+para associar endereço, latitude, longitude e fonte juntos, em quatro colunas
+distintas. A justificativa é opcional. A interface retira as colunas associadas
+dos preditores. A prévia mostra apenas parte da amostra: confira também a tabela
+completa do projeto antes da emissão, mantendo o identificador de cada elemento.
+
+Leia as métricas na escala indicada. Resíduos padronizados, resíduos
+studentizados e observações influentes têm definições distintas. Uma observação
+sinalizada continua na amostra até uma exclusão justificada; sinalização não é
+autorização para removê-la. Elasticidades descrevem a variação local da estimativa
+ao redor do avaliando, não uma relação causal nem uma regra para categorias.
+
+As estatísticas do ajuste usam a amostra de treinamento. Validação independente
+só é apresentada quando o procedimento solicitado executou e registrou a
+partição, as previsões e suas métricas. Isso não substitui a validação com casos
+reais autorizados nem o parecer de um profissional independente.
+
 ### Quantificação de custo
 
 No seletor **Percurso de cálculo**, escolha **Quantificação de custo**. Não é
@@ -71,11 +109,16 @@ backup. Não confunda recuperar um arquivo histórico com aprovar o caso atual.
 Gere PDF, DOCX e dossiê e examine as representações disponíveis, tabelas,
 legibilidade e anexos integrais. Geração de arquivo não é aprovação. Consulte
 as pendências efetivamente retornadas pelo serviço.
+Confira também a planilha Excel da amostra efetivamente utilizada, quando
+exigida pelo perfil. O vínculo dos requisitos com os arquivos identifica a
+representação entregue; não atesta a veracidade de uma declaração profissional.
 
 O responsável registra a revisão com identidade, motivo e identificador da
 revisão. O evento é vinculado ao resultado e ao conteúdo documental. Alterações
-materiais exigem nova avaliação e revisão; eventos anteriores permanecem no
-histórico, sem autorizar a versão alterada.
+nos dados ou no modelo — amostra, alvo, preditores ou avaliando usado no cálculo —
+exigem recalcular. Mudanças no conteúdo ou nos anexos do laudo exigem nova geração
+documental e repetição da revisão e assinatura aplicáveis. Eventos anteriores
+permanecem no histórico, sem autorizar a versão alterada.
 
 Quando o serviço permitir, exporte o vínculo e os bytes PDF para o assinador
 externo. Assine exatamente esses bytes e importe o PDF original. O produto
@@ -93,7 +136,12 @@ mas não impede consulta, exportação e backup das evidências existentes.
 
 Restaure apenas em espaço vazio. O serviço verifica caminhos, limites e hashes
 antes de ativar os dados restaurados; nunca sobrescreva a única cópia íntegra.
-Reabra os trabalhos e confira arquivos e valores. Para retornar a uma versão
+Reabra os trabalhos e confira arquivos e valores. Em **Localização dos elementos
+da amostra**, confira cada `row_id` canônico (`R000000` etc.), que é distinto do
+campo `id` da planilha. Reaparecem os registros usados e excluídos; evidência
+editada por `row_id` prevalece sobre o valor da coluna associada. Mapeamento para
+coluna removida ou localização inválida após a leitura integral bloqueia nova
+geração documental até a correção. Para retornar a uma versão
 anterior, use o instalador identificado e backup compatível com seu schema;
 não misture executável antigo com dados migrados sem compatibilidade verificada.
 

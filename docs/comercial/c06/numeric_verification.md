@@ -80,3 +80,31 @@ one-percent negative mutations and invocation of the Decimal checker from an arb
 working directory. A new candidate CI run is still required to turn the retained
 GitHub-run failure into cross-platform execution evidence; local success is not recorded
 as a hosted-run success.
+
+## Fitted diagnostics added during C06 resumption
+
+Commit `36c5208` added the fitted disclosures and eight initial tests. A separate
+read-only review found three defects despite those passes: positional alignment
+of the original correlation matrix, incomplete coverage of the influence union,
+and omission of material diagnostics from C05's result fingerprint.
+
+Commit `82166abba16d446ce10d260b603816c3b8652fd9` corrects these boundaries:
+
+- Correlations join the frozen base frame to the effective row IDs. Missing,
+  duplicate or canonically colliding IDs cannot produce a complete matrix.
+- Influence counts require finite, exact maps for studentized residuals, Cook
+  distance and leverage, their positive thresholds, and agreement with the
+  recorded union. Missing or extra rows remain unavailable, with map-specific
+  coverage evidence. An unverifiable union is never labelled verified.
+- Statistical diagnostics participate in the reviewed result material. Removing
+  any of the five diagnostic blocks invalidates the prior review in the real
+  worker/C05 reassessment path. Snapshots without the added field retain their
+  historical material shape; derived review/signature state is excluded to avoid
+  a fingerprint cycle.
+
+The two row/coverage regressions were reproduced before correction. The full
+numeric disclosure file passed **11 tests** in the independent re-review; a final
+coverage-metadata refinement passed its focused mutation test. These local checks
+preserve the fitted coefficients, sample and normative grades. They do not approve
+the final PDF/DOCX/XLSX or Windows artifact: those require the identified candidate
+cohort in `integration-matrix.md`.
