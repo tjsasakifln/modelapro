@@ -41,7 +41,7 @@ from .results import ModelResult
 DISPLAY_ROUNDING_DECIMALS = 2
 
 ISSUANCE_REASON_LABELS = {
-    "no_automatic_report_approval": "Esta minuta não constitui aprovação automática de laudo.",
+    "no_automatic_report_approval": "Este documento não constitui aprovação automática de laudo.",
     "grau_is_not_issuance_readiness": "O grau calculado não equivale a prontidão de emissão.",
     "documentary_declared_is_not_verified_proof": "Documento apenas declarado não é comprovação.",
     "draft": "Minuta em rascunho, sujeita a revisão profissional.",
@@ -61,6 +61,7 @@ ISSUANCE_LABELS = {
 
 PRECISION_STATUS_LABELS = {
     "not_computed": "Precisão não calculada",
+    "not_applicable_cost_quantification": "Não aplicável à quantificação de custo",
     "classified": "Precisão classificada",
     "unclassified": "Precisão calculada mas não classificável",
     "error": "Erro ao calcular a precisão",
@@ -867,6 +868,16 @@ def build_report_view(
     ]
 
     precisao_status = str(precisao.get("status") or "not_computed")
+    precision_not_applicable_to_cost = (
+        precisao_status == "not_applicable_cost_quantification"
+        or precisao.get("reason") == "not_applicable_to_cost_quantification"
+        or (
+            statistical.get("route") == "cost_quantification"
+            and statistical.get("precision_grade_applicable") is False
+        )
+    )
+    if precision_not_applicable_to_cost:
+        precisao_status = "not_applicable_cost_quantification"
     precisao_grade = precisao.get("grade")
     amplitude_pct = _as_finite_number(precisao.get("amplitude_pct"))
 
@@ -1059,7 +1070,9 @@ def build_report_view(
             ).hexdigest()
 
     grau_fundamentacao_label = GRAU_LABELS.get(fundamentacao.get("grade"), "Não classificado")
-    if precisao_status == "unclassified":
+    if precisao_status == "not_applicable_cost_quantification":
+        grau_precisao_label = "Não aplicável à quantificação de custo"
+    elif precisao_status == "unclassified":
         grau_precisao_label = "Calculada, não classificável"
     elif precisao_status == "not_computed":
         grau_precisao_label = "Não calculado"
