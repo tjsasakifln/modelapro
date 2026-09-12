@@ -134,12 +134,14 @@ def _write_run(tmp_path, payload):
     return path
 
 
-def _junit(tmp_path, cases=705, failures=0, name="wide.junit.xml"):
+def _junit(tmp_path, cases=705, failures=0, skips=0, name="wide.junit.xml"):
     suite = ET.Element("testsuite")
     for i in range(cases):
         case = ET.SubElement(suite, "testcase", classname="t", name=f"t{i}")
         if i < failures:
             ET.SubElement(case, "failure", message="boom")
+        elif i < failures + skips:
+            ET.SubElement(case, "skipped", message="Set C15_INSTALL_SMOKE=1 to run")
     path = tmp_path / name
     ET.ElementTree(suite).write(path)
     return path
@@ -287,9 +289,10 @@ def test_c16_summary_injections(tmp_path):
     assert any("stale" in p for p in run(_clean_c16(sha="f" * 40)))
 
 
-def _populate(tmp_path, run_over=None, junit_kw=None, c16_over=None):
+def _populate(tmp_path, run_over=None, junit_kw=None, c16_over=None, smoke_kw=None):
     _write_run(tmp_path, _clean_run(**(run_over or {})))
     _junit(tmp_path, **(junit_kw or {}))
+    _junit(tmp_path, **{"cases": 1, "name": "install-smoke.junit.xml", **(smoke_kw or {})})
     (tmp_path / "c16.json").write_text(json.dumps(_clean_c16(**(c16_over or {}))), encoding="utf-8")
     return tmp_path
 
@@ -313,6 +316,8 @@ def test_verify_artifacts_absent_directory_is_red(tmp_path):
         {"junit_kw": {"failures": 1}},
         {"junit_kw": {"cases": 10}},
         {"c16_over": {"counts": {"aprovados": 1, "reprovados": 1, "disjoint": True}}},
+        {"smoke_kw": {"cases": 1, "skips": 1}},
+        {"smoke_kw": {"cases": 0}},
     ],
 )
 def test_every_mandatory_injection_makes_the_gate_red(tmp_path, kwargs):
@@ -354,3 +359,33 @@ def test_main_is_green_only_when_jobs_and_evidence_both_agree(tmp_path):
         )
         == 0
     )
+
+
+# --- a skipped gate exits 0 and looks identical to a passing one -----------
+
+
+def test_a_skipped_testcase_is_not_success(tmp_path):
+    """test_wheel_install_smoke.py is skipif-gated on C15_INSTALL_SMOKE.
+
+    Drop that env key from the job and pytest collects one test, skips it and
+    exits 0: the job stays green and the installed-artifact property is
+    asserted nowhere again, inside the fix for that very gap.
+    """
+    path = _junit(tmp_path, cases=1, skips=1, name="install-smoke.junit.xml")
+    problems = check_junit(path, min_tests=1, label="install-smoke.junit.xml", forbid_skips=True)
+    assert any("skipped" in p for p in problems), problems
+
+
+def test_skips_are_tolerated_where_the_matrix_legitimately_allows_them(tmp_path):
+    """The wide suite may skip an OS path that is not announced; the gate for it
+    is run.json's skip_xfail_count, not this one."""
+    path = _junit(tmp_path, cases=705, skips=1)
+    assert check_junit(path, min_tests=700, label="wide.junit.xml", forbid_skips=False) == []
+
+
+def test_absent_install_smoke_artifact_is_red(tmp_path):
+    _write_run(tmp_path, _clean_run())
+    _junit(tmp_path)
+    (tmp_path / "c16.json").write_text(json.dumps(_clean_c16()), encoding="utf-8")
+    problems = verify_artifacts(tmp_path, expected_sha=CANDIDATE_SHA, min_wide_tests=700)
+    assert any("install-smoke" in p for p in problems), problems

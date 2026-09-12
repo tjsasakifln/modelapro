@@ -175,8 +175,14 @@ def check_p04_run(path: Path, expected_sha: str | None = None, mode: str = CANDI
     return problems
 
 
-def check_junit(path: Path, min_tests: int = 1, label: str = "junit") -> list[str]:
-    """A JUnit XML that is absent, unparseable, empty or red is not success."""
+def check_junit(path: Path, min_tests: int = 1, label: str = "junit", forbid_skips: bool = True) -> list[str]:
+    """A JUnit XML that is absent, unparseable, empty, skipped or red is not success.
+
+    Skips are checked because a suite gated on an environment variable exits 0
+    when the variable is absent: pytest collects the test, skips it, and the job
+    stays green. Counting only failures would let a dropped env key silently
+    restore the gap this artifact exists to close.
+    """
     problems: list[str] = []
     if not path.is_file():
         problems.append(f"{label}: artifact absent at {path}")
@@ -193,6 +199,11 @@ def check_junit(path: Path, min_tests: int = 1, label: str = "junit") -> list[st
     if failed:
         ids = [f"{c.attrib.get('classname', '')}::{c.attrib.get('name', '')}" for c in failed[:10]]
         problems.append(f"{label}: {len(failed)} failed/errored testcases, e.g. {ids}")
+    if forbid_skips:
+        skipped = [c for c in cases if c.find("skipped") is not None]
+        if skipped:
+            ids = [f"{c.attrib.get('classname', '')}::{c.attrib.get('name', '')}" for c in skipped[:10]]
+            problems.append(f"{label}: {len(skipped)} skipped testcases, e.g. {ids} (gate exited 0 without asserting)")
     return problems
 
 
@@ -233,7 +244,15 @@ def verify_artifacts(
     if not root.is_dir():
         return [f"artifacts: directory absent at {root} (no evidence was downloaded)"]
     problems.extend(check_p04_run(root / "run.json", expected_sha=expected_sha, mode=p04_mode))
-    problems.extend(check_junit(root / "wide.junit.xml", min_tests=min_wide_tests, label="wide.junit.xml"))
+    problems.extend(
+        check_junit(root / "wide.junit.xml", min_tests=min_wide_tests, label="wide.junit.xml", forbid_skips=False)
+    )
+    # The installed-artifact smoke is skipif-gated on C15_INSTALL_SMOKE. If that
+    # env key is ever dropped from the job, pytest skips and exits 0 and the gap
+    # comes back inside its own fix, so this artifact forbids skips.
+    problems.extend(
+        check_junit(root / "install-smoke.junit.xml", min_tests=1, label="install-smoke.junit.xml", forbid_skips=True)
+    )
     problems.extend(check_c16(root / "c16.json", expected_sha=expected_sha))
     return problems
 
