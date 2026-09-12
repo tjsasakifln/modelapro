@@ -70,7 +70,15 @@ class TestLowR2DoesNotBlock:
         X = pd.DataFrame({'const': 1, 'x': range(20)})
         y = pd.Series(range(20))
 
-        res = NBRValidator.validate_model(model_result, X, y, degree=1)
+        # MP-COM/C05: documentary items must be DECLARED with provenance.
+        # Undeclared items are pending and score 0 - this test is about R2,
+        # so it declares them explicitly instead of relying on a silent default.
+        res = NBRValidator.validate_model(
+            model_result, X, y, degree=1,
+            grau_item1=2, grau_item3=2,
+            item1_provenance={"source": "laudo/vistoria", "ref": "fixture"},
+            item3_provenance={"source": "planilha de dados", "ref": "fixture"},
+        )
         # Finalize with an in-range avaliando so item 4 is fully scored.
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=25.0,
@@ -420,7 +428,14 @@ class TestVIFDoesNotBlock:
         X = pd.DataFrame({'const': 1, 'x1': range(20), 'x2': range(20)})
         y = pd.Series(range(20))
 
-        res = NBRValidator.validate_model(model_result, X, y, degree=1)
+        # MP-COM/C05: items 1/3 declared with provenance; this test is about
+        # VIF, not about undeclared documentary items scoring points.
+        res = NBRValidator.validate_model(
+            model_result, X, y, degree=1,
+            grau_item1=2, grau_item3=2,
+            item1_provenance={"source": "laudo/vistoria", "ref": "fixture"},
+            item3_provenance={"source": "planilha de dados", "ref": "fixture"},
+        )
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=25.0,
             extrapolation_details=[
@@ -548,6 +563,54 @@ class TestOptimalCombinationTargetAchieved:
         df = pd.DataFrame({'area': area, 'preco': preco})
         return df
 
+    def test_declared_documentary_grades_are_discarded_by_legacy_revalidation(self):
+        """MP-COM/C05 handoff C05->C01: documented production defect.
+
+        ``find_best_model`` accepts grau_item1/grau_item3 and routes them into
+        the per-spec validation, but ``optimal_combination.py`` then RE-RUNS
+        ``NBRValidator.validate_model`` on the winning model without passing
+        the documentary arguments, overwriting the correct assessment. The
+        caller's declaration is silently lost.
+
+        Until C05 removed the approving defaults, this was invisible: the
+        re-validation defaulted items 1 and 3 to Grau I, so the result looked
+        classified while never reflecting what the caller declared (a caller
+        declaring Grau III also silently received Grau I). This test pins the
+        CURRENT behaviour so the handoff cannot be closed by accident; see
+        docs/comercial/c05/handoff.md.
+        """
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        df = self._make_strong_dataset()
+        finder = OptimalCombinationFinder()
+        result = finder.find_best_model(
+            df, target_col='preco', degree=1,
+            avaliando_raw={'area': 120.0},
+            grau_item1=2, grau_item3=2,
+        )
+
+        assert result.success is True
+        assert result.best_model is not None
+        vr = result.best_model.validation_result
+        grades = {i.item: i.grau_achieved for i in vr.item_scores}
+
+        # The calculated items are fine; the declared documentary ones are lost.
+        assert grades[2] == 3 and grades[4] == 3 and grades[5] == 3 and grades[6] == 3
+        assert grades[1] == 0, "declared item 1 survived: C01 handoff may be done"
+        assert grades[3] == 0, "declared item 3 survived: C01 handoff may be done"
+        # Absence of a documentary declaration must NOT be approved as a grade.
+        assert vr.grau_fundamentacao is None
+        assert result.best_grau_reached == vr.grau_fundamentacao
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "Blocked on C05->C01 handoff: optimal_combination.py must pass the "
+            "documentary grades and provenance into the final "
+            "NBRValidator.validate_model call instead of re-validating without "
+            "them. C05 does not own that file."
+        ),
+    )
     def test_target_achieved_true_when_reachable(self):
         from modules.optimal_combination import OptimalCombinationFinder
 
@@ -556,6 +619,7 @@ class TestOptimalCombinationTargetAchieved:
         result = finder.find_best_model(
             df, target_col='preco', degree=1,
             avaliando_raw={'area': 120.0},
+            grau_item1=2, grau_item3=2,
         )
 
         assert result.success is True
@@ -571,9 +635,10 @@ class TestOptimalCombinationTargetAchieved:
 
         df = self._make_strong_dataset()
         finder = OptimalCombinationFinder()
-        # Grau III requires items 1 and 3 (externally informed) to be >= 2,
-        # but find_best_model defaults grau_item1=grau_item3=1, so Grau III
-        # is structurally unreachable regardless of data quality.
+        # Grau III requires items 1 and 3 (documentary) to be >= 2. Since
+        # MP-COM/C05 they are no longer defaulted to Grau I, and the legacy
+        # re-validation discards whatever the caller declared, so Grau III is
+        # unreachable through this path regardless of data quality.
         result = finder.find_best_model(
             df, target_col='preco', degree=3,
             avaliando_raw={'area': 120.0},

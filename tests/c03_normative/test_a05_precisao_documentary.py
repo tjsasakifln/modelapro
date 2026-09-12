@@ -185,7 +185,14 @@ def test_legacy_high_vif_still_does_not_block_is_valid():
     )
     X = pd.DataFrame({"const": 1, "x": range(20)})
     y = pd.Series(range(20))
-    res = NBRValidator.validate_model(model_result, X, y, degree=1)
+    # MP-COM/C05: documentary items declared with provenance so this test
+    # exercises the VIF behaviour and not a silent documentary default.
+    res = NBRValidator.validate_model(
+        model_result, X, y, degree=1,
+        grau_item1=2, grau_item3=2,
+        item1_provenance={"source": "laudo/vistoria", "ref": "fixture"},
+        item3_provenance={"source": "planilha de dados", "ref": "fixture"},
+    )
     res = NBRValidator.finalize_precision_and_extrapolation(
         res,
         amplitude_pct=25.0,
