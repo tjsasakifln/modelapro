@@ -139,3 +139,19 @@ funcionando, não uma regressão introduzida por C06.
 
 `BLOCKED_ON_C01` para o aceite C06-A03 nesta propriedade. C06 não contorna,
 não relaxa o assert e não volta para `diagnose-base`.
+
+---
+
+## Resultado da reexecução (adendo, 2026-09-12)
+
+C01 implementou isto no HEAD `1d40285`. O defeito central está resolvido: o
+cálculo válido sobrevive, é rotulado e o caso não é liberável. O critério
+`grade_requirement_status == "not_met"` saiu `pending`, e essa divergência é
+uma correção do meu critério, não uma reprovação de C01 — decidir `met`/`not_met`
+é ato do classificador normativo de C05, ausente naquele HEAD.
+
+Verificação completa, com o bloco MP-QUAL/1 observado e o critério que fica
+armado para quando C05 publicar: `docs/comercial/c06/verificacao_c01_grade.md`.
+
+Status: `BLOCKED_ON_C01` → **resolvido no HEAD de C01**, aceite C06-A03 segue
+`IMPLEMENTED_PARTIAL` à espera de C05. Não composto na #20.

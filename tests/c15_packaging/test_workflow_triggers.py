@@ -48,7 +48,7 @@ def test_p04_harness_job_accepts_the_candidate_strictly():
 # `bash -e {0}` has no pipefail, so `run.py | tee` returned tee's zero while
 # the runner had failed. These tests fail if that default ever comes back.
 
-import yaml  # noqa: E402
+from tests.c15_packaging._workflow_yaml import load as _load_yaml  # noqa: E402
 
 LINUX_JOBS = (
     "lint",
@@ -63,7 +63,7 @@ LINUX_JOBS = (
 
 
 def _jobs() -> dict:
-    return yaml.safe_load(_load())["jobs"]
+    return _load_yaml(_load())["jobs"]
 
 
 def _shell_of(job: dict) -> str:
@@ -142,3 +142,127 @@ def test_no_mandatory_upload_may_vanish_silently():
             if str(step.get("uses", "")).startswith("actions/upload-artifact@"):
                 found = (step.get("with") or {}).get("if-no-files-found")
                 assert found == "error", f"{name}:{step.get('name')} -> {found!r}"
+
+
+# --- the reader itself must not be silently wrong ------------------------
+#
+# Every guard above is only as good as _workflow_yaml.load. A reader that
+# quietly returned an empty mapping would make all of them vacuous, so it is
+# pinned against known content of the real file and against a hand-built
+# sample with the shapes it claims to support.
+
+
+def test_reader_sees_every_job_of_the_real_workflow():
+    jobs = _jobs()
+    assert set(LINUX_JOBS) | {"c15-tests-windows"} == set(jobs), sorted(jobs)
+    for name, job in jobs.items():
+        assert job.get("runs-on"), name
+        assert job.get("steps"), name
+
+
+def test_reader_handles_the_shapes_it_claims():
+    sample = """
+name: demo
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: piped
+        env:
+          K: v
+        run: |
+          echo a | tee b.log
+          echo done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: x/
+          if-no-files-found: error
+          merge-multiple: true
+"""
+    doc = _load_yaml(sample)
+    job = doc["jobs"]["build"]
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["defaults"]["run"]["shell"] == "bash -eo pipefail {0}"
+    steps = job["steps"]
+    assert len(steps) == 3, steps
+    assert steps[0]["uses"] == "actions/checkout@v4"
+    assert steps[1]["name"] == "piped"
+    assert steps[1]["env"] == {"K": "v"}
+    assert steps[1]["run"].splitlines() == ["echo a | tee b.log", "echo done"]
+    assert steps[2]["with"]["if-no-files-found"] == "error"
+    assert steps[2]["with"]["merge-multiple"] is True
+    assert doc["on"]["push"]["branches"] == ["main"]
+
+
+def test_reader_does_not_silently_return_empty():
+    assert _load_yaml("") == {}
+    assert _jobs(), "reader returned nothing for the real workflow"
+
+
+# --- gaps found by the C06 requirement inventory -------------------------
+
+
+def test_windows_blocks_the_gate():
+    """Windows x64 is an announced target of the commercial offer.
+
+    It was absent from --required-jobs, so a Windows failure was not a red
+    build. A job that cannot turn the gate red announces nothing.
+    """
+    acc = _jobs()["acceptance"]
+    assert "c15-tests-windows" in acc["needs"], acc["needs"]
+    run_bodies = " ".join(s.get("run", "") for s in acc["steps"])
+    required = run_bodies.split("--required-jobs", 1)[1].split()[0]
+    assert "c15-tests-windows" in required.split(","), required
+
+
+def test_every_required_job_is_a_real_job_and_a_declared_need():
+    """A name in --required-jobs that is not a job would never be seen."""
+    jobs = _jobs()
+    acc = jobs["acceptance"]
+    run_bodies = " ".join(s.get("run", "") for s in acc["steps"])
+    required = run_bodies.split("--required-jobs", 1)[1].split()[0].split(",")
+    for name in required:
+        assert name in jobs, f"{name} is required but is not a job"
+        assert name in acc["needs"], f"{name} is required but is not a need"
+
+
+def test_install_smoke_flag_is_actually_set_by_a_job():
+    """The installed-artifact /health property was asserted nowhere.
+
+    tests/c15_packaging/test_wheel_install_smoke.py is skipif-gated on
+    C15_INSTALL_SMOKE, and no job set it: the test was permanently skipped
+    while its docstring claimed CI ran it.
+    """
+    setters = [
+        (name, step.get("name"))
+        for name, job in _jobs().items()
+        for step in job.get("steps") or []
+        if "C15_INSTALL_SMOKE" in str(step.get("env") or "")
+    ]
+    assert setters, "no job sets C15_INSTALL_SMOKE; the smoke test can only skip"
+
+
+def test_wide_test_floor_only_ratchets_upward():
+    """The floor is a ratchet, not a target.
+
+    Lowering it is how a truncated suite gets waved through, so the value in
+    the workflow is pinned here and this constant may only ever be raised.
+    Raise it after a green run, to that run's count rounded down to the
+    nearest hundred; never to make a red build pass.
+    """
+    RATCHET = 800  # run 34667257642, be464a2: 808 testcases, 0 failures
+    step = next(
+        s for s in _jobs()["acceptance"]["steps"] if "--min-wide-tests" in str(s.get("run", ""))
+    )
+    body = str(step["run"])
+    value = int(body.split("--min-wide-tests", 1)[1].split()[0])
+    assert value >= RATCHET, f"wide-suite floor lowered to {value}, ratchet is {RATCHET}"

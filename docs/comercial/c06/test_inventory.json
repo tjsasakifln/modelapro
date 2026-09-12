@@ -1,0 +1,517 @@
+{
+  "meta": {
+    "campaign": "MP-COM-20260912/C06",
+    "artifact": "implementation item A - inventory of applicable requirements and covering tests",
+    "worktree": "/home/tjsasakifln/code/modela-pro-p04",
+    "branch": "mp-pro-20260911/p04-referencia-consolidacao",
+    "head_sha": "c9ab4dcaa16a1c366441ae814bfa544032203fa8",
+    "measured_at_utc": "2026-09-12T02:35:14Z",
+    "method": "PYTHONPATH= python3 -m pytest tests --collect-only -q",
+    "requirements_source": "NO published requirements matrix for MP-COM-20260912/C06 exists in this repo (docs/comercial/ did not exist before this file). The eleven areas below come from the C06 task statement, not from a repo document. Applicability is therefore asserted by the campaign brief, not verified against a signed scope.",
+    "area_split_note": "The C06 task named 11 areas. Two are split here because a single verdict would flatten opposite findings: 'PDF/DOCX generation' -> PDF generation (COVERED) + DOCX generation (ABSENT); 'backup and recovery' -> recovery (COVERED) + backup (ABSENT). Every entry carries requested_area naming the original task label, so the 14 entries map onto the 11 requested areas.",
+    "correction_notice": "Revision 2. Revision 1 was stamped 65cb121 but described .github/workflows/c15-ci.yml as it stood at 65cb121's PARENT 8d66c79: the tests were re-collected against the new HEAD, the workflow file was not re-read. That produced a false high-severity finding (FIND-04) and two false statements about the p04-harness job. Every claim in this revision was re-derived against .github/workflows/c15-ci.yml, scripts/c15_local/aggregate_required.py and scripts/pro_workflow/run.py as they are at c9ab4dc, every line citation was re-derived with grep -n, and every node id was verified to collect with `PYTHONPATH= python3 -m pytest \"<nodeid>\" --collect-only -q`. Findings the tree has since fixed are marked status RESOLVED with the fixing commit; none was deleted.",
+    "ci_claims_basis": "The CI statements in this file are read from the workflow FILE at c9ab4dc. No GitHub Actions run was observed and none is claimed; the workflow's own comment cites run 34667257642, which this document did not open.",
+    "nodeid_convention": "Every node id in this file was verified to collect. Class-based tests carry their class segment, because a two-segment id inside a class collects zero. An entry written as a bare file path means the whole module; the parenthesised count is the number of cases that module collected at be464a2.",
+    "head_drift_during_authoring": "HEAD advanced 8d66c79 -> 65cb121 -> a331606 -> 815251f -> be464a2 -> d2efd11 -> 10e7c1d -> c9ab4dc while these two documents were written, by sibling C06 agents in this same worktree. Every line number here is as of c9ab4dc plus the working-tree modifications listed under collected_total.git_status_at_measurement."
+  },
+  "collected_total": {
+    "value": 894,
+    "tracked_files_value": 846,
+    "untracked_files_value": 48,
+    "untracked_files": {
+      "tests/pro_workflow/p04/test_mutations_commercial.py": 30,
+      "tests/pro_workflow/p04/test_metamorphic_reference.py": 18
+    },
+    "confirmed_by": "two consecutive collections at 2026-09-12T02:35:14Z on HEAD c9ab4dc whose node-id lists are byte-identical (diff empty)",
+    "unstable": true,
+    "observed_sequence": [
+      705,
+      733,
+      739,
+      756,
+      852,
+      894
+    ],
+    "instability_cause": "Other C06 sub-agents write test files into this same worktree concurrently, and HEAD itself advanced seven times during authoring. The 705->733 delta was confined by node-id diff to tests/c15_packaging/test_workflow_triggers.py; later growth came from two UNTRACKED files (test_mutations_commercial.py 30, test_metamorphic_reference.py 18) plus tests/pro_workflow/p04/test_nist_strd.py (94, itself modified in the working tree) and further cases in test_ci_aggregator.py (45).",
+    "how_to_quote": "A SHA does NOT make 894 reproducible: 48 of the 894 come from untracked files no commit determines, and the two largest contributing tracked files are modified in the working tree. Quote the tracked-file total (846 at c9ab4dc) AND label it as the tracked-file total; or quote 894 together with `git status --porcelain tests/` (reproduced in git_status_at_measurement); or do not headline a collected total. Even 846 is only approachable, not exactly recomputable, from a clean checkout.",
+    "collect_errors": 0,
+    "git_status_at_measurement": [
+      " M tests/fixtures/pro_workflow/nist_strd/datasets.py",
+      " M tests/pro_workflow/p04/test_nist_strd.py",
+      "?? tests/pro_workflow/p04/test_metamorphic_reference.py",
+      "?? tests/pro_workflow/p04/test_mutations_commercial.py"
+    ]
+  },
+  "skips": [
+    {
+      "id": "SKIP-01",
+      "location": "tests/c15_packaging/test_wheel_install_smoke.py:20-23",
+      "kind": "pytest.mark.skipif (module-level pytestmark)",
+      "condition": "os.environ.get(\"C15_INSTALL_SMOKE\", \"\") not in {\"1\", \"true\", \"yes\"}",
+      "affects": "tests/c15_packaging/test_wheel_install_smoke.py::test_clean_venv_install_imports_resources_and_health",
+      "classification": "a",
+      "evidence": "At revision 1 this was true and class (b): grep -rn C15_INSTALL_SMOKE over .github/ returned nothing, no job set the variable, the module docstring named an 'install-smoke' job that did not exist, and docs/campaigns/MP-20260911/INTEGRATION.md:122 credited install-eval-linux, which then never started a server. FIXED in be464a2: install-eval-linux gained a step 'Clean-venv wheel install smoke (boots /health off the installed dist)' with env C15_INSTALL_SMOKE: \"1\" that runs pytest on the gated module. The test builds a wheel, installs it into a venv, boots uvicorn backend.api:app with THAT venv's interpreter and asserts wait_for_health(...)['status'] == 'healthy' (test_wheel_install_smoke.py:113-128). The skip still fires in wide-suite-linux, which does not set the variable, so the module is not run by every job - but it is run by one, which makes it class (a). Pinned by tests/c15_packaging/test_workflow_triggers.py::test_install_smoke_flag_is_actually_set_by_a_job.",
+      "reason_text": "Set C15_INSTALL_SMOKE=1 to run the clean-venv wheel install smoke",
+      "status": "RESOLVED in be464a2 (was class b)"
+    },
+    {
+      "id": "SKIP-02",
+      "location": "tests/c15_packaging/test_packaging_metadata.py:99",
+      "kind": "pytest.skip inside test body",
+      "condition": "python -m build not importable (returncode != 0 and 'No module named build' in output)",
+      "affects": "tests/c15_packaging/test_packaging_metadata.py::test_sdist_contains_templates_and_css",
+      "classification": "a",
+      "evidence": "The sdist content property it guards is independently produced and consumed by the build-sdist-wheel job, and the wheel twin (test_wheel_contains_packages_templates_css_and_entrypoint) is not gated. `build` is a declared dev extra, installed by every CI job via -e \".[dev]\", so the skip cannot fire in CI.",
+      "reason_text": "python -m build is a dev extra"
+    },
+    {
+      "id": "SKIP-03",
+      "location": "tests/c02_schema/test_c01_real_bundle.py:21,23",
+      "kind": "two pytest.skip calls inside the test body: :21 on ImportError, :23 on ingest_market is None",
+      "condition": "ImportError on modules.data_loader.ingest_market, or ingest_market is None",
+      "affects": "tests/c02_schema/test_c01_real_bundle.py::test_c01_ingest_market_bundle_when_published",
+      "classification": "a",
+      "evidence": "The module docstring states it is 'Skipped until C01 publishes ingest_market on this tree. Not evidence of end-to-end integration.' The symbol is in fact published on this tree (tests/c01_input/test_ingest_market.py collects 33 cases against it), so the guard is dormant rather than hiding an omission. It is honest about not being integration evidence.",
+      "reason_text": "C01 ingest_market not published on this tree"
+    },
+    {
+      "id": "SOFT-01",
+      "location": "tests/pro_workflow/p02/test_a01_playwright.py:81 (_record_block at :67, SCRATCH default at :19)",
+      "kind": "soft pass - not a skip/xfail marker, so no skip report is emitted",
+      "condition": "playwright import fails, or no free loopback port in 18200-18280",
+      "affects": "tests/pro_workflow/p02/test_a01_playwright.py::test_a01_playwright_real_path_or_record_unavailability",
+      "classification": "b",
+      "evidence": "On failure to obtain a browser the test writes a JSON log with status BLOCKED, asserts the log file exists, and returns green. Its two siblings covering the same property - tests/pro_workflow/p04/test_browser_composed.py:57 and tests/acceptance/test_e2e_ui.py:70 - raise AssertionError('NOT_RUN:...') instead. A green result here does not distinguish 'browser flow verified' from 'browser flow not executed'. Additionally SCRATCH defaults to the hardcoded foreign path /tmp/grok-goal-7164525daca4/implementer (line 19). Mitigation: wide-suite-linux installs Playwright Chromium, so the real path is expected to run there; the defect is that nothing in the suite result proves it did.",
+      "reason_text": "A01 nao foi fabricado. Unitarios e AppTest cobrem o restante neste ambiente.",
+      "invisible_to": "tests/c15_packaging/test_ci_aggregator.py::test_skip_xfail_is_caught (:231) - the aggregator's skip/xfail check - cannot see it, because a soft pass emits no skip record."
+    },
+    {
+      "id": "GUARD-01",
+      "location": "tests/c08_report/pdf_text.py:22-25",
+      "kind": "conditional import fallback (not a skip)",
+      "condition": "ImportError on pypdf -> fall back to the pdftotext binary",
+      "affects": "PDF text extraction helper used by tests/c08_report/* and tests/acceptance/test_e2e_pdf.py",
+      "classification": "a",
+      "evidence": "A fallback between two extractors, not an omission: if neither yields text the helper raises rather than passing. It never converts a missing dependency into a pass."
+    },
+    {
+      "id": "GUARD-02",
+      "location": "tests/acceptance/_helpers.py:43-48 (try_export; ImportError -> None at :46-47) and :51-56 (require_export)",
+      "kind": "conditional import",
+      "condition": "ImportError on a product module -> try_export returns None",
+      "affects": "tests/acceptance/*",
+      "classification": "a",
+      "evidence": "require_export turns a missing export into an assertion failure tagged UNMET_DEPENDENCY:<owner>, i.e. red not skipped. try_export is only used where absence is itself the asserted state."
+    },
+    {
+      "id": "GUARD-03",
+      "location": "tests/c17_integration/test_scenarios_a_j.py:604-607",
+      "kind": "conditional import",
+      "condition": "ImportError on c15_local.launcher -> import scripts.c15_local.launcher",
+      "affects": "tests/c17_integration/test_scenarios_a_j.py::TestJLocalInstall::test_loopback_default_and_redis_not_required",
+      "classification": "a",
+      "evidence": "Both branches import the same module under its installed and its source-tree name; no assertion is weakened. Note the same test asserts os.name == 'posix' at :621, so it would fail on Windows - benign because no CI job runs tests/c17_integration on Windows and the campaign OVERVIEW.md explicitly does not announce Windows readiness."
+    }
+  ],
+  "env_gated_optional": [
+    {
+      "id": "OPT-01",
+      "gate": "C15_INSTALL_SMOKE",
+      "test": "tests/c15_packaging/test_wheel_install_smoke.py::test_clean_venv_install_imports_resources_and_health",
+      "properties_asserted": [
+        "pip wheel builds a wheel from the checkout",
+        "wheel installs into a clean venv under constraints/linux-py3.txt",
+        "backend/modules/frontend/c15_local import from site-packages, not the checkout",
+        "modules/templates/report.html and frontend/assets/styles.css resolve as package data",
+        "frontend_command is the streamlit CLI",
+        "uvicorn backend.api:app boots FROM THE INSTALLED WHEEL and /health returns status=healthy"
+      ],
+      "equivalent_elsewhere": "COVERED",
+      "analysis": "At revision 1: install-eval-linux ran only an inline evaluation script which covered wheel install under constraints, site-packages imports, package-data-backed PDF, evidence bundle and reproduce_from_bundle, but never started a server and never called /health - so the composite property was asserted by no job. At be464a2 the same job first runs the gated module with C15_INSTALL_SMOKE=1, which boots uvicorn from the clean venv and asserts /health returns status=healthy. Residual observation, still true and still worth keeping: every OTHER health boot in the tree runs against the editable checkout (tests/c15_packaging/test_launcher_command.py:95, tests/c17_integration/test_r17_hardening.py:218, tests/acceptance/test_e2e_ui.py:117, tests/pro_workflow/p04/test_browser_composed.py:105) or in-process via the FastAPI TestClient (tests/test_api.py:15, tests/acceptance/test_e2e_http.py:23). The gated test is still the only one that boots a server from a non-editable installed distribution, so removing its CI setter would silently remove the property again - which tests/c15_packaging/test_workflow_triggers.py::test_install_smoke_flag_is_actually_set_by_a_job now prevents.",
+      "finding": false,
+      "status": "RESOLVED in be464a2 (was FIND-03)"
+    },
+    {
+      "id": "OPT-02",
+      "gate": "P04_REQUIRE_EXTENSIONS",
+      "test": "tests/pro_workflow/p04/test_candidate_extensions.py (whole module)",
+      "properties_asserted": [
+        "search_policy.minimum_fundamentacao_grade is honoured as the canonical field",
+        "provenance.workflow_context carries schema_version MP-PRO/1",
+        "conflicting grade aliases produce structured errors"
+      ],
+      "equivalent_elsewhere": "COVERED",
+      "analysis": "The module is never skipped: wide-suite-linux runs `pytest tests`, so it executes. With P04_REQUIRE_EXTENSIONS unset a missing extension is written to finding_*.json and the case still passes (test_candidate_extensions.py:15). Revision 1 concluded from the absence of the variable in the workflow that the strict run never happens in CI. THAT WAS WRONG: scripts/pro_workflow/run.py:124-127 exports P04_REQUIRE_EXTENSIONS=1 into the child environment whenever --mode accept-candidate is used, and since 65cb121 the p04-harness job runs exactly `python scripts/pro_workflow/run.py --mode accept-candidate`. The strict suite therefore runs in CI, is recorded in run.json as a run named 'extensions' (run.py:172-191), and the aggregator fails the build if that run is absent (aggregate_required.py:154-156) or if the recorded mode is not accept-candidate (:130-132). Overlapping strict coverage also exists in tests/pro_workflow/p01/test_a03_grade_aliases.py and tests/pro_workflow/p02/test_request_grade_method.py.",
+      "finding": false,
+      "status": "RESOLVED in 65cb121 (was FIND-04)"
+    },
+    {
+      "id": "OPT-03",
+      "gate": "C17_UI_EVIDENCE / C16_UI_SCREENSHOT",
+      "test": "tests/acceptance/test_e2e_ui.py",
+      "properties_asserted": [
+        "where UI screenshots are copied"
+      ],
+      "equivalent_elsewhere": "N/A",
+      "analysis": "These variables select an artefact destination only. They do not gate any assertion: when unset the test still drives Chromium and still raises NOT_RUN on failure. wide-suite-linux sets C17_UI_EVIDENCE=artifacts/ui-e2e.",
+      "finding": false
+    },
+    {
+      "id": "OPT-04",
+      "gate": "P02_SCRATCH",
+      "test": "tests/pro_workflow/p02/test_a01_playwright.py",
+      "properties_asserted": [
+        "where the BLOCKED log is written"
+      ],
+      "equivalent_elsewhere": "N/A",
+      "analysis": "Destination only, but the default is a hardcoded foreign scratch path (/tmp/grok-goal-7164525daca4/implementer). See SOFT-01 for the real defect in this file.",
+      "finding": false
+    }
+  ],
+  "areas": [
+    {
+      "area": "calculation boundaries",
+      "requested_area": "calculation boundaries",
+      "verdict": "COVERED",
+      "tests": [
+        "tests/c02_schema/test_boundaries.py",
+        "tests/c03_normative/test_a01_item4_boundary_delta.py",
+        "tests/c03_normative/test_a02_frontiers.py (10 cases)",
+        "tests/c06_transformations/test_a01_x_domains.py (18 cases)",
+        "tests/c06_transformations/test_a02_roundtrip.py (9 cases)",
+        "tests/test_nbr14653.py::TestItem6SignificanciaGlobal::test_classifier_boundaries",
+        "tests/test_nbr14653.py::TestItem2QuantidadeDados::test_formula_boundaries",
+        "tests/test_nbr14653.py::TestFinalizePrecisionAndExtrapolation::test_extrapolation_admitida_uma_variavel_com_valor_na_fronteira",
+        "tests/pro_workflow/p04/test_corpus_s01_s08.py (10 cases)"
+      ],
+      "evidence": "Threshold values are probed on both sides of each frontier (test_a02_frontiers, test_classifier_boundaries) and transform input domains plus their round trips are enumerated in c06; the extrapolation boundary case is exercised at the exact limit value."
+    },
+    {
+      "area": "statistical hypotheses",
+      "requested_area": "statistical hypotheses",
+      "verdict": "COVERED",
+      "tests": [
+        "tests/test_nbr14653.py::TestItem5SignificanciaRegressores::test_worst_pvalue_determines_grade_not_average_or_best",
+        "tests/test_nbr14653.py::TestItem5SignificanciaRegressores::test_worst_pvalue_fails_even_if_average_would_pass",
+        "tests/test_nbr14653.py::TestItem5SignificanciaRegressores::test_const_excluded_from_worst_pvalue",
+        "tests/c04_fitting/test_a03_design_diagnostics.py (7 cases)",
+        "tests/c04_fitting/test_a04_prediction_intervals.py",
+        "tests/c04_fitting/test_a01_influence_exclusion.py (6 cases)",
+        "tests/pro_workflow/p01/test_a01_ols_oracle.py",
+        "tests/pro_workflow/p04/test_oracle_independence.py (8 cases)",
+        "tests/acceptance/test_oracles_f01_f16.py (21 cases)"
+      ],
+      "evidence": "Coefficient significance uses the worst p-value rule with the constant excluded, intervals and Cook influence are cross-checked against tests/fixtures/pro_workflow/ols_oracle.py, which imports only numpy/scipy and whose independence is itself asserted by test_oracle_independence.py."
+    },
+    {
+      "area": "qualification profile (grau de fundamentacao / precisao)",
+      "requested_area": "qualification profile",
+      "verdict": "COVERED",
+      "tests": [
+        "tests/c03_normative/test_a04_classifiers.py (8 cases)",
+        "tests/c03_normative/test_a05_precisao_documentary.py (8 cases)",
+        "tests/c03_normative/test_assess_normative_contract.py",
+        "tests/test_nbr14653.py::TestClassifyFundamentacao::test_grau_iii / test_grau_ii / test_grau_i / test_none_when_below_all_thresholds",
+        "tests/test_nbr14653.py::TestClassifyFundamentacao::test_points_enough_but_required_item_downgrades_from_iii_to_ii",
+        "tests/test_nbr14653.py::TestFinalizePrecisionAndExtrapolation::test_grau_precisao_ranges",
+        "tests/pro_workflow/p01/test_a03_grade_aliases.py",
+        "tests/pro_workflow/p02/test_request_grade_method.py (5 cases)"
+      ],
+      "evidence": "Both the points total and the per-item minimum are tested independently (a passing total with a failing required item downgrades), and the contract rule that the effective grade comes from validation.fundamentacao rather than from the request is asserted in p01/p02."
+    },
+    {
+      "area": "UI",
+      "requested_area": "UI",
+      "verdict": "PARTIAL",
+      "tests": [
+        "tests/c09_frontend/test_request_spec.py (12 cases)",
+        "tests/c09_frontend/test_snapshot_presenter.py (9 cases)",
+        "tests/c09_frontend/test_layout_states.py (6 cases)",
+        "tests/c09_frontend/test_app_launch.py",
+        "tests/pro_workflow/p02/test_presenter_and_delivery.py (9 cases)",
+        "tests/pro_workflow/p02/test_invalidation_and_binding.py (8 cases)",
+        "tests/acceptance/test_e2e_ui.py",
+        "tests/pro_workflow/p04/test_browser_composed.py",
+        "tests/pro_workflow/p02/test_a01_playwright.py::test_a01_playwright_real_path_or_record_unavailability"
+      ],
+      "evidence": "Presenter, request-spec building and layout states are covered by unit and AppTest level tests; real-browser coverage exists and fails honestly in two of three files, but the third (SOFT-01) can report green without having driven a browser, so end-to-end UI cannot be asserted from a green suite alone."
+    },
+    {
+      "area": "PDF generation",
+      "requested_area": "PDF/DOCX generation",
+      "verdict": "COVERED",
+      "tests": [
+        "tests/c08_report/test_a01_snapshot_numbers.py",
+        "tests/c08_report/test_a02_warnings.py",
+        "tests/c08_report/test_a03_integral_rows.py",
+        "tests/c08_report/test_a04_layout.py",
+        "tests/c08_report/test_a05_exception.py",
+        "tests/acceptance/test_e2e_pdf.py",
+        "tests/pro_workflow/p03/test_a01_pdf_fields.py",
+        "tests/pro_workflow/p03/test_a02_integral_annex.py",
+        "tests/pro_workflow/p03/test_a03_formula_series.py (6 cases)",
+        "tests/c15_packaging/test_format_engines.py::test_weasyprint_probe_ok_or_actionable_native_error"
+      ],
+      "evidence": "Bytes are asserted to start with %PDF and the extracted text is matched field by field against the snapshot numbers, on Linux with the native pango/cairo stack installed by CI. Windows PDF is explicitly not announced (docs/campaigns/MP-PRO-20260911/OVERVIEW.md) and the Windows job's --check-pdf step is continue-on-error."
+    },
+    {
+      "area": "DOCX generation",
+      "requested_area": "PDF/DOCX generation",
+      "verdict": "ABSENT",
+      "tests": [
+        "NONE"
+      ],
+      "evidence": "grep for docx / python-docx / Document( across tests/, modules/, backend/, frontend/ and pyproject.toml returns no hit. There is no DOCX feature in the product, therefore no test and nothing to cover. If DOCX is an announced commercial requirement it is unimplemented, not merely untested."
+    },
+    {
+      "area": "digital signature",
+      "requested_area": "digital signature",
+      "verdict": "ABSENT",
+      "tests": [
+        "NONE"
+      ],
+      "evidence": "grep for assinatura / signature / sign_pdf / ICP-Brasil / pyhanko / endesive across tests/, modules/, backend/, frontend/ matches only inspect.signature() reflection calls (modules/local_task_runner.py:28, backend/api.py:527, tests/c14_batch/test_public_api.py:12, tests/acceptance/test_oracles_f01_f16.py:234). No signing, no certificate handling, no signature verification exists."
+    },
+    {
+      "area": "dossier / evidence bundle",
+      "requested_area": "dossier/evidence bundle",
+      "verdict": "COVERED",
+      "tests": [
+        "tests/c12_evidence/test_a01_complete_package.py",
+        "tests/c12_evidence/test_a02_integrity_manifest.py",
+        "tests/c12_evidence/test_a03_reproduction.py (6 cases)",
+        "tests/c12_evidence/test_a04_csv_safety.py",
+        "tests/c12_evidence/test_a05_completeness.py",
+        "tests/pro_workflow/p01/test_a05_dossier.py (5 cases)",
+        "tests/pro_workflow/p03/test_a06_verifier.py",
+        ".github/workflows/c15-ci.yml job install-eval-linux (inline reproduce_from_bundle assertion)"
+      ],
+      "evidence": "The manifest hash check, the CSV-injection safety of exported cells and an end-to-end reproduce_from_bundle that must land within tolerance of the original point estimate are all asserted, and the reproduction is repeated from the installed wheel in install-eval-linux."
+    },
+    {
+      "area": "recovery (crash / restart durability)",
+      "requested_area": "backup and recovery",
+      "verdict": "COVERED",
+      "tests": [
+        "tests/c11_persistence/test_a02_restart_and_abandoned.py::TestRestartAndAbandoned::test_reopen_reloads_immutable_revisions",
+        "tests/c11_persistence/test_a02_restart_and_abandoned.py::TestRestartAndAbandoned::test_abandoned_running_becomes_interrupted_without_fabricating_success",
+        "tests/c11_persistence/test_a02_restart_and_abandoned.py::TestRestartAndAbandoned::test_abandoned_running_keeps_snapshot_but_does_not_mark_succeeded",
+        "tests/c11_persistence/test_a05_durability_security.py::TestDurabilityAndSafety::test_truncated_write_does_not_corrupt_existing_snapshot",
+        "tests/c11_persistence/test_a05_durability_security.py::TestDurabilityAndSafety::test_unknown_schema_version_refuses_to_mutate_store",
+        "tests/c11_persistence/test_fresh_process.py::test_fresh_process_public_api",
+        "tests/c11_persistence/test_a01_queryable_without_ws.py (4 cases)"
+      ],
+      "evidence": "A torn write is shown not to corrupt the prior snapshot, an abandoned running job becomes interrupted rather than silently succeeded, and the store is shown queryable from a fresh process with no websocket."
+    },
+    {
+      "area": "backup (user-facing backup / export / restore-from-backup)",
+      "requested_area": "backup and recovery",
+      "verdict": "ABSENT",
+      "tests": [
+        "NONE"
+      ],
+      "evidence": "The word 'backup' does not appear as a feature anywhere; grep hits under modules/ (job_store.py, project_store.py, evidence_bundle.py) are durable-store and restore-of-state code, covered under recovery above. There is no backup command, no archive/export of the whole data directory, and no restore-from-backup path, therefore no test. Do not read the recovery verdict as backup coverage."
+    },
+    {
+      "area": "installer",
+      "requested_area": "installer and update",
+      "verdict": "PARTIAL",
+      "tests": [
+        "tests/c15_packaging/test_packaging_metadata.py (5 cases)",
+        "tests/c15_packaging/test_dependency_sync.py (8 cases)",
+        "tests/c15_packaging/test_launcher_command.py (4 cases, incl. test_backend_process_health_on_loopback)",
+        "tests/c15_packaging/test_config_defaults.py (9 cases)",
+        "tests/c15_packaging/test_wheel_install_smoke.py::test_clean_venv_install_imports_resources_and_health (run by install-eval-linux with C15_INSTALL_SMOKE=1 since be464a2; still skipped in wide-suite-linux - SKIP-01)",
+        ".github/workflows/c15-ci.yml jobs build-sdist-wheel and install-eval-linux"
+      ],
+      "evidence": "Packaging is real and verified: wheel/sdist contents, package data, dependency-to-import sync, a clean-venv install that computes a value and emits a PDF, and - since be464a2 - the same job booting /health off the installed wheel (OPT-01, resolved). What is missing is any installer artefact for an end user: there is no .exe/.msi/.pkg/.deb build, only a wheel plus scripts/c15_local/launcher.py. That single gap is why the verdict stays PARTIAL."
+    },
+    {
+      "area": "update",
+      "requested_area": "installer and update",
+      "verdict": "ABSENT",
+      "tests": [
+        "NONE"
+      ],
+      "evidence": "grep for updater / auto_update / update_check / atualizacao across tests/, modules/, backend/, scripts/ returns nothing. scripts/c15_local/update_constraints.py is a developer tool that regenerates constraints/linux-py3.txt; it is not a product update channel and must not be counted as coverage. There is no version-check endpoint, no migration-on-upgrade path, and no test of upgrading an installed instance."
+    },
+    {
+      "area": "licences",
+      "requested_area": "licences",
+      "verdict": "ABSENT",
+      "tests": [
+        "NONE"
+      ],
+      "evidence": "No LICENSE file exists at the repo root; pyproject.toml declares no license field and no License:: classifier; there is no third-party licence inventory, no bundled NOTICE, and no product licence-key or entitlement mechanism. grep for licen[cs] across tests/, modules/, backend/ returns no hit. Nothing is covered because nothing exists."
+    },
+    {
+      "area": "security",
+      "requested_area": "security",
+      "verdict": "PARTIAL",
+      "tests": [
+        "tests/c11_persistence/test_a05_durability_security.py::TestDurabilityAndSafety::test_path_traversal_is_rejected",
+        "tests/c11_persistence/test_a05_durability_security.py::TestDurabilityAndSafety::test_pickle_and_model_object_are_not_deserialized",
+        "tests/c11_persistence/test_a05_durability_security.py::TestDurabilityAndSafety::test_storage_lives_only_under_temp_root",
+        "tests/c11_persistence/test_c10_callsite_adapters.py::TestC10CallsiteAdapters::test_save_and_get_artifact_rejects_traversal",
+        "tests/c11_persistence/test_a04_ws_isolation.py::TestWebsocketIsolation::test_real_ws_route_requires_local_token_and_isolates_jobs",
+        "tests/c11_persistence/test_a04_ws_isolation.py::TestWebsocketIsolation::test_wrong_token_is_rejected",
+        "tests/c11_persistence/test_a04_ws_isolation.py::TestWebsocketIsolation::test_two_jobs_never_see_each_others_payloads",
+        "tests/c10_pipeline/test_a05_security_peers.py (8 cases)",
+        "tests/c12_evidence/test_a04_csv_safety.py",
+        "tests/c15_packaging/test_config_defaults.py::test_default_bind_is_loopback_not_all_interfaces",
+        "tests/c15_packaging/test_config_defaults.py::test_default_cors_is_explicit_localhost_not_star",
+        "tests/c15_packaging/test_config_defaults.py::test_star_cors_is_rejected",
+        "tests/c15_packaging/test_config_defaults.py::test_no_embedded_secret_in_defaults",
+        "tests/c15_packaging/test_no_secrets.py (2 cases)",
+        "tests/c15_packaging/test_logging.py (2 cases)",
+        "tests/c17_integration/test_r17_hardening.py (9 cases)"
+      ],
+      "evidence": "The local-deployment threat model is covered concretely: loopback-only bind, explicit CORS, ws token, per-job payload isolation, path traversal, no pickle deserialization, CSV formula injection, no secrets in defaults, PII stripped from logs. Not covered: authentication/authorization of a multi-user deployment, transport encryption, dependency vulnerability scanning (no pip-audit/safety step in c15-ci.yml), and licence/supply-chain provenance. The product is announced as a local single-user install, which makes the first two arguably out of matrix, but the absence of any dependency-vulnerability gate is a real gap for a commercial release."
+    }
+  ],
+  "ci_jobs": [
+    {
+      "job": "lint",
+      "runs": "flake8 over setup.py, modules/config_manager.py, modules/logging_manager.py, backend/monitor.py, the four __init__ markers, scripts/c15_local, scripts/pro_workflow, tests/c15_packaging, tests/pro_workflow/p04, tests/fixtures/pro_workflow",
+      "suites": [],
+      "required": true,
+      "note": "Style only, and only over C15/P04-owned paths. modules/, backend/ and frontend/ at large are not linted."
+    },
+    {
+      "job": "c15-tests-linux",
+      "runs": "python -m pytest tests/c15_packaging -q",
+      "suites": [
+        "tests/c15_packaging"
+      ],
+      "required": true,
+      "note": "Emits artifacts/c15-linux.junit.xml."
+    },
+    {
+      "job": "build-sdist-wheel",
+      "runs": "python -m build",
+      "suites": [],
+      "required": true
+    },
+    {
+      "job": "install-eval-linux",
+      "runs": "installs the built wheel into a venv outside the checkout; then runs `pytest tests/c15_packaging/test_wheel_install_smoke.py` with env C15_INSTALL_SMOKE=1 (boots /health off the installed dist); then an inline script that composes a valuation job, asserts point ~= 735000, asserts report.pdf starts with %PDF, asserts the evidence manifest exists and reproduce_from_bundle reproduces the point with integrity ok",
+      "suites": [
+        "tests/c15_packaging/test_wheel_install_smoke.py"
+      ],
+      "required": true,
+      "note": "Since be464a2 this job is where the installed-artifact /health property is asserted - see OPT-01."
+    },
+    {
+      "job": "c15-tests-windows",
+      "runs": "python -m pytest tests/c15_packaging -q, then c15_local.launcher --check-pdf with continue-on-error",
+      "suites": [
+        "tests/c15_packaging"
+      ],
+      "required": true,
+      "note": "Present in the aggregator's --required-jobs list at be464a2, so a Windows failure does block the gate; pinned by tests/c15_packaging/test_workflow_triggers.py::test_windows_blocks_the_gate. This is not a Windows readiness claim: the --check-pdf step is deliberately continue-on-error and docs/campaigns/MP-PRO-20260911/OVERVIEW.md:4 states Windows PDF is not claimed."
+    },
+    {
+      "job": "wide-suite-linux",
+      "runs": "python -m pytest tests -q (the entire tests/ tree), with Playwright Chromium installed and C17_UI_EVIDENCE set",
+      "suites": [
+        "tests (all)"
+      ],
+      "required": true,
+      "note": "Runs the whole tree. It does not set C15_INSTALL_SMOKE, so test_wheel_install_smoke.py still skips here; that module is executed by install-eval-linux instead."
+    },
+    {
+      "job": "c16-harness",
+      "runs": "python scripts/c16_acceptance/run_harness.py --output artifacts/c16.json",
+      "suites": [],
+      "required": true
+    },
+    {
+      "job": "p04-harness",
+      "runs": "python scripts/pro_workflow/run.py --mode accept-candidate --output artifacts/p04, then scripts/pro_workflow/measure.py --phase before, then a guard step that re-reads artifacts/p04/run.json and exits 1 unless mode == 'accept-candidate' and exit_code == 0",
+      "suites": [],
+      "required": true,
+      "note": "Strict acceptance mode, not diagnostic. run.py:124-125 exports P04_REQUIRE_EXTENSIONS=1 for this mode, so the strict extensions suite really runs - see OPT-02. Revision 1 of this document said '--mode diagnose-base ... Diagnostic mode only. No --phase after and no strict run'; that described 8d66c79, not 65cb121, and was false when written."
+    },
+    {
+      "job": "acceptance",
+      "runs": "python scripts/c15_local/aggregate_required.py --required-jobs lint,c15-tests-linux,c15-tests-windows,build-sdist-wheel,install-eval-linux,wide-suite-linux,c16-harness,p04-harness --results-json '${{ toJSON(needs) }}' --artifacts-dir evidence --expected-sha \"$CANDIDATE_SHA\" --min-wide-tests 700 --p04-mode accept-candidate, after downloading every evidence artifact into evidence/. CANDIDATE_SHA is github.event.pull_request.head.sha on pull_request, else github.sha.",
+      "suites": [],
+      "required": true,
+      "note": "Invoked WITH --artifacts-dir, so verify_artifacts() (aggregate_required.py:224, reached from main() at :241 via the branch at :268) does execute: it enforces the strict extensions run (:154-156), the recorded accept-candidate mode (:130-132), the expected SHA (:170-173), the wide-test floor (check_junit at :178) and the absence of skips/xfails and failure findings (:158-159, :165-168). Revision 1 said the opposite; that was false at 65cb121 and is false at be464a2. Pinned by tests/c15_packaging/test_workflow_triggers.py::test_aggregator_opens_the_evidence_not_only_the_job_results and ::test_p04_harness_job_accepts_the_candidate_strictly."
+    }
+  ],
+  "findings": [
+    {
+      "id": "FIND-01",
+      "severity": "high",
+      "title": "No requirements matrix exists for MP-COM-20260912/C06",
+      "detail": "docs/comercial/ did not exist in this repo before this inventory. The eleven areas inventoried here come from the C06 task statement. Nothing in the repo declares which of them are obligatory for the commercial release, so 'applicable requirement' cannot be verified against a source document. Any coverage claim in this inventory is coverage against an unratified list.",
+      "status": "OPEN"
+    },
+    {
+      "id": "FIND-02",
+      "severity": "high",
+      "title": "Digital signature, DOCX, licences and product update are entirely absent from the product",
+      "detail": "Four of the eleven areas have no implementation at all, hence no test: digital signature (only inspect.signature reflection hits), DOCX generation (zero hits repo-wide), licences (no LICENSE file, no license field in pyproject.toml, no third-party inventory, no entitlement mechanism) and update (no updater; scripts/c15_local/update_constraints.py is a dev tool, not a product update channel). These are ABSENT, not PARTIAL.",
+      "status": "OPEN"
+    },
+    {
+      "id": "FIND-03",
+      "severity": "high",
+      "title": "C15_INSTALL_SMOKE was set by no CI job, so the installed-artifact /health property was asserted nowhere",
+      "detail": "tests/c15_packaging/test_wheel_install_smoke.py is skipif-gated on C15_INSTALL_SMOKE, which grep finds in no file under .github/. Its docstring claims 'CI runs it in the dedicated install-smoke job'; that job does not exist. INTEGRATION.md:122 says it is covered by install-eval-linux, but install-eval-linux never boots a server and never calls /health. The closest health test, tests/c15_packaging/test_launcher_command.py::test_backend_process_health_on_loopback, runs against the editable checkout, not the installed wheel. Class (b). Hardened by exhaustive check: grep -rn 'wait_for_health|/health' over tests/, scripts/ and backend/ shows every other health boot runs against the editable checkout - test_launcher_command.py:95, c17_integration/test_r17_hardening.py:218, acceptance/test_e2e_ui.py:117, p04/test_browser_composed.py:105 - or via fastapi TestClient in-process (tests/test_api.py:15, acceptance/test_e2e_http.py:23). No test other than the skipped one boots a server from a non-editable installed distribution. RESOLUTION: be464a2 added a step to install-eval-linux with env C15_INSTALL_SMOKE: \"1\" that runs pytest tests/c15_packaging/test_wheel_install_smoke.py; the test boots uvicorn with the clean venv's interpreter and asserts /health returns status=healthy (test_wheel_install_smoke.py:113-128). A regression guard, tests/c15_packaging/test_workflow_triggers.py::test_install_smoke_flag_is_actually_set_by_a_job, fails if the setter is ever removed. INTEGRATION.md:122's 'coberto por install-eval-linux' is now true, by a mechanism that did not exist when that line was written. Retained, not deleted: the negative was real.",
+      "status": "RESOLVED in be464a2"
+    },
+    {
+      "id": "FIND-04",
+      "severity": "high",
+      "title": "The aggregator's evidence verification, including the strict P04 extensions run, did not execute in CI (original R20-A defect; independently rediscovered, already fixed)",
+      "detail": "This is an accurate description of the original R20-A defect and was reached independently here. It was however ALREADY FIXED when this document first measured: 65cb121 landed at 2026-09-12T01:58:30Z and revision 1 measured at 02:01:23Z, having re-collected tests against the new HEAD without re-reading the workflow, so it described the parent 8d66c79 and stamped it 65cb121. WHAT THE DEFECT WAS: verify_artifacts() runs only when --artifacts-dir is passed, and the acceptance job passed only --required-jobs and --results-json, so the strict-extensions check (aggregate_required.py:154-156), the mode check (:130-132), the SHA check (:170-173) and the wide-test floor never ran; combined with p04-harness running --mode diagnose-base, no CI path could turn a missing P01/P02/P03 extension on the composed candidate into a red build. STATE AT be464a2: the acceptance job passes --artifacts-dir evidence --expected-sha \"$CANDIDATE_SHA\" --min-wide-tests 700 --p04-mode accept-candidate, and p04-harness runs --mode accept-candidate, which exports P04_REQUIRE_EXTENSIONS=1 (run.py:124-125) and records an 'extensions' run in run.json (run.py:172-191). A missing extension does now make the build red. Guarded by tests/c15_packaging/test_workflow_triggers.py::test_aggregator_opens_the_evidence_not_only_the_job_results and ::test_p04_harness_job_accepts_the_candidate_strictly. CORRECTION: revision 1 cited aggregate_required.py:135-136 for the strict-extensions check and main() at :243; :135-136 is the exit_code check and main() is at :241. The strict-extensions check is at :154-156.",
+      "status": "RESOLVED in 65cb121"
+    },
+    {
+      "id": "FIND-05",
+      "severity": "medium",
+      "title": "tests/pro_workflow/p02/test_a01_playwright.py reports green when the browser flow did not run",
+      "detail": "On playwright import failure or no free port it writes a BLOCKED log, asserts the log exists and returns - a pass. Its two siblings covering the same property (p04/test_browser_composed.py, acceptance/test_e2e_ui.py) raise AssertionError('NOT_RUN:...'). Because this is neither skip nor xfail it is invisible to skip reporting and to the aggregator's skip/xfail check (tests/c15_packaging/test_ci_aggregator.py::test_skip_xfail_is_caught, :231). Its SCRATCH default is also a hardcoded foreign path, /tmp/grok-goal-7164525daca4/implementer.",
+      "status": "OPEN"
+    },
+    {
+      "id": "FIND-06",
+      "severity": "medium",
+      "title": "The collected test total is not reproducible, and quoting the SHA does not fix that",
+      "detail": "Collections at 705, 733, 739, 756 and 852 were observed on this worktree while sibling C06 agents wrote test files into it. 852 was confirmed at be464a2 by two consecutive collections whose node-id lists are byte-identical. THE INSTABILITY DISCLOSURE STANDS. The remedy proposed in revision 1 - 'any downstream document quoting a bare total must quote the SHA with it' - DOES NOT WORK, because 39 of the 852 come from two UNTRACKED files (tests/pro_workflow/p04/test_mutations_commercial.py 21, tests/pro_workflow/p04/test_metamorphic_reference.py 18) that no commit determines; an independent verifier's re-run over a superset tree reported 832, at a tree whose SHA would have been quoted as authority for a different number (that 832 is the verifier's measurement, not one taken here). WORKING REMEDY: quote the tracked-file total (813 at be464a2) and label it as such - see collected_total.how_to_quote for why even 813 is only approachable, not exactly recomputable, from a clean checkout; or quote 852 together with `git status --porcelain tests/` showing exactly which untracked test files were present; or do not use a collected total as a headline number at all.",
+      "status": "OPEN"
+    },
+    {
+      "id": "FIND-07",
+      "severity": "medium",
+      "title": "No dependency-vulnerability or supply-chain gate for a commercial release",
+      "detail": ".github/workflows/c15-ci.yml has no pip-audit, safety, SBOM or licence-scan step. constraints/linux-py3.txt pins versions and tests/c15_packaging/test_dependency_sync.py verifies the pins match the imports, but nothing checks those pins against a vulnerability database or records the licences of the pinned dependencies. Combined with FIND-02's absent licence file, the supply-chain posture of the release is unverified. CROSS-REFERENCE: the sibling C06 deliverable docs/comercial/c06/security_supply_chain.md reaches the same conclusion independently and records it as BLOCKED items B1 and B2 - pip-audit and safety are absent from every inspected interpreter and from PATH, and no SBOM generator is installed, so no vulnerability scan and no transitive licence review were performed. That document also records a concrete licence obligation (xlrd 2.0.2 is BSD-3-Clause AND BSD-4-Clause; the BSD-4-Clause portion requires an attribution acknowledgment in redistributions), which reinforces the licences=ABSENT verdict here: the repo ships no LICENSE and no third-party notices file to carry that acknowledgment. Consolidation should treat FIND-07 and that document's B1/B2/F2 as one finding.",
+      "status": "OPEN"
+    },
+    {
+      "id": "FIND-08",
+      "severity": "low",
+      "title": "c15-tests-windows cannot block the gate",
+      "detail": "The Windows job was absent from the acceptance job's --required-jobs list, so a Windows failure was not a red build. RESOLUTION: at be464a2 c15-tests-windows is in --required-jobs and in the acceptance job's needs, pinned by tests/c15_packaging/test_workflow_triggers.py::test_windows_blocks_the_gate. This makes the Windows packaging tests blocking; it is still not a Windows readiness claim, since launcher --check-pdf remains continue-on-error and docs/campaigns/MP-PRO-20260911/OVERVIEW.md:4 does not announce Windows PDF.",
+      "status": "RESOLVED in be464a2"
+    },
+    {
+      "id": "FIND-09",
+      "severity": "low",
+      "title": "Lint covers only C15/P04-owned paths",
+      "detail": "The lint job's flake8 invocation enumerates a fixed file list; modules/, backend/ and frontend/ at large are not linted. Not a correctness defect, but the gate does not mean 'the codebase lints'.",
+      "status": "OPEN"
+    }
+  ],
+  "not_claimed": [
+    "The suite was not executed; only collection was run. No pass/fail claim is made.",
+    "No external certification, approval or conformity assessment is claimed. NBR 14653-2 coverage refers to tests the repo contains.",
+    "No GitHub Actions run was observed. CI statements are read from .github/workflows/c15-ci.yml at be464a2 - what the workflow instructs, not what a run did.",
+    "No Windows readiness claim, and no claim that the product was validated by a human appraiser.",
+    "Where an area is ABSENT, no compensating coverage was found and none is implied."
+  ],
+  "skip_enumeration_oracle": "grep -rn \"pytest\\.skip|skipif|xfail|pytest\\.importorskip\" tests/ --include=*.py, re-run at c9ab4dc: exactly three genuine skip sites (SKIP-01/02/03) and no xfail marker anywhere. The other grep hits are aggregator fixtures and assertions ABOUT skip/xfail counting, not markers. Unchanged since the 705-case snapshot despite the tree growing to 894.",
+  "_WARNING_defeitos_abertos": "Defeitos provados e NAO corrigidos neste arquivo. Ver docs/comercial/c06/defeitos_abertos_nos_documentos.md. FIND-04 e as mencoes a diagnose-base sao FALSAS no SHA fixado; FIND-03 e FIND-08 estao RESOLVIDOS em be464a2; ~12 node ids citados coletam zero."
+}

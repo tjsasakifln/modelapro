@@ -118,3 +118,55 @@ A demonstração ainda ausente: um run real de `workflow_dispatch` em branch
 descartável com um defeito injetado, produzindo uma URL de run vermelho. É a
 diferença entre "testado unitariamente" e "demonstrado". Registrado como
 pendência, não como feito.
+
+## O portão mordendo num run real
+
+Run de push **34666595782**, SHA `a331606`
+(<https://github.com/tjsasakifln/modelapro/actions/runs/34666595782>),
+conclusão `failure`. O job `Required jobs aggregator` imprimiu:
+
+```
+aggregator: evidence artifacts disagree with the job results:
+  - p04 run.json: exit_code is 1, required 0
+  - p04 run.json: run extensions returncode 1, required 0
+  - p04 run.json: run extensions reports 1 failed cases
+  - p04 run.json: 2 failure findings recorded, e.g.
+      ['tests.pro_workflow.p04.test_candidate_extensions::test_minimum_fundamentacao_grade_canonical_field',
+       'P04-EXT-minimum_grade']
+  - wide.junit.xml: 1 testcases, floor is 700 (suite truncated or not run)
+  - wide.junit.xml: 1 failed/errored testcases, e.g. ['::tests.c15_packaging.test_workflow_triggers']
+```
+
+Três coisas a registrar sobre esse run.
+
+**1. A leitura de artefato funcionou de ponta a ponta.** O agregador baixou os
+artefatos, abriu `run.json` e reportou `exit_code is 1` — exatamente o sintoma
+que antes ficava verde. Não é mais simulação de laboratório.
+
+**2. A distinção de `findings` está correta na prática.** O run registrou
+quatro entradas em `findings`; o agregador acusou **duas**, e são as duas com
+sinal de falha (o `nodeid` do teste que falhou e o `present: false` do
+`P04-EXT-minimum_grade`). Os registros de sucesso `P04-EXT-formula` e
+`P04-EXT-alias_conflict`, ambos `present: true`, não foram contados. Era
+exatamente o defeito que o portão tinha antes de ser corrigido.
+
+**3. O piso de testcases pegou uma suíte truncada sem ter sido planejado para
+isso.** `wide.junit.xml: 1 testcases, floor is 700` aconteceu porque a suíte
+ampla morreu na coleta, não porque testes falharam. Um agregador que só
+olhasse "há falhas no XML?" veria um XML quase limpo. O piso fixado antes do
+ensaio é o que separou "suíte passou" de "suíte não rodou".
+
+Causas, que são duas e independentes:
+
+- A coleta quebrou por culpa de C06: o teste estrutural importava `yaml`, e
+  PyYAML não é dependência declarada deste projeto. Corrigido em `815251f`
+  com um leitor próprio, sem tocar em dependências (C04 é o proprietário).
+- `p04 run.json: exit_code is 1` **não** é C06 e não foi corrigido: é o
+  defeito de grau descrito em `handoff_c01_grade_not_met.md`, que pertence a
+  C01. O job `p04-harness` continua vermelho enquanto esse handoff não for
+  implementado, e deve continuar.
+
+Este run é a demonstração que faltava na seção anterior. Ele não substitui a
+matriz de injeções: a matriz prova que cada modo de falha é detectado
+isoladamente; o run prova que o caminho completo — upload, download,
+leitura, comparação — funciona no ambiente real.

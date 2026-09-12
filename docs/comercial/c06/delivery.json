@@ -1,0 +1,109 @@
+{
+  "id": "MP-COM-20260912/C06",
+  "lote": "MP-COM-20260912",
+  "role": "integrador e dono da prova final; único publicador da composição na #20",
+  "base_sha": "8d66c7973c659174e06d7223c9a9a8181e8eeabf",
+  "branch": "mp-pro-20260911/p04-referencia-consolidacao",
+  "pr_base": "mp-20260911/integracao-final",
+  "pr_number": 20,
+  "head_note": "O SHA desta entrega é publicado em comentário da PR depois do commit, nunca dentro dele.",
+  "local_classification": "IMPLEMENTED_PARTIAL",
+  "product_state": {
+    "CODIGO_COMPLETO": "parcial",
+    "TECHNICAL_QUALIFICATION": "parcial",
+    "NORMATIVE_SCOPE_VERIFICATION": "reprovado",
+    "COMMERCIAL_PACKAGE_VERIFICATION": "parcial",
+    "INDEPENDENT_TECHNICAL_REVIEW": "nao_realizado",
+    "REAL_CASE_VALIDATION": "nao_realizado",
+    "INSTITUTION_PROFILE_VERIFICATION": "preparado",
+    "INSTITUTION_ACCEPTANCE": {},
+    "COMMERCIAL_RELEASE_READY": false
+  },
+  "aceites": {
+    "C06-A01": "IMPLEMENTED_VERIFIED",
+    "C06-A02": "IMPLEMENTED_PARTIAL",
+    "C06-A03": "IMPLEMENTED_PARTIAL",
+    "C06-A04": "BLOCKED_EXTERNAL_EVIDENCE",
+    "C06-A05": "BLOCKED_EXTERNAL_EVIDENCE",
+    "C06-A06": "WAITING_FOR_COMPONENTS",
+    "C06-A07": "IMPLEMENTED_PARTIAL",
+    "C06-A08": "NOT_REACHED"
+  },
+  "implemented": [
+    "R20-A fechado: pipefail por default em todo job Linux, candidato avaliado com accept-candidate, agregador que abre os artefatos",
+    "Matriz de injeções obrigatórias: exit_code perdido, modo diagnóstico, artefato ausente/vazio/ilegível/stale, suíte não executada, JUnit vermelho/truncado/vazio, c16 com reprovados",
+    "Guardas estruturais que parseiam o YAML sem PyYAML (leitor próprio, com teste do próprio leitor)",
+    "Referência NIST StRD: 11 conjuntos, tolerâncias pré-registradas, conferência independente com numpy feita por C06",
+    "Propriedades analíticas e metamórficas do núcleo OLS",
+    "21 detectores de mutação para os defeitos de alegação comercial",
+    "Inventário de requisitos e de testes, com achados",
+    "Manifesto reuse.json com licença e evidência por dependência",
+    "Protocolo de casos reais e de perfis institucionais, com fontes primárias",
+    "C15_INSTALL_SMOKE passa a ser executado (a propriedade do artefato instalado não era afirmada em lugar nenhum)",
+    "c15-tests-windows passa a bloquear o portão"
+  ],
+  "handoffs_emitidos": [
+    {
+      "para": "C01 (atravessa C05)",
+      "doc": "docs/comercial/c06/handoff_c01_grade_not_met.md",
+      "assunto": "minimum_fundamentacao_grade=2 destrói o resultado em vez de rotulá-lo not_met",
+      "camada": "backend/worker.py:1220-1223",
+      "criterio_de_aceite": "snapshot presente, point 735000.0, requested_minimum_grade 2, grade_requirement_status not_met, GET /jobs/{id}/result != 409",
+      "resultado": "Implementado por C01 em 1d40285. Reexecutado por C06: snapshot presente, point 735000.0, requested_minimum_grade 2, HTTP 200, case_release_status review_required. grade_requirement_status saiu 'pending' e nao 'not_met' -- correcao do criterio de C06, nao afrouxamento: decidir met/not_met e ato do classificador normativo de C05, ausente. Criterio not_met rearmado para a chegada de C05. Nao composto."
+    }
+  ],
+  "dependencias_externas_exatas": [
+    "Dez ou mais trabalhos de avaliação reais autorizados, com dados e finalidade declarada, incluindo destinatário bancário e perfil securitário",
+    "Um avaliador tecnicamente qualificado, independente de quem escreveu o código, para revisão dos casos reais",
+    "Revisão estatística proporcional ao risco, por pessoa identificada",
+    "Autorização explícita para submeter qualquer material a qualquer instituição",
+    "pip-audit ou safety disponível no ambiente para o gate de vulnerabilidade",
+    "HEAD estabilizado de C01, C02, C03, C04 e C05 para a composição"
+  ],
+  "limitations": [
+    "Verificação adversarial por agentes não é revisão técnica independente e não conta como tal",
+    "NIST StRD testa aritmética; não é certificação, não é ABNT, não tem dado imobiliário",
+    "Custo de reconstrução/reposição não tem rota de cálculo implementada, então o perfil securitário não é verificável",
+    "Oito dos dez defeitos comerciais não têm guarda do lado do produto; os detectores são de teste",
+    "tests/c15_packaging/test_format_engines.py falha localmente por xlrd ausente no venv de desenvolvimento; ambiental, o CI instala .[dev]",
+    "O job p04-harness está vermelho no candidato por causa do defeito de grau, e deve continuar até C01 implementar o handoff"
+  ],
+  "nao_autorizado_e_nao_feito": [
+    "merge em main ou na #17",
+    "auto-merge, deploy, lançamento público, venda",
+    "compra de normas, certificados ou serviços",
+    "submissão de dados a instituições",
+    "assinatura de laudo ou contrato em nome de pessoa"
+  ],
+  "resume": "docs/comercial/c06/resume.md",
+  "next_human_act": "Decidir sobre o handoff de grau para C01 e sobre fornecer os insumos externos listados. Este estado não autoriza merge, venda nem laudo.",
+  "producer_heads_observados": {
+    "C01": {
+      "head": "1d40285aa47d2f0cb6da7dcdbb1776a6c0081a3f",
+      "worktree_limpo": true,
+      "handoff_publicado": true,
+      "verificado_por_c06": true,
+      "incorporado": false
+    },
+    "C02": {
+      "commits_ahead": 4,
+      "worktree_limpo": false,
+      "incorporado": false
+    },
+    "C03": {
+      "commits_ahead": 0,
+      "worktree_limpo": false,
+      "incorporado": false
+    },
+    "C04": {
+      "commits_ahead": 2,
+      "worktree_limpo": false,
+      "incorporado": false
+    },
+    "C05": {
+      "commits_ahead": 2,
+      "worktree_limpo": false,
+      "incorporado": false
+    }
+  }
+}
