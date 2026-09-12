@@ -32,7 +32,9 @@ def _write_bundle_inventory(bundle: Path, destination: Path) -> dict:
             "size": path.stat().st_size,
             "sha256": sha256(path),
         }
-        for path in sorted(bundle.rglob("*"))
+        for path in sorted(
+            bundle.rglob("*"), key=lambda item: item.relative_to(bundle).as_posix()
+        )
         if path.is_file()
     ]
     encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
