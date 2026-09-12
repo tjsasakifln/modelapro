@@ -259,6 +259,9 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
     stale_result = page.get_by_text(
         "O arquivo mudou. O resultado abaixo pertence à versão anterior.", exact=True
     )
+    terminal_state = page.locator("p").filter(
+        has_text=re.compile(r"^Estado:\s*Cálculo disponível$")
+    ).first
 
     # GET refresh is intentionally explicit in this WebSocket-disabled path.
     # Locator waits span Streamlit's DOM replacement instead of sampling a
@@ -266,6 +269,7 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
     for _ in range(12):
         try:
             expect(current_job).to_be_visible(timeout=10000)
+            expect(terminal_state).to_be_visible(timeout=10000)
             expect(stale_result).to_have_count(0, timeout=10000)
             expect(result_region).to_be_visible(timeout=10000)
             break
@@ -275,6 +279,7 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
             expect(refresh).to_be_enabled(timeout=20000)
             refresh.click()
     expect(current_job).to_be_visible(timeout=10000)
+    expect(terminal_state).to_be_visible(timeout=10000)
     expect(stale_result).to_have_count(0, timeout=10000)
     expect(result_region).to_be_visible(timeout=10000)
     body = page.inner_text("body")
