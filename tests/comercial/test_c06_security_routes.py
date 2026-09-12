@@ -41,7 +41,7 @@ def installation(tmp_path, monkeypatch):
     api.reset_runtime()
 
 
-@pytest.mark.parametrize("path", ["/preview", "/jobs", "/upload", "/projects", "/operations/backup"])
+@pytest.mark.parametrize("path", ["/preview", "/jobs", "/upload", "/projects", "/operations/backup", "/jobs/test/recipient-return"])
 def test_missing_bearer_rejected_on_actual_routes(installation, path):
     client, _, _ = installation
     assert client.request("GET" if path in {"/projects", "/operations/backup"} else "POST", path).status_code == 403

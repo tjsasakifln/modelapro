@@ -63,6 +63,8 @@ class LocalRequestGuard:
             limit = 65536
         elif path == "/operations/restore":
             limit = 101 * 1024 * 1024
+        elif path.endswith("/recipient-return"):
+            limit = 21 * 1024 * 1024
         elif path in {"/preview", "/upload", "/jobs"} or path.endswith(("/attachments", "/signature")):
             limit = (config.MAX_UPLOAD_MB + 1) * 1024 * 1024
         try:

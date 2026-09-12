@@ -357,3 +357,14 @@ def test_material_calculation_changes_invalidate_result_decisions(mutation):
         spec["reference_date"] = "2026-09-02"
 
     assert _compose(spec, draft)["result_fingerprint"] != baseline
+
+
+def test_request_spec_cannot_declare_an_institutional_act():
+    baseline = _compose()
+    injected = _compose(_spec(institution_acceptance={
+        "recorded": True, "valid": True,
+        "record": {"status": "accepted", "recipient_id": "SYNTHETIC_TEST"},
+    }))
+    assert injected["institution_acceptance"]["recorded"] is False
+    assert injected["case_release_status"] == baseline["case_release_status"]
+    assert injected["result_fingerprint"] == baseline["result_fingerprint"]

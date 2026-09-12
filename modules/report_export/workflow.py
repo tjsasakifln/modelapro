@@ -97,6 +97,28 @@ def _save_json(store: Any, job_id: str, name: str, value: Mapping[str, Any]) -> 
     store.save_artifact(job_id, name, canonical_json(dict(value)).encode("utf-8"))
 
 
+def _recipient_documentary_file(store: Any, job_id: str, context: Mapping[str, Any]) -> list:
+    receipt = context.get("institution_receipt") or {}
+    record = receipt.get("record") if isinstance(receipt, Mapping) else None
+    if (not isinstance(record, Mapping) or receipt.get("recorded") is not True
+            or record.get("authorized_for_report") is not True):
+        return []
+    raw = store.get_artifact(job_id, str(record.get("stored_name") or ""))
+    valid = raw is not None and _sha(raw) == record.get("proof_sha256")
+    item = {
+        "filename": record.get("filename"), "media_type": record.get("media_type"),
+        "sha256": record.get("proof_sha256"), "size": record.get("size"),
+        "source": record.get("source"), "category": "annex", "requirement_ids": [],
+        "description": "Comprovante declarado; autenticidade e aceite não verificados",
+        "authorized_for_report": True,
+        "synthetic_test_only": record.get("synthetic_test_only") is True,
+        "attachment_state": "available" if valid else "missing_or_hash_mismatch",
+    }
+    if valid:
+        item["bytes"] = raw
+    return [item]
+
+
 def _report_context(store: Any, job_id: str) -> Dict[str, Any]:
     context = _load_json_artifact(store, job_id, "report_context.json")
     registry = _load_json_artifact(
@@ -117,6 +139,7 @@ def _report_context(store: Any, job_id: str) -> Dict[str, Any]:
             item["bytes"] = raw
             item["attachment_state"] = "available"
         files.append(item)
+    files.extend(_recipient_documentary_file(store, job_id, context))
     if any(item.get("synthetic_test_only") for item in files):
         context["synthetic_test_only"] = True
     context["documentary_files"] = files
@@ -289,6 +312,7 @@ def _reassess(
         review_events=review_events,
         signature=signature,
         normative_assessment=normative,
+        institution_receipt=report_context.get("institution_receipt"),
     )
     if not isinstance(updated_context, Mapping):
         raise DocumentWorkflowError(
@@ -380,6 +404,27 @@ def generate_documents(
     )
     # JSON input cannot manufacture attachment bytes or replace the registry.
     context["documentary_files"] = persisted_context.get("documentary_files") or []
+    # A later recipient return is a separate historical artifact. Incorporate
+    # it only into a newly generated report, whose content identity will change;
+    # receiving the sidecar must not rewrite an already signed document.
+    context.pop("institution_receipt", None)
+    if store.get_artifact(job_id, "recipient_returns.json") is not None:
+        from .recipient import get_recipient_return_status
+        receipt_status = get_recipient_return_status(store, job_id)
+        latest = receipt_status.get("latest") or {}
+        if latest.get("authorized_for_report") is True:
+            context["institution_receipt"] = receipt_status["institution_acceptance"]
+        if any(item.get("synthetic_test_only") for item in receipt_status["records"]):
+            context["synthetic_test_only"] = True
+        # The proof is integral evidence in the new dossier, not only a string
+        # copied into the visible report. It never satisfies valuation rules.
+        receipt_file = _recipient_documentary_file(store, job_id, context)
+        prior_receipt = _recipient_documentary_file(store, job_id, persisted_context)
+        prior_hashes = {item["sha256"] for item in prior_receipt}
+        context["documentary_files"] = [
+            item for item in context["documentary_files"]
+            if item.get("sha256") not in prior_hashes
+        ] + receipt_file
     output_manifest = build_output_manifest(snapshot, context)
     current_qctx = dict((snapshot.get("provenance") or {}).get("qualification_context") or {})
     snapshot = _reassess(

@@ -340,6 +340,7 @@ def compose_qualification_context(
     cost_result: Optional[Mapping[str, Any]] = None,
     previous_fingerprint: Optional[str] = None,
     normative_assessment: Optional[Mapping[str, Any]] = None,
+    institution_receipt: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     del previous_fingerprint  # staleness is decided from each event's bound digest by C05.
     spec = dict(request_spec)
@@ -400,7 +401,9 @@ def compose_qualification_context(
         "signature": dict(spec.get("signature") or {}) or None,
         "output_manifest": dict(spec.get("output_manifest") or {}),
         "claim_evidence": dict(spec.get("claim_evidence") or {}),
-        "institution_acceptance": spec.get("institution_acceptance"),
+        # Only the document service supplies a server-read receipt. RequestSpec
+        # declarations (including valid=true) cannot establish an external act.
+        "institution_acceptance": dict(institution_receipt or {}) or None,
         "software_version": snapshot_draft.get("code_sha"),
         "result_snapshot_id": snapshot_draft.get("job_id"),
         "result_material": material,
@@ -436,6 +439,7 @@ def reassess_qualification_context(
     review_events: Optional[Sequence[Mapping[str, Any]]] = None,
     signature: Optional[Mapping[str, Any]] = None,
     normative_assessment: Optional[Mapping[str, Any]] = None,
+    institution_receipt: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run the document/review pass against an already calculated snapshot.
 
@@ -498,4 +502,5 @@ def reassess_qualification_context(
         review_events=spec["review_events"],
         normative_assessment=normative,
         cost_result=cost_result or None,
+        institution_receipt=institution_receipt,
     )
