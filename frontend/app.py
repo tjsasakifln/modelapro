@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Optional
+from typing import Optional
+
 
 def _import_components():
     try:
@@ -54,11 +55,9 @@ def _import_components():
             export_recipient_package_manifest,
             gate_ready_for_professional_signoff,
             invalidate_review_events,
-            record_institution_return,
             record_institution_submission,
             record_review_event,
             redact_diagnostic,
-            sha256_bytes,
             verify_imported_signature_link,
         )
         from components.workflow import (
@@ -110,11 +109,9 @@ def _import_components():
             export_recipient_package_manifest,
             gate_ready_for_professional_signoff,
             invalidate_review_events,
-            record_institution_return,
             record_institution_submission,
             record_review_event,
             redact_diagnostic,
-            sha256_bytes,
             verify_imported_signature_link,
         )
         from frontend.components.workflow import (
@@ -160,11 +157,9 @@ declared_fingerprint_from_imported = _COMP["declared_fingerprint_from_imported"]
 export_recipient_package_manifest = _COMP["export_recipient_package_manifest"]
 gate_ready_for_professional_signoff = _COMP["gate_ready_for_professional_signoff"]
 invalidate_review_events = _COMP["invalidate_review_events"]
-record_institution_return = _COMP["record_institution_return"]
 record_institution_submission = _COMP["record_institution_submission"]
 record_review_event = _COMP["record_review_event"]
 redact_diagnostic = _COMP["redact_diagnostic"]
-sha256_bytes = _COMP["sha256_bytes"]
 verify_imported_signature_link = _COMP["verify_imported_signature_link"]
 apply_invalidation = _COMP["apply_invalidation"]
 merge_invalidation = _COMP["merge_invalidation"]
@@ -570,14 +565,25 @@ def main() -> None:
                 except (ApiConnectionError, ApiResponseError) as exc:
                     st.error(str(exc))
 
-    profile = form.get("qualification_profile") or {}
-    document_state = _COMP["render_document_workflow"](client, snapshot)
     qualification = ((snapshot or {}).get("provenance") or {}).get("qualification_context") or {}
+    # A recovered job is bound to its persisted profile, never to whatever
+    # profile happens to be selected in the current form.
+    profile = qualification.get("profile") or form.get("qualification_profile") or {}
+    document_state = _COMP["render_document_workflow"](client, snapshot)
     current_fp = document_state.get("result_fingerprint") or qualification.get("result_fingerprint")
     stored_events = list(qualification.get("review_events") or [])
 
     submissions = list(st.session_state.get("c02_institution_events") or [])
-    recipient_actions = render_recipient_panel(profile=profile, submissions=submissions)
+    recipient_status = {}
+    if client.job_id and profile.get("recipient_id"):
+        try:
+            recipient_status = client.recipient_return()
+        except (ApiConnectionError, ApiResponseError) as exc:
+            st.warning(f"Registro persistido de retorno indisponível: {redact_diagnostic(str(exc))}")
+    persisted_returns = list(recipient_status.get("records") or [])
+    recipient_actions = render_recipient_panel(
+        profile=profile, submissions=[*submissions, *persisted_returns]
+    )
     if recipient_actions.get("export_package"):
         manifest = export_recipient_package_manifest(
             profile=profile,
@@ -603,22 +609,82 @@ def main() -> None:
         st.caption("Pacote preparado localmente. Sem envio a portal e sem aceite fabricado.")
     if recipient_actions.get("import_return") and recipient_actions.get("imported_file") is not None:
         imported = recipient_actions["imported_file"]
-        payload = imported.getvalue()
-        try:
-            event = record_institution_return(
-                recipient_id=profile.get("recipient_id") or "",
-                imported_filename=imported.name,
-                proof_sha256=sha256_bytes(payload),
-                decision="received",
-                authorized_act=False,
-            )
-            submissions.append(event)
-            st.session_state.c02_institution_events = submissions
-            st.info("Comprovante importado. Sem ato autorizado, não há aceite institucional.")
-        except ValueError as exc:
-            st.error(redact_diagnostic(str(exc)))
+        st.caption(
+            "O registro preserva os bytes e a declaração do operador. Ele não verifica "
+            "autenticidade, autoridade do emissor nem aceite institucional."
+        )
+        protocol = st.text_input("Protocolo informado no retorno")
+        received_at = st.text_input(
+            "Data/hora de recebimento com fuso (ISO-8601)",
+            placeholder="2026-09-12T16:00:00-03:00",
+        )
+        return_source = st.text_input("Fonte/procedência declarada do comprovante")
+        declared_unverified = st.checkbox(
+            "Declaro que recebi este documento, sem afirmar autenticidade ou aceite institucional"
+        )
+        if st.button(
+            "Arquivar comprovante como recebido e não verificado",
+            disabled=not bool(profile.get("recipient_id")),
+        ):
+            from modules.report_export.recipient import OPERATOR_DECLARATION
 
-    history = list(stored_events) + list(submissions)
+            try:
+                stored_return = client.recipient_return(
+                    method="POST",
+                    files={
+                        "file": (
+                            imported.name,
+                            imported.getvalue(),
+                            imported.type or "application/octet-stream",
+                        )
+                    },
+                    data={
+                        "recipient_id": profile.get("recipient_id") or "",
+                        "protocol": protocol,
+                        "received_at": received_at,
+                        "source": return_source,
+                        "operator_declaration": (
+                            OPERATOR_DECLARATION if declared_unverified else ""
+                        ),
+                    },
+                )
+                recipient_status = client.recipient_return()
+                persisted_returns = list(recipient_status.get("records") or [])
+                st.info(
+                    "Comprovante arquivado com bytes e SHA-256. Estado: recebido/declarado, "
+                    "autenticidade e aceite institucional não verificados."
+                )
+                st.json(stored_return)
+            except (ApiConnectionError, ApiResponseError) as exc:
+                st.error(redact_diagnostic(str(exc)))
+
+    latest_return = recipient_status.get("latest") or {}
+    if latest_return:
+        st.write(
+            {
+                "retorno_persistido": latest_return.get("status"),
+                "destinatário": latest_return.get("recipient_id"),
+                "protocolo": latest_return.get("protocol"),
+                "sha256": latest_return.get("proof_sha256"),
+                "integridade_dos_bytes": latest_return.get("bytes_integrity"),
+                "aceite_institucional": False,
+            }
+        )
+        st.caption(
+            "Documento recebido/declarado pelo operador; não autenticado e não interpretado como aceite."
+        )
+        if st.button("Preparar download do comprovante arquivado"):
+            try:
+                st.download_button(
+                    "Baixar bytes originais do comprovante",
+                    data=client.get_recipient_return_file(latest_return["record_id"]),
+                    file_name=latest_return.get("filename") or "recipient-return.bin",
+                    mime=latest_return.get("media_type") or "application/octet-stream",
+                )
+            except (ApiConnectionError, ApiResponseError) as exc:
+                st.error(redact_diagnostic(str(exc)))
+
+    history = list(stored_events) + list(submissions) + list(persisted_returns)
     render_issuance_history(history)
 
     persist_client_to_session(st.session_state, client)

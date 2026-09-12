@@ -961,6 +961,34 @@ class JobClient:
         return self.operation(method, f"/jobs/{self.job_id}/documents{action}",
                               headers={"X-Job-Token": self.access_token or ""}, **kwargs).json()
 
+    def recipient_return(self, *, method: str = "GET", **kwargs) -> dict:
+        if not self.job_id:
+            raise ApiResponseError("Selecione um trabalho antes de registrar o retorno.")
+        if not self.access_token:
+            self.access_token = self.operation(
+                "POST", f"/jobs/{self.job_id}/access-token"
+            ).json()["access_token"]
+        return self.operation(
+            method,
+            f"/jobs/{self.job_id}/recipient-return",
+            headers={"X-Job-Token": self.access_token or ""},
+            **kwargs,
+        ).json()
+
+    def get_recipient_return_file(self, record_id: str) -> bytes:
+        if not self.job_id:
+            raise ApiResponseError("Selecione um trabalho antes de recuperar o retorno.")
+        if not self.access_token:
+            self.access_token = self.operation(
+                "POST", f"/jobs/{self.job_id}/access-token"
+            ).json()["access_token"]
+        response = self.operation(
+            "GET",
+            f"/jobs/{self.job_id}/recipient-return/{record_id}/file",
+            headers={"X-Job-Token": self.access_token or ""},
+        )
+        return response.content
+
     def get_status(self, job_id: Optional[str] = None) -> dict:
         jid = job_id or self.job_id
         if not jid:
