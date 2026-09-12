@@ -521,6 +521,54 @@ def test_persisted_sample_override_with_zero_coordinates_wins_when_reopened():
     }
 
 
+def test_decimal_comma_mapping_covers_rows_beyond_preview_and_stays_strict():
+    base = {
+        "sample_evidence_columns": {
+            "address": "endereco", "latitude": "lat",
+            "longitude": "lon", "source": "fonte",
+        },
+        "sample_evidence": {
+            "R000009": {
+                "address": "TESTE: coordenada corrigida",
+                "latitude": 0,
+                "longitude": 0,
+                "source": "TESTE: vistoria",
+            },
+        },
+        "used_rows": [{
+            "row_id": f"R{index:06d}",
+            "values": {
+                "endereco": f"Rua Decimal, {index}",
+                "lat": f"-23,{549000 + index:06d}",
+                "lon": f"-46,{633000 + index:06d}",
+                "fonte": "TESTE: CSV pt-BR",
+            },
+        } for index in range(12)],
+        "excluded_rows": [],
+    }
+
+    context = complete_report_context(base, request_spec={}, snapshot={})
+    rows = {row["row_id"]: row for row in context["used_rows"]}
+
+    assert len(rows) == 12
+    assert all(row["geolocation"]["complete"] is True for row in rows.values())
+    assert rows["R000008"]["geolocation"]["latitude"] == pytest.approx(-23.549008)
+    assert rows["R000008"]["geolocation"]["longitude"] == pytest.approx(-46.633008)
+    assert rows["R000008"]["geolocation"]["source"] == "TESTE: CSV pt-BR"
+    assert rows["R000009"]["geolocation"]["latitude"] == 0
+    assert rows["R000009"]["geolocation"]["longitude"] == 0
+    assert rows["R000009"]["geolocation"]["source"] == "TESTE: vistoria"
+
+    for invalid in (True, "NaN", "Infinity", "91,0", "1.234,56"):
+        changed = copy.deepcopy(base)
+        changed["used_rows"][10]["values"]["lat"] = invalid
+        invalid_context = complete_report_context(changed, request_spec={}, snapshot={})
+        invalid_geo = invalid_context["used_rows"][10]["geolocation"]
+        assert invalid_geo["complete"] is False
+        assert invalid_geo["latitude"] is None
+        assert "latitude_missing_or_out_of_range" in invalid_geo["issues"]
+
+
 def test_wide_correlation_is_split_without_losing_values_and_pvalues_stay_nonzero():
     snapshot, context = _rich_case()
     count = 20

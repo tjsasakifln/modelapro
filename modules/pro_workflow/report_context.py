@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from collections.abc import Mapping as ABCMapping
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 
 REPORT_CONTEXT_SCHEMA = "MP-REPORT-CONTEXT/1"
 OUTPUT_MANIFEST_SCHEMA = "MP-OUTPUT-MANIFEST/1"
+_DECIMAL_COORDINATE = re.compile(r"^[+-]?(?:\d+|\d+[.,]\d+|[.,]\d+)$")
 
 
 def _finite(value: Any) -> Optional[float]:
@@ -185,7 +187,13 @@ def _text(value: Any) -> Optional[str]:
 
 
 def _coordinate(value: Any, *, minimum: float, maximum: float) -> Optional[float]:
-    number = _finite(value)
+    candidate = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not _DECIMAL_COORDINATE.fullmatch(text):
+            return None
+        candidate = text.replace(",", ".")
+    number = _finite(candidate)
     if number is None or number < minimum or number > maximum:
         return None
     # Keep the canonical origin compact and stable across persist/reopen
