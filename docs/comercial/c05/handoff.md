@@ -74,6 +74,29 @@ cd <worktree> && PYTHONPATH= python3 -m pytest \
   tests/test_nbr14653.py::TestOptimalCombinationTargetAchieved -q
 ```
 
+**Segundo teste afetado, em arquivo que C05 NÃO possui.** A mesma correção faz falhar:
+
+```
+tests/test_audit_fixes.py::TestAvaliandoDomainPreFilter::
+  test_full_search_does_not_crash_and_does_not_bottom_rank_on_zero_avaliando
+```
+
+Ele chama `find_best_model` e, na linha 180, afirma `vr.grau_fundamentacao is not None`.
+Passa a falhar pela mesma causa desta seção: a re-validação descarta os itens documentais
+e o grau fica `None`. O teste é sobre o pré-filtro de domínio do avaliando; a asserção de
+grau é incidental e dependia do default aprovador.
+
+C05 **não editou** esse arquivo — está fora da sua propriedade de escrita, e a falha está
+declarada em vez de silenciada. Duas saídas, ambas do proprietário:
+
+1. **Preferida:** aplicar a correção de 2.1. A re-validação passa a receber as declarações
+   e o teste volta a passar sem ser tocado.
+2. Se a intenção do teste for apenas "não quebra e não fica em último lugar", separar a
+   asserção de grau, que não pertence ao que ele testa.
+
+Não use como saída relaxar a asserção para `>= 0` nem reintroduzir o default: o default é
+justamente o defeito.
+
 ### 2.2 → C01/C02 — `backend/api.py`: defaults de formulário
 
 `grau_item1: int = Form(1)` e `grau_item3: int = Form(1)` fazem a API atribuir Grau I a

@@ -1,0 +1,52 @@
+{
+  "campaign": "MP-COM-20260912/C05",
+  "manifest_version": "c05.reuse/1",
+  "consulted_on": "2026-09-11",
+  "decision": "no_vendoring_no_dependency_change",
+  "summary": "C05 não incorporou nenhum fragmento de terceiros e não alterou dependências. third_party/vendor/c05/ permanece vazio por decisão, não por omissão. Uma biblioteca já instalada foi usada apenas em ambiente de desenvolvimento local para ler os exemplares licenciados das normas e conferir limiares; nenhum código de produto passou a importá-la.",
+  "development_only_use": [
+    {
+      "name": "pypdf",
+      "version_resolved": "6.16.1",
+      "origin_url": "https://github.com/py-pdf/pypdf",
+      "spdx": "BSD-3-Clause",
+      "license_verified_at": [
+        "dist-info METADATA/LICENSE do pacote instalado neste ambiente",
+        "LICENSE upstream na tag de release correspondente (raw.githubusercontent.com)"
+      ],
+      "used_for": "extrair texto das edições ABNT em docs/normas/ para conferir limiares contra o texto",
+      "runtime_dependency": false,
+      "imported_by_product_code": false,
+      "why_not_a_dependency": "a conferência de limiares é ato de campanha, não função do produto. O resultado da leitura está registrado em modules/normative_rules.THRESHOLD_PROVENANCE e é reconferível por SHA-256 sem reabrir os PDFs.",
+      "notice_obligation": "reproduzir copyright e texto da licença em THIRD_PARTY_NOTICES caso venha a ser distribuída; hoje não é distribuída."
+    }
+  ],
+  "already_present_and_relied_upon": {
+    "note": "Bibliotecas que o produto já usava antes desta campanha. C05 não as introduziu, não as atualizou e não alterou constraints. Versões resolvidas neste ambiente (wheels manylinux x86_64, CPython 3.12), com licença conferida em duas vias: no dist-info instalado e upstream na tag de release correspondente, com correspondência verbatim.",
+    "libraries": [
+      {"name": "statsmodels", "version_resolved": "0.15.0", "spdx": "BSD-3-Clause", "origin_url": "https://github.com/statsmodels/statsmodels", "license_expression_declared_in_metadata": true},
+      {"name": "scipy", "version_resolved": "1.18.1", "spdx": "BSD-3-Clause", "origin_url": "https://github.com/scipy/scipy", "license_expression_declared_in_metadata": false},
+      {"name": "numpy", "version_resolved": "2.5.2", "spdx": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0", "origin_url": "https://github.com/numpy/numpy", "license_expression_declared_in_metadata": true, "note": "a expressão composta reconhece componentes vendorizados no wheel"},
+      {"name": "pandas", "version_resolved": "3.0.5", "spdx": "BSD-3-Clause", "origin_url": "https://github.com/pandas-dev/pandas", "license_expression_declared_in_metadata": false}
+    ],
+    "commercial_distribution": "As licenças BSD-3-Clause são compatíveis com distribuição comercial proprietária, sob obrigação de reproduzir copyright e texto da licença nos avisos de terceiros."
+  },
+  "finding_for_c04": {
+    "severity": "attention_before_distribution",
+    "title": "libquadmath LGPL-2.1-or-later embarcada nos wheels manylinux de numpy e scipy",
+    "detail": "Os wheels manylinux de numpy 2.5.2 e scipy 1.18.1 embarcam o objeto compartilhado libquadmath, declarado 'LGPL-2.1-or-later'. Desta declaração só foi lido o string declaratório e um cabeçalho curto de permissão; os TERMOS OPERATIVOS da LGPL-2.1 — em especial a seção 6, que governa a distribuição de um trabalho que usa a biblioteca — NÃO foram lidos nesta campanha.",
+    "consequence": "Não é impedimento conhecido à distribuição comercial: copyleft não é sinônimo de proibição comercial. Mas é obrigação a verificar ANTES de empacotar e distribuir, e a verificação não foi feita aqui.",
+    "owner": "C04, único editor de dependências/constraints globais e responsável por SBOM e THIRD_PARTY_NOTICES",
+    "state": "BLOCKED_EXTERNAL_EVIDENCE",
+    "exact_material": "Texto integral da GNU Lesser General Public License, versão 2.1, e a identificação da origem exata do libquadmath embarcado em cada wheel",
+    "note": "O texto de licença de libgfortran/libquadmath/OpenBLAS não existe em nenhum arquivo do repositório numpy na tag v2.5.2: a obrigação vem do wheel, não do repositório-fonte."
+  },
+  "vendored_fragments": [],
+  "third_party_vendor_dir": "third_party/vendor/c05/ (vazio por decisão)",
+  "what_a_license_is_not": [
+    "Uma licença permissiva não é certificação de conformidade com a ABNT.",
+    "Uma licença permissiva não é homologação de software por instituição alguma.",
+    "Usar uma biblioteca confiável não transfere qualificação para este produto."
+  ],
+  "numeric_reference_note": "O NIST StRD permanece candidato a REFERÊNCIA numérica independente, não motor normativo nem certificação do MODELA PRO. C05 não o utilizou: a verificação numérica independente é escopo de outra frente, e o oráculo não pode ser gerado pelo mesmo código que ele aprova."
+}
