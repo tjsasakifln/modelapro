@@ -1,6 +1,6 @@
 # C06 — matriz da composição, não dos componentes isolados
 
-Atualização em trabalho em 2026-09-12. Referência publicada desta execução:
+Retomada em trabalho em 2026-09-12. Última candidata publicada, ainda reprovada:
 `c60fbebd11816e358756a50ca8a09b74a815aa34`. Os commits posteriores da mesma PR
 precisam de execução própria antes de serem aprovados. Os oito aceites de cada
 produtor permanecem nos arquivos originais como histórico do componente; esta
@@ -11,12 +11,12 @@ número de testes.
 
 | Referência | Execução e evidência exigida | Situação registrada |
 |---|---|---|
-| E1 | [C15 PR 34716312436](https://github.com/tjsasakifln/modelapro/actions/runs/34716312436): JUnit, collection.json, status, identity.json e inventário de bytes por namespace | EM EXECUÇÃO. Histórico 34714577751 falhou em 2 testes (1678 passed, 1 skipped): expectativa antiga de custo e sincronização do navegador P02; agregador recusou corretamente. Merge testado 9517073b5c6a660c829b55491de6787b5fdb2282 foi distinguido do PR HEAD 6867f31, sem erro de stale SHA |
-| E2 | [Windows 34716312452](https://github.com/tjsasakifln/modelapro/actions/runs/34716312452): lock resolvido no Windows, fechamento de DLLs, hashes, manifesto de falha | EM EXECUÇÃO. Histórico 34714577745 construiu/instalou, mas o verificador não encontrou o executável na etapa seguinte; nenhum cálculo foi executado. Caminho recomposto e espera do processo corrigidos; não é Windows verificado |
+| E1 | [C15 PR 34716312436](https://github.com/tjsasakifln/modelapro/actions/runs/34716312436): JUnit, collection.json, status, identity.json e inventário de bytes por namespace | FAILURE confirmado na retomada: 1703 passed, 1 failed (P02 sincronização), 1 skipped; lint também falhou. Correções posteriores exigem nova execução. Histórico 34714577751 falhou em 2 testes (1678 passed, 1 skipped): expectativa antiga de custo e sincronização do navegador P02; agregador recusou corretamente. Merge testado 9517073b5c6a660c829b55491de6787b5fdb2282 foi distinguido do PR HEAD 6867f31, sem erro de stale SHA |
+| E2 | [Windows 34716312452](https://github.com/tjsasakifln/modelapro/actions/runs/34716312452): lock resolvido no Windows, fechamento de DLLs, hashes, manifesto de falha | FAILURE confirmado na retomada: instalação/preflight passaram; /health não abriu em 120 s na operação A. Update/rollback não executados; uninstall também reprovou. Diagnóstico/correção em curso. Histórico 34714577745 construiu/instalou, mas o verificador não encontrou o executável na etapa seguinte; nenhum cálculo foi executado. Caminho recomposto e espera do processo corrigidos; não é Windows verificado |
 | E3 | Serviço C03 e rotas reais: `pytest tests/comercial/test_c06_document_flow.py tests/comercial/test_c06_security_routes.py` | 28 passed local; ambiente diagnóstico com pacotes de sistema, não substitui E1/E2 |
 | E4 | Catálogo C05 e distribuição: `pytest tests/comercial/c05 tests/comercial/c06/test_catalog_distribution.py` | 553 passed local após fontes versionadas; wheel ampliado precisa nova execução candidata |
 | E5 | NIST e qualificação integrada + coleção: `pytest` respectivos arquivos | 122 passed local, incluindo Decimal independente e mutantes materiais; orçamento em numeric_verification.md |
-| E6 | `test_c06_cost_flow.py`, `test_c06_document_flow.py`, `test_c06_recipient_return.py` sobre 6867f31 | 27 passed local, incluindo assinatura TESTE real de custo/mercado e importação de comprovante não verificado; C15 precisa confirmar ambiente candidato |
+| E6 | `test_c06_cost_flow.py`, `test_c06_document_flow.py`, `test_c06_recipient_return.py` e `test_c06_recipient_document.py` sobre 6867f31 | 27 passed local, incluindo assinatura TESTE real de custo/mercado e importação de comprovante não verificado; C15 precisa confirmar ambiente candidato |
 | E7 | `test_c06_browser_document_flow.py`: Streamlit + uvicorn + Chromium, guardas habilitadas | 1 passed local; upload integral, cálculo, revisão, exportação PDF, assinatura TESTE/importação, dossiê e histórico. Incluído na coleta obrigatória E1 |
 | E8 | Navegador mercado + custo juntos, incluindo coletor de artefatos reais sem chaves privadas | 2 passed local em 236,88 s sobre a coorte c60fbeb; custo 920,00 BRL salvo/reaberto; PDF/DOCX/dossiê/assinatura TESTE por namespace |
 | E9 | Retorno BB real worker → registro não verificado → duas gerações documentais → dossiê/histórico → adulteração | 1 passed em 318,64 s; não é aceite institucional. Integridade dos metadados do registro em endurecimento adicional |
@@ -50,7 +50,7 @@ Build/testes falhos continuam a produzir evidência; artefatos não se sobrepõe
 | C04-A05 | licença comprador separada; expiração bloqueia novo cálculo, preserva leitura/exportação | importação com âncora fixada; negativo de chave fornecida pelo cliente; fluxo legítimo | E1/E3; termos/titular externos |
 | C05-A01, A02 | fontes autorizadas parafraseadas, catálogo versionado dentro do pacote; ausência não produz catálogo vazio | c05/test_a01*, inventário regras, catalog_distribution; comparação fonte=wheel | E1/E4 |
 | C05-A05, A08 | requisitos por perfil e limitações explícitas, sem selo de banco ou universalidade | c05/output_conformance + profile-process-verification-20260912.md | E4; atualidade/aplicabilidade por encomenda |
-| C06-A01 | accept-candidate, pipefail, extensões e agregação fail-closed com coleta obrigatória | c15_packaging/test_ci_aggregator.py, test_evidence_identity.py, test_collection_evidence.py | E1 |
+| C06-A01 | accept-candidate, pipefail, extensões e agregação fail-closed com coleta obrigatória; inventário exato regenerado/comparado antes da suíte e conferido contra execução/JUnit | c15_packaging/test_ci_aggregator.py, test_evidence_identity.py, test_collection_evidence.py, test_test_inventory.py; mandatory-test-nodeids.json e inventory-check.log | E1 |
 | C06-A04 | protocolo congelado de dez ou mais casos autorizados + parecer independente | real_case_matrix.md; nenhum resultado ou identidade fictícia | NOT_RUN externo |
 | C06-A08 | dez estados separados, pacote identificado e aprovação sustentada por prova | esta matriz, estados na #20 e evidência candidata | COMMERCIAL_RELEASE_READY=false |
 
@@ -76,8 +76,16 @@ Build/testes falhos continuam a produzir evidência; artefatos não se sobrepõe
 
 ## Impedimentos internos ainda abertos nesta redação
 
-Digest integral dos metadados do recibo; reexecução dos detectores comerciais nas
-superfícies atuais; confirmação da revisão adversarial final na candidata;
+A auditoria executada na retomada identificou também os 26 gaps internos de
+capacidade do perfil BB resolvido: [output-gap-closure.md](output-gap-closure.md).
+Métricas sem consumidor, campos sem entrada, Excel e manifesto por representação
+ainda exigem fechamento; não são dependências externas nem simples texto histórico.
+
+
+Digest integral dos metadados do recibo implementado em `999680d`, confirmação
+na candidata pendente. Cobertura externa e estado da UI em correção;
+reexecução dos detectores comerciais nas superfícies atuais;
+confirmação da revisão adversarial final na candidata;
 nova suíte ampla/agregador sem falhas;
 Windows instalado e ciclo entre versões realmente distintas; inventário/revisão
 do artefato final. Esses itens continuam
