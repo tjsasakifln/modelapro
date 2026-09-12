@@ -8,6 +8,7 @@ document bytes or professional-review data are read or changed.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -164,6 +165,7 @@ async def document_attachment_upload(
     category: str = Form("document"),
     description: str = Form(""),
     synthetic_test_only: bool = Form(False),
+    requirement_ids: str = Form("[]"),
     x_job_token: Optional[str] = Header(None),
 ):
     """Store exact documentary bytes; mere JSON references are not evidence."""
@@ -181,7 +183,10 @@ async def document_attachment_upload(
             category=category,
             description=description,
             synthetic_test_only=synthetic_test_only,
+            requirement_ids=json.loads(requirement_ids),
         )
+    except json.JSONDecodeError:
+        return _error(DocumentWorkflowError("ATTACHMENT_REQUIREMENTS_INVALID", "requirement_ids must be JSON", status_code=400))
     except DocumentWorkflowError as exc:
         return _error(exc)
 

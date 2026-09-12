@@ -185,6 +185,7 @@ def _attach_test_document(store, job_id):
         category="document",
         description="TESTE: registro documental sintético",
         synthetic_test_only=True,
+        requirement_ids=["parte1.6.3.vistoria", "8.2.1.5.2.campo_suficiente", "10.1.laudo_completo"],
     )
 
 
@@ -255,6 +256,18 @@ def _review_to_signature_request(store, job_id):
         create_signature_request(store, job_id, revision_id="REVISION-NEVER-REVIEWED-TEST")
     request = create_signature_request(store, job_id, revision_id="C06-TEST-1")
     return request, store.get_artifact(job_id, "report.pdf")
+
+
+def test_strings_without_integral_evidence_do_not_qualify_document(tmp_path, real_worker_product):
+    store, job_id = _clone_product(tmp_path, real_worker_product)
+    generate_documents(store, job_id)
+    reviewed = record_review(store, job_id, professional_id="PROFISSIONAL TESTE",
+                             motive="TESTE: referência sem arquivo não basta", version="TESTE-SEM-ARQUIVO",
+                             synthetic_test_only=True)
+    assert reviewed["case_release_status"] != "ready_for_professional_signoff"
+    assert reviewed["document_state"]["is_final"] is False
+    with pytest.raises(DocumentWorkflowError, match="not ready"):
+        create_signature_request(store, job_id, revision_id="TESTE-SEM-ARQUIVO")
 
 
 def test_real_product_emits_equivalent_documents_dossier_and_test_signature(

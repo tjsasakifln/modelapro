@@ -11,6 +11,7 @@ import hashlib
 import copy
 import json
 import re
+from functools import wraps
 from collections.abc import Mapping
 from typing import Any, Dict, Optional
 
@@ -39,6 +40,15 @@ class DocumentWorkflowError(RuntimeError):
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _serialized(operation):
+    """One document mutation per workspace, also excluding consistent backups."""
+    @wraps(operation)
+    def run(store, *args, **kwargs):
+        with store._lock:
+            return operation(store, *args, **kwargs)
+    return run
 
 
 def _load_json_artifact(store: Any, job_id: str, name: str, *, required: bool = True) -> Dict[str, Any]:
@@ -107,6 +117,7 @@ def _report_context(store: Any, job_id: str) -> Dict[str, Any]:
     return context
 
 
+@_serialized
 def store_document_attachment(
     store: Any,
     job_id: str,
@@ -119,6 +130,7 @@ def store_document_attachment(
     category: str = "document",
     description: str = "",
     synthetic_test_only: bool = False,
+    requirement_ids: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
     """Persist exact attachment bytes and a digest-bound report registry."""
     if not store.get(job_id):
@@ -127,6 +139,17 @@ def store_document_attachment(
         raise DocumentWorkflowError("ATTACHMENT_EMPTY", "attachment is empty", status_code=400)
     if len(content) > 20 * 1024 * 1024:
         raise DocumentWorkflowError("ATTACHMENT_TOO_LARGE", "attachment exceeds 20 MiB", status_code=413)
+    if not source.strip() or not authorized_for_report:
+        raise DocumentWorkflowError("ATTACHMENT_AUTHORIZATION_REQUIRED", "source and authorization are required", status_code=400)
+    requirement_ids = requirement_ids or []
+    if not isinstance(requirement_ids, list) or not all(isinstance(rid, str) for rid in requirement_ids):
+        raise DocumentWorkflowError("ATTACHMENT_REQUIREMENTS_INVALID", "requirement_ids must be a list of IDs", status_code=400)
+    from ..qualification_profile import resolve_profile
+    job = store.get(job_id)
+    profile = resolve_profile((job.get("request_spec") or {}).get("qualification_profile") or {})
+    known_requirements = {item["id"] for item in profile.get("requirements") or []}
+    if set(requirement_ids) - known_requirements:
+        raise DocumentWorkflowError("ATTACHMENT_REQUIREMENTS_INVALID", "requirement does not belong to the case profile", status_code=400)
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", str(filename or "document.bin")).strip(".-")
     safe = safe[:70] or "document.bin"
     digest = _sha(content)
@@ -153,6 +176,7 @@ def store_document_attachment(
         "category": normalized_category,
         "description": str(description or ""),
         "synthetic_test_only": bool(synthetic_test_only),
+        "requirement_ids": sorted(set(requirement_ids)),
     }
     items = [item for item in items if item.get("stored_name") != stored_name] + [entry]
     _save_json(
@@ -193,6 +217,24 @@ def _reassess(
             "the C01/C05 document reassessment function is unavailable",
         ) from exc
     fingerprint = report_content_fingerprint(snapshot, report_context)
+    # References in an order are declarations, not file evidence. Only the
+    # server-read, digest-checked registry can satisfy documentary requirements.
+    from ..qualification_profile import resolve_profile
+    profile = resolve_profile(request_spec.get("qualification_profile") or {})
+    declared = dict(request_spec.get("profile_evidence") or {})
+    verified = dict(declared)
+    for requirement in profile.get("requirements") or []:
+        rid = requirement.get("id")
+        if requirement.get("verification") == "calculated":
+            continue
+        verified.pop(rid, None)
+        matches = [item for item in report_context.get("documentary_files") or []
+                   if item.get("authorized_for_report") and item.get("attachment_state") == "available"
+                   and (rid in (item.get("requirement_ids") or [])
+                        or (isinstance(declared.get(rid), str) and declared[rid] == item.get("source")))]
+        if matches:
+            verified[rid] = "; ".join(f"sha256:{item['sha256']}:{item.get('source')}" for item in matches)
+    request_spec = {**request_spec, "profile_evidence": verified}
     updated_context = reassess_qualification_context(
         snapshot=snapshot,
         request_spec=request_spec,
@@ -241,10 +283,11 @@ def _refresh_dossier(
     signature_record: Optional[Mapping[str, Any]] = None,
     signed_pdf: Optional[bytes] = None,
     documentary_files: list[Mapping[str, Any]] | None = None,
+    persist: bool = True,
 ) -> Optional[bytes]:
     existing = store.get_artifact(job_id, "evidence_bundle.zip")
     if existing is None:
-        return None
+        raise DocumentWorkflowError("DOSSIER_MISSING", "evidence_bundle.zip is required for document emission")
     refreshed = refresh_evidence_bundle_archive(
         existing,
         snapshot=snapshot,
@@ -254,7 +297,8 @@ def _refresh_dossier(
         signed_report_pdf=signed_pdf,
         documentary_files=documentary_files or [],
     )
-    store.save_artifact(job_id, "evidence_bundle.zip", refreshed)
+    if persist:
+        store.save_artifact(job_id, "evidence_bundle.zip", refreshed)
     return refreshed
 
 
@@ -267,6 +311,7 @@ def _artifact_inventory(store: Any, job_id: str, names: list[str]) -> Dict[str, 
     return result
 
 
+@_serialized
 def generate_documents(
     store: Any,
     job_id: str,
@@ -301,6 +346,10 @@ def generate_documents(
     # result_fingerprint changed after adding the real output manifest.  The
     # final report-content fingerprint is computed only from that stable result.
     pdf, docx = _render_and_verify(snapshot, context)
+    dossier = _refresh_dossier(
+        store, job_id, snapshot=snapshot, pdf=pdf, docx=docx,
+        documentary_files=context.get("documentary_files") or [], persist=False,
+    )
     store.save_snapshot(job_id, snapshot)
     # Persist only JSON-safe metadata. Exact attachment bytes stay in their
     # own immutable artifact and are reloaded by digest for later stages.
@@ -308,14 +357,7 @@ def generate_documents(
     _save_json(store, job_id, "output_manifest.json", output_manifest)
     store.save_artifact(job_id, "report.pdf", pdf)
     store.save_artifact(job_id, "report.docx", docx)
-    dossier = _refresh_dossier(
-        store,
-        job_id,
-        snapshot=snapshot,
-        pdf=pdf,
-        docx=docx,
-        documentary_files=context.get("documentary_files") or [],
-    )
+    store.save_artifact(job_id, "evidence_bundle.zip", dossier)
     state = assess_document_state(snapshot, context)
     result = {
         "schema_version": "MP-DOCUMENTS/1",
@@ -335,6 +377,7 @@ def generate_documents(
     return result
 
 
+@_serialized
 def record_review(
     store: Any,
     job_id: str,
@@ -386,18 +429,15 @@ def record_review(
         signature=None,
     )
     pdf, docx = _render_and_verify(snapshot, context)
+    dossier = _refresh_dossier(
+        store, job_id, snapshot=snapshot, pdf=pdf, docx=docx,
+        documentary_files=context.get("documentary_files") or [], persist=False,
+    )
     store.save_snapshot(job_id, snapshot)
     _save_json(store, job_id, "report_context.json", _json_value(context))
     store.save_artifact(job_id, "report.pdf", pdf)
     store.save_artifact(job_id, "report.docx", docx)
-    _refresh_dossier(
-        store,
-        job_id,
-        snapshot=snapshot,
-        pdf=pdf,
-        docx=docx,
-        documentary_files=context.get("documentary_files") or [],
-    )
+    store.save_artifact(job_id, "evidence_bundle.zip", dossier)
     state = assess_document_state(snapshot, context)
     result = {
         "schema_version": "MP-REVIEW/1",
@@ -411,12 +451,15 @@ def record_review(
     return result
 
 
+@_serialized
 def create_signature_request(store: Any, job_id: str, *, revision_id: str) -> Dict[str, Any]:
     job, snapshot, _normative = _job_inputs(store, job_id)
     context = _report_context(store, job_id)
     pdf = store.get_artifact(job_id, "report.pdf")
     if pdf is None:
         raise DocumentWorkflowError("REPORT_PDF_MISSING", "report.pdf is not available")
+    if store.get_artifact(job_id, "evidence_bundle.zip") is None:
+        raise DocumentWorkflowError("DOSSIER_MISSING", "evidence_bundle.zip is required for signing")
     state = assess_document_state(snapshot, context)
     if state.get("case_release_status") != "ready_for_professional_signoff" or not state.get("is_final"):
         raise DocumentWorkflowError("DOCUMENT_NOT_READY_FOR_SIGNATURE", "document is not ready for signature")
@@ -436,6 +479,7 @@ def create_signature_request(store: Any, job_id: str, *, revision_id: str) -> Di
     return request
 
 
+@_serialized
 def import_signed_report(
     store: Any,
     job_id: str,
@@ -510,8 +554,6 @@ def import_signed_report(
             ),
             status_code=422,
         )
-    store.save_snapshot(job_id, snapshot)
-    store.save_artifact(job_id, "signed_report.pdf", bytes(signed_pdf))
     dossier = _refresh_dossier(
         store,
         job_id,
@@ -521,6 +563,7 @@ def import_signed_report(
         signature_record=record,
         signed_pdf=bytes(signed_pdf),
         documentary_files=context.get("documentary_files") or [],
+        persist=False,
     )
     requirement_map = _requirement_map(snapshot)
     submission = None
@@ -537,7 +580,11 @@ def import_signed_report(
         check = verify_submission_package(submission)
         if not check.get("ok"):
             raise DocumentWorkflowError("SUBMISSION_PACKAGE_INVALID", "submission package failed verification")
-        store.save_artifact(job_id, "submission.zip", submission)
+    # All cryptographic, document, dossier and package checks precede mutations.
+    store.save_snapshot(job_id, snapshot)
+    store.save_artifact(job_id, "signed_report.pdf", bytes(signed_pdf))
+    store.save_artifact(job_id, "evidence_bundle.zip", dossier)
+    store.save_artifact(job_id, "submission.zip", submission)
     result = {
         "schema_version": "MP-SIGNED-DOCUMENT/1",
         "job_id": job_id,
@@ -556,6 +603,7 @@ def import_signed_report(
     return result
 
 
+@_serialized
 def get_document_status(store: Any, job_id: str) -> Dict[str, Any]:
     job = store.get(job_id)
     if not isinstance(job, Mapping):

@@ -26,6 +26,12 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
             category = st.selectbox("Categoria do arquivo", ["document", "annex"], key=f"{namespace}_category")
             source = st.text_input("Fonte e autorização de acesso ao arquivo", key=f"{namespace}_source")
             description = st.text_input("Descrição do documento/anexo", key=f"{namespace}_description")
+            from modules.qualification_profile import resolve_profile
+            profile_ref = ((snapshot.get("provenance") or {}).get("qualification_context") or {}).get("profile") or {}
+            profile = resolve_profile(profile_ref)
+            requirement_ids = st.multiselect("Requisitos comprovados pelo arquivo",
+                                             options=[item["id"] for item in profile.get("requirements") or []],
+                                             key=f"{namespace}_requirements")
             authorized = st.checkbox("Tenho autorização para incluir estes bytes no laudo e dossiê", key=f"{namespace}_authorized")
             if st.form_submit_button("Anexar arquivo autorizado"):
                 if attachment is None or not authorized or not source.strip():
@@ -34,7 +40,8 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
                     stored = client.documents("/attachments", method="POST",
                                               files={"file": (attachment.name, attachment.getvalue())},
                                               data={"source": source, "category": category, "description": description,
-                                                    "authorized_for_report": "true"})
+                                                    "authorized_for_report": "true",
+                                                    "requirement_ids": json.dumps(requirement_ids)})
                     st.session_state.pop(f"{namespace}_signing_request", None)
                     st.json(stored)
                     st.info("Bytes arquivados com hash. Gere novamente os documentos para incorporar o conteúdo e revalidar revisões.")
