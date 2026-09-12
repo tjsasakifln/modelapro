@@ -123,7 +123,12 @@ class ProjectStub(BaseHTTPRequestHandler):
             if name.endswith(".pdf"):
                 self._json(404, {"error": "failed"})
                 return
-            self._bytes(200, b"FROZEN")
+            self._bytes(200, json.dumps({
+                "request_spec": scenario.get("frozen_request_spec") or {
+                    "schema_version": "MP/1",
+                    "target_col": "preco",
+                }
+            }).encode("utf-8"))
             return
         self._json(404, {"error": self.path})
 
@@ -190,7 +195,7 @@ def test_session_reload_recovers_job_result_and_failed_pdf_keeps_calc():
         pdf = status["artifact_states"]["report.pdf"]
         assert pdf["state"] == "failed"
         calc = restored.get_artifact("frozen_project.json")
-        assert calc == b"FROZEN"
+        assert json.loads(calc)["request_spec"]["target_col"] == "preco"
     finally:
         server.shutdown()
 

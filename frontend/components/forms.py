@@ -998,20 +998,53 @@ class JobClient:
     def recover(self, job_id: Optional[str] = None) -> Optional[dict]:
         """GET de estado/resultado após falha de WS, rerun ou reabertura.
 
-        Nunca descarta job_id, mesmo se o GET falhar.
+        Nunca descarta job_id, mesmo se o GET falhar. Ao trocar de trabalho,
+        limpa antes todo estado derivado do anterior. O RequestSpec de um
+        resultado recuperado vem exclusivamente do frozen_project persistido,
+        não dos widgets que estiverem na tela.
         """
         jid = job_id or self.job_id
         if not jid:
             return None
-        if jid != self.job_id:
+        switching_job = jid != self.job_id
+        if switching_job:
             self.access_token = None
+            self.status_url = f"/jobs/{jid}"
+            self.last_status = None
+            self.last_snapshot = None
+            self.last_request_spec = None
+            self.last_submit_fingerprint = None
+            self.last_error = None
         self.job_id = jid
         status = self.get_status(jid)
         if status.get("result_available"):
-            try:
-                self.last_snapshot = self.get_result(jid)
-            except (ApiConnectionError, ApiResponseError):
-                pass
+            # Nunca deixe um snapshot anterior visível se a leitura atual
+            # falhar. A exceção é deliberadamente bloqueante para a interface.
+            self.last_snapshot = None
+            self.last_request_spec = None
+            self.last_snapshot = self.get_result(jid)
+            frozen_state = (
+                ((status.get("artifact_states") or {}).get("frozen_project.json") or {})
+                .get("state")
+            )
+            if frozen_state == "ready":
+                raw = self.get_artifact("frozen_project.json", jid)
+                try:
+                    frozen = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ApiResponseError(
+                        "Projeto congelado em formato inesperado.", payload=str(exc)
+                    ) from exc
+                request_spec = frozen.get("request_spec") if isinstance(frozen, Mapping) else None
+                if not isinstance(request_spec, Mapping):
+                    raise ApiResponseError(
+                        "Projeto congelado não contém RequestSpec canônico.", payload=frozen
+                    )
+                self.last_request_spec = dict(request_spec)
+        else:
+            self.last_snapshot = None
+            if switching_job:
+                self.last_request_spec = None
         return status
 
     def cancel(self, job_id: Optional[str] = None) -> dict:
