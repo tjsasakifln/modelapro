@@ -219,7 +219,11 @@ def test_browser_cost_calculation_without_market_file_can_be_saved_and_reopened(
                     )
                     _fill(page, "Depreciação — fonte", "VISTORIA-SINTETICA-TESTE")
 
-                    _select(page, "Procedência da vistoria", "professional_act")
+                    _select(
+                        page,
+                        "Procedência da vistoria",
+                        "Ato do profissional responsável",
+                    )
                     _fill(page, "Responsável pela vistoria", "PROFISSIONAL SINTETICO DE TESTE")
                     _fill(
                         page,
