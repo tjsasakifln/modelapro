@@ -133,7 +133,7 @@ jobs:
             "NT AUTHORITY\SYSTEM",
             "BUILTIN\Administrators"
           )) {
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
               $identity,
               "FullControl",
               "ContainerInherit,ObjectInherit",
@@ -322,6 +322,9 @@ jobs:
           & $env:C06_PRIOR_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$install"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path (Join-Path $install "MODELA-PRO.exe"))) { throw "installed executable absent" }
+          $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
+          $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
+          $env:MODELA_LICENSE_PATH = $env:C06_PRIOR_LICENSE
           & "$install\MODELA-PRO.exe" --check-pdf
           if ($LASTEXITCODE -ne 0) { throw "installed A cannot render PDF with its bundled native runtime" }
           "C06_INSTALL=$install" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -344,11 +347,11 @@ jobs:
         run: |
           & $env:C06_CURRENT_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "$env:C06_INSTALL\MODELA-PRO.exe" --check-pdf
-          if ($LASTEXITCODE -ne 0) { throw "installed B cannot render PDF with its bundled native runtime" }
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
           $env:MODELA_LICENSE_PATH = $env:C06_CURRENT_LICENSE
+          & "$env:C06_INSTALL\MODELA-PRO.exe" --check-pdf
+          if ($LASTEXITCODE -ne 0) { throw "installed B cannot render PDF with its bundled native runtime" }
           & $env:BUILD_PYTHON -m scripts.comercial.operacao.verify_windows_install `
             --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
             --evidence $env:C06_EVIDENCE `
@@ -360,11 +363,11 @@ jobs:
         run: |
           & $env:C06_PRIOR_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "$env:C06_INSTALL\MODELA-PRO.exe" --check-pdf
-          if ($LASTEXITCODE -ne 0) { throw "restored A cannot render PDF with its bundled native runtime" }
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-restored"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
           $env:MODELA_LICENSE_PATH = $env:C06_PRIOR_LICENSE
+          & "$env:C06_INSTALL\MODELA-PRO.exe" --check-pdf
+          if ($LASTEXITCODE -ne 0) { throw "restored A cannot render PDF with its bundled native runtime" }
           & $env:BUILD_PYTHON -m scripts.comercial.operacao.verify_windows_install `
             --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
             --evidence $env:C06_EVIDENCE `
@@ -398,6 +401,22 @@ jobs:
             $paths = @((Get-Item -Force $target)) + @(Get-ChildItem -Force -Recurse $target)
             foreach ($path in $paths) {
               $acl = Get-Acl -LiteralPath $path.FullName
+              try {
+                $ownerSid = [System.Security.Principal.NTAccount]::new($acl.Owner).Translate(
+                  [System.Security.Principal.SecurityIdentifier]
+                ).Value
+              } catch {
+                $ownerSid = $acl.Owner
+              }
+              if ($ownerSid -notin $allowedSids) {
+                $unsafe += [ordered]@{
+                  path = $path.FullName.Substring($target.Length).TrimStart('\')
+                  root = $target
+                  owner = $acl.Owner
+                  owner_sid = $ownerSid
+                  reason = "owner_not_allowed"
+                }
+              }
               foreach ($ace in $acl.Access) {
                 try {
                   $sid = $ace.IdentityReference.Translate(
@@ -438,6 +457,7 @@ jobs:
           if ($aclStatus -ne "PASSED") { throw "private runtime paths have missing or overbroad Windows ACLs" }
 
       - name: Uninstall without deleting the separate evidence profile
+        if: always()
         shell: pwsh
         run: |
           $uninstaller = Join-Path $env:C06_INSTALL "unins000.exe"
