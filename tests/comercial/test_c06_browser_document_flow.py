@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal, InvalidOperation
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -144,8 +145,16 @@ def _fill(page, label: str, value: str) -> None:
         page.keyboard.press("Tab")
         page.wait_for_timeout(350)
         try:
-            if _field(page, label).input_value() == value:
+            confirmed = _field(page, label)
+            actual = confirmed.input_value()
+            if actual == value:
                 return
+            if confirmed.get_attribute("type") == "number":
+                try:
+                    if Decimal(actual) == Decimal(value):
+                        return
+                except InvalidOperation:
+                    pass
         except Exception:
             pass
     raise AssertionError(f"UI field did not retain confirmed value: {label}")
@@ -205,16 +214,31 @@ def _wait_for_visible_state(page, expected: str, *, timeout: float = 30.0) -> st
 
 
 def _select(page, label: str, option: str, *, steps: int = 1) -> None:
-    box = page.locator("[data-testid='stSelectbox']").filter(has_text=label)
-    assert box.count(), f"UI selectbox not found: {label}"
-    control = box.first.get_by_role("combobox")
+    def visible_box():
+        matches = page.locator("[data-testid='stSelectbox']").filter(has_text=label)
+        for index in range(matches.count()):
+            candidate = matches.nth(index)
+            if candidate.is_visible():
+                return candidate
+        return None
+
+    box = visible_box()
+    assert box is not None, f"visible UI selectbox not found: {label}"
+    control = box.get_by_role("combobox")
     if not control.count():
-        control = box.first.locator("[data-baseweb='select']")
+        control = box.locator("[data-baseweb='select']")
     control.first.click()
     for _ in range(steps):
         page.keyboard.press("ArrowDown")
     page.keyboard.press("Enter")
-    page.wait_for_timeout(500)
+    for _ in range(20):
+        current = visible_box()
+        if current is not None:
+            rendered = current.evaluate("element => element.outerHTML")
+            if option in rendered:
+                return
+        page.wait_for_timeout(250)
+    raise AssertionError(f"UI selectbox did not retain {option!r}: {label}")
 
 
 def _multiselect(page, label: str, options: tuple[str, ...]) -> None:
@@ -230,14 +254,17 @@ def _multiselect(page, label: str, options: tuple[str, ...]) -> None:
 
 
 def _expand(page, title: str) -> None:
-    heading = page.get_by_text(title, exact=True)
     for _ in range(30):
-        if heading.count():
-            break
+        heading = page.get_by_text(title, exact=True)
+        for index in range(heading.count()):
+            candidate = heading.nth(index)
+            if candidate.is_visible():
+                candidate.scroll_into_view_if_needed()
+                candidate.click()
+                page.wait_for_timeout(250)
+                return
         page.wait_for_timeout(200)
-    assert heading.count(), f"UI expander not found: {title}"
-    heading.first.click()
-    page.wait_for_timeout(250)
+    raise AssertionError(f"visible UI expander not found: {title}")
 
 
 def _wait_for_calculation(page) -> str:
@@ -270,6 +297,20 @@ def _wait_for_dossier_ready(page) -> None:
     raise AssertionError("required evidence_bundle.zip did not become ready\n" + body[-3000:])
 
 
+def _market_csv_with_documentary_locations(*, n: int = 30) -> bytes:
+    lines = analytic_linear_csv(n=n, tag="SYNTHETIC-TEST").decode("utf-8").splitlines()
+    enriched = [lines[0] + ";endereco;latitude;longitude;fonte"]
+    for index, line in enumerate(lines[1:], start=1):
+        latitude = f"{-23.55 + index * 0.001:.6f}".replace(".", ",")
+        longitude = f"{-46.63 - index * 0.001:.6f}".replace(".", ",")
+        enriched.append(
+            line
+            + f";Rua Sintética {index}, Centro;{latitude}"
+            + f";{longitude};ANUNCIO-SINTETICO-TESTE-{index:03d}"
+        )
+    return ("\n".join(enriched) + "\n").encode("utf-8")
+
+
 def test_browser_completes_test_report_review_and_external_signature(tmp_path):
     try:
         from playwright.sync_api import sync_playwright
@@ -279,7 +320,7 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
     api_port, ui_port = _free_port_pair()
     trust_root, p12 = _test_signing_identity(tmp_path)
     market_file = tmp_path / "SYNTHETIC_TEST_mercado.csv"
-    market_file.write_bytes(analytic_linear_csv(n=30, tag="SYNTHETIC-TEST"))
+    market_file.write_bytes(_market_csv_with_documentary_locations())
     attachment_file = tmp_path / "SYNTHETIC_TEST_vistoria.txt"
     attachment_file.write_text(
         "DOCUMENTO SINTETICO DE TESTE - SEM VALIDADE EXTERNA\n"
@@ -376,6 +417,14 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                     market.first.set_input_files(str(market_file))
                     page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=90000)
 
+                    for label, column, steps in (
+                        ("Coluna do endereço da amostra", "endereco", 4),
+                        ("Coluna da latitude da amostra", "latitude", 5),
+                        ("Coluna da longitude da amostra", "longitude", 6),
+                        ("Coluna da fonte da amostra", "fonte", 7),
+                    ):
+                        _select(page, label, column, steps=steps)
+
                     _fill(page, "Unidade do valor-alvo", "BRL")
                     page.get_by_text(
                         "Informar data da avaliação (data-base)", exact=True
@@ -415,6 +464,24 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                         "Evidência da identificação dos dados de mercado",
                         "SYNTHETIC_TEST_mercado.csv",
                     )
+                    for label, value in (
+                        ("Objetivo da avaliação", "SYNTHETIC_TEST — determinar valor de mercado"),
+                        ("Diagnóstico de mercado", "SYNTHETIC_TEST — oferta regular e liquidez média"),
+                        (
+                            "Justificativa para adoção do Grau I",
+                            "SYNTHETIC_TEST — justificativa documental preventiva",
+                        ),
+                        ("Observações do laudo", "SYNTHETIC_TEST — sem validade externa"),
+                        ("Critério de enquadramento — bairro", "localização nominal do dado"),
+                        ("Codificação ou escala — bairro", "categoria nominal"),
+                        ("Critério de enquadramento — area", "área privativa em metros quadrados"),
+                        ("Codificação ou escala — area", "numérica contínua"),
+                        ("Latitude do avaliando (graus decimais)", "-23,5505"),
+                        ("Longitude do avaliando (graus decimais)", "-46,6333"),
+                        ("Endereço completo do avaliando", "Praça Sintética, Centro"),
+                        ("Fonte da localização do avaliando", "VISTORIA-SINTETICA-TESTE"),
+                    ):
+                        _fill(page, label, value)
 
                     _expand(page, "Evidências do perfil e achados profissionais")
                     for requirement_id, reference in (
@@ -507,6 +574,17 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                         ("Caracterização do imóvel", "SYNTHETIC_TEST — imóvel fictício de 73,5 m²"),
                         ("Justificativa do método", "SYNTHETIC_TEST — regressão sobre amostra sintética"),
                         ("Pressupostos, ressalvas e limitações", "SYNTHETIC_TEST — sem validade externa"),
+                    ):
+                        _fill(page, label, value)
+                    for label, value in (
+                        ("Nome do profissional no laudo", "PROFISSIONAL SINTETICO DE TESTE"),
+                        ("Conselho profissional no laudo", "CREA-TESTE"),
+                        ("Registro profissional no laudo", "CREA-TESTE-000"),
+                        ("ART/RRT ou documento de responsabilidade", "ART-TESTE-000"),
+                        (
+                            "Referência documental da qualificação",
+                            "CERTIDAO-SINTETICA-TESTE-000",
+                        ),
                     ):
                         _fill(page, label, value)
                     page.get_by_role("button", name="Gerar PDF, DOCX e dossiê").click()

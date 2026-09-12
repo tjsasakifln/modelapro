@@ -1554,9 +1554,19 @@ def render_sample_evidence_column_mapping(
     return mapping, errors
 
 
-def _sample_evidence_seed(sample_rows: Sequence[Mapping[str, Any]], context: Mapping[str, Any]) -> list[dict]:
+def _sample_evidence_seed(
+    sample_rows: Sequence[Mapping[str, Any]],
+    context: Mapping[str, Any],
+    *,
+    sample_evidence_columns: Optional[Mapping[str, str]] = None,
+) -> list[dict]:
     current = context.get("sample_evidence") or {}
     evidence = {str(key): value for key, value in current.items()} if isinstance(current, Mapping) else {}
+    column_mapping = sample_evidence_columns
+    if column_mapping is None:
+        column_mapping = context.get("sample_evidence_columns") or {}
+    if not isinstance(column_mapping, Mapping):
+        column_mapping = {}
     row_ids = []
     rows_by_id: dict[str, Mapping[str, Any]] = {}
     for row in sample_rows:
@@ -1570,14 +1580,19 @@ def _sample_evidence_seed(sample_rows: Sequence[Mapping[str, Any]], context: Map
     result = []
     for row_id in row_ids:
         row = rows_by_id.get(row_id) or {}
+        values = row.get("values") or row
+        if not isinstance(values, Mapping):
+            values = {}
         materialized = row.get("geolocation") or {}
         if not isinstance(materialized, Mapping):
             materialized = {}
-        location = {
-            field: materialized.get(field, row.get(field))
-            for field in ("address", "latitude", "longitude", "source", "justification")
-            if materialized.get(field, row.get(field)) is not None
-        }
+        location = {}
+        for field in ("address", "latitude", "longitude", "source", "justification"):
+            mapped_column = column_mapping.get(field)
+            mapped_value = values.get(mapped_column) if mapped_column else values.get(field)
+            value = materialized.get(field, mapped_value)
+            if value is not None:
+                location[field] = value
         explicit = evidence.get(row_id) or {}
         if isinstance(explicit, Mapping):
             location.update(explicit)
@@ -1670,8 +1685,28 @@ def render_professional_report_fields(
     if fields["objective"] and purpose and fields["objective"].casefold() == purpose.casefold():
         errors.append("Objetivo da avaliação deve ser informado separadamente da finalidade da encomenda.")
 
-    current_classification = current.get("variable_classification") or {}
-    if not isinstance(current_classification, Mapping):
+    stored_classification = current.get("variable_classification") or {}
+    if isinstance(stored_classification, Mapping):
+        current_classification = dict(stored_classification)
+    elif isinstance(stored_classification, (list, tuple)):
+        current_classification = {}
+        for index, raw_entry in enumerate(stored_classification):
+            if not isinstance(raw_entry, Mapping):
+                errors.append(
+                    f"Classificação armazenada na linha {index + 1} tem tipo inválido."
+                )
+                continue
+            variable = str(raw_entry.get("variable") or raw_entry.get("name") or "").strip()
+            if not variable:
+                errors.append(
+                    f"Classificação armazenada na linha {index + 1} não identifica a variável."
+                )
+                continue
+            if variable in current_classification:
+                errors.append(f"Classificação armazenada repete a variável {variable}.")
+                continue
+            current_classification[variable] = dict(raw_entry)
+    else:
         errors.append("Classificação das variáveis armazenada tem tipo inválido; revise os campos antes de continuar.")
         current_classification = {}
     classification: dict[str, dict] = {}
@@ -1815,7 +1850,11 @@ def render_professional_report_fields(
         errors.append("Localização da amostra armazenada tem tipo inválido; revise a tabela.")
     elif any(not isinstance(value, Mapping) for value in stored_sample_evidence.values()):
         errors.append("Localização da amostra contém linha com tipo inválido; revise a tabela.")
-    seed = _sample_evidence_seed(sample_rows, current)
+    seed = _sample_evidence_seed(
+        sample_rows,
+        current,
+        sample_evidence_columns=sample_evidence_columns,
+    )
     allowed_row_ids = [row["row_id"] for row in seed]
     edited = st.data_editor(
         pd.DataFrame(seed, columns=["row_id", "address", "latitude", "longitude", "source", "justification"]),
