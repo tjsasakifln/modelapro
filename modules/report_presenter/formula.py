@@ -118,16 +118,20 @@ def compose_model_equation(
     """
     block = _as_mapping(model)
     spec = _as_mapping(block.get("specification") or block.get("candidate_spec"))
+    transform_state = _as_mapping(block.get("target_transform_state"))
     provided = str(block.get("formula") or spec.get("formula") or "").strip()
     y_transform = _transform_name(
         block.get("y_transformation")
         or spec.get("y_transformation")
         or block.get("target_transform")
+        or transform_state.get("name")
     )
     pairs = _coefficient_pairs(block)
     lhs = _lhs(target_col or str(block.get("target_column") or spec.get("target") or ""), y_transform)
     composed_storage = ""
     composed_display = ""
+    rhs_storage = ""
+    rhs_display = ""
     if pairs:
         rhs_storage = _compose_terms(pairs, storage=True)
         rhs_display = _compose_terms(pairs, storage=False)
@@ -142,12 +146,40 @@ def compose_model_equation(
     scale_label = "logarítmica" if log_scale else ("original" if identity else (y_transform or "não informada"))
 
     notes: List[str] = []
+    original_scale_formula = ""
+    original_scale_formula_storage = ""
+    inverse = _as_mapping(transform_state.get("inverse"))
+    retransformation_method = str(
+        inverse.get("default_method")
+        or _as_mapping(block.get("retransformation")).get("method")
+        or ("identity" if identity else "")
+    ).strip()
+    retransformation_estimand = str(
+        inverse.get("default_estimand")
+        or _as_mapping(block.get("retransformation")).get("estimand")
+        or ("E[Y|X]" if identity else "")
+    ).strip()
+    target_original = target_col or str(block.get("target_column") or spec.get("target") or "y")
+    if rhs_storage and identity:
+        original_scale_formula = f"{target_original} = {rhs_display}"
+        original_scale_formula_storage = f"{target_original} = {rhs_storage}"
+    elif rhs_storage and log_scale and retransformation_method == "exponential":
+        original_scale_formula = f"{target_original} = exp({rhs_display})"
+        original_scale_formula_storage = f"{target_original} = exp({rhs_storage})"
     if formula_text and log_scale:
-        notes.append(
-            "A equação descreve o ajuste na escala logarítmica. A estimativa "
-            "monetária do snapshot é o valor na unidade original; esta minuta não "
-            "imprime exp(ajuste) como média sem o método de retransformação informado."
-        )
+        if original_scale_formula:
+            notes.append(
+                "A forma na unidade original aplica a inversa exponencial ao preditor "
+                "linear. Método: exponential; estimando: "
+                f"{retransformation_estimand or 'exp(E[log Y|X])'}. Essa forma não "
+                "é rotulada como média condicional sem correção de viés declarada."
+            )
+        else:
+            notes.append(
+                "A equação descreve o ajuste na escala logarítmica, mas o snapshot "
+                "não fornece coeficientes e método suficientes para escrever a forma "
+                "na unidade original."
+            )
     elif formula_text and identity:
         notes.append("A equação descreve o ajuste na escala original do alvo.")
     elif formula_text and y_transform:
@@ -194,6 +226,11 @@ def compose_model_equation(
         "formula": formula_text,
         "formula_display": provided or composed_display or formula_text,
         "formula_storage": composed_storage or provided,
+        "original_scale_formula": original_scale_formula,
+        "original_scale_formula_storage": original_scale_formula_storage,
+        "retransformation_method": retransformation_method or None,
+        "retransformation_estimand": retransformation_estimand or None,
+        "original_scale_present": bool(original_scale_formula),
         "source": source,
         "present": bool(formula_text),
         "y_transformation": y_transform or "identity",

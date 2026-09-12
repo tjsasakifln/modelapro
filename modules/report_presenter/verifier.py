@@ -325,30 +325,164 @@ def verify_report_consistency(
     view = build_report_view(snap, ctx)
     compact_text = "".join(text.split())
     for rows_key in ("used_rows", "excluded_rows"):
+        kind = "used" if rows_key == "used_rows" else "excluded"
         for row in view.get(rows_key) or []:
-            ordered = [
-                row.get("seq"),
-                row.get("row_id"),
-                row.get("source"),
-                row.get("justification"),
-            ]
-            if rows_key == "used_rows":
-                ordered.append(row.get("label"))
-            ordered.extend(row.get("value_cells") or [])
-            expected_row = "".join(
-                "".join(str(value or "").split()) for value in ordered
+            core_fields = (
+                "row_id", "source", "justification", "address", "latitude",
+                "longitude",
             )
-            if expected_row and expected_row not in compact_text:
-                findings.append(
-                    _finding(
-                        "MUTATED_SAMPLE_ROW",
-                        f"report_context.{rows_key}.{row.get('row_id')}",
-                        expected_row,
-                        None,
-                        "A linha renderizada não preserva fonte, justificativa e valores efetivos.",
-                    )
+            if kind == "used":
+                if row.get("label"):
+                    core_fields += ("label",)
+            for field in core_fields:
+                value = row.get(field)
+                if field in {"address", "latitude", "longitude"} and value is None:
+                    value = "PENDENTE"
+                token = _as_mapping(row.get("cell_tokens")).get(field)
+                display_value = "" if value is None else value
+                expected_cell = "".join(
+                    f"{display_value}{token or ''}".split()
                 )
-                break
+                if not expected_cell or compact_text.count(expected_cell) != 1:
+                    findings.append(
+                        _finding(
+                            "MUTATED_SAMPLE_CELL",
+                            f"report_context.{rows_key}.{row.get('row_id')}.{field}",
+                            expected_cell,
+                            compact_text.count(expected_cell),
+                            "Célula da amostra ausente, duplicada ou desligada do row_id.",
+                        )
+                    )
+                    break
+
+        panels_key = f"{kind}_value_panels"
+        for panel in view.get(panels_key) or []:
+            columns = list(panel.get("columns") or [])
+            for index, column in enumerate(columns):
+                token = list(panel.get("header_tokens") or [])[index]
+                check_bound_value = "".join(f"{column}{token}".split())
+                token_count = compact_text.count(token)
+                bound_count = compact_text.count(check_bound_value)
+                if token_count < 1 or bound_count != token_count:
+                    findings.append(
+                        _finding(
+                            "MUTATED_SAMPLE_PANEL_HEADER",
+                            f"report_context.{rows_key}.panel_{panel.get('number')}.{column}",
+                            check_bound_value,
+                            {"bound": bound_count, "token": token_count},
+                            "Cabeçalho ausente, duplicado ou deslocado para outro painel.",
+                        )
+                    )
+            for row in panel.get("rows") or []:
+                row_id_cell = "".join(
+                    f"{row.get('row_id')}{row.get('row_id_token') or ''}".split()
+                )
+                if compact_text.count(row_id_cell) != 1:
+                    findings.append(
+                        _finding(
+                            "MUTATED_SAMPLE_PANEL_ROW_ID",
+                            f"report_context.{rows_key}.panel_{panel.get('number')}.{row.get('row_id')}",
+                            row_id_cell,
+                            compact_text.count(row_id_cell),
+                            "row_id ausente, duplicado ou deslocado no painel.",
+                        )
+                    )
+                for index, value in enumerate(row.get("cells") or []):
+                    token = list(row.get("cell_tokens") or [])[index]
+                    display_value = "" if value is None else value
+                    expected_cell = "".join(f"{display_value}{token}".split())
+                    if compact_text.count(expected_cell) != 1:
+                        field = columns[index] if index < len(columns) else index
+                        findings.append(
+                            _finding(
+                                "MUTATED_SAMPLE_CELL",
+                                f"report_context.{rows_key}.{row.get('row_id')}.{field}",
+                                expected_cell,
+                                compact_text.count(expected_cell),
+                                "Valor da amostra ausente, duplicado ou em painel/row_id incorreto.",
+                            )
+                        )
+                        break
+
+    def check_bound_field(value: Any, token: Any, field: str) -> None:
+        display_value = "" if value is None else value
+        expected_cell = "".join(f"{display_value}{token or ''}".split())
+        observed_count = compact_text.count(expected_cell) if expected_cell else 0
+        if not expected_cell or observed_count != 1:
+            findings.append(
+                _finding(
+                    "MUTATED_STATISTICAL_FIELD",
+                    field,
+                    expected_cell,
+                    observed_count,
+                    "Campo estatístico ausente, duplicado ou desligado da seção esperada.",
+                )
+            )
+
+    metrics_view = _as_mapping(view.get("metrics"))
+    if metrics_view.get("present"):
+        metric_tokens = _as_mapping(metrics_view.get("tokens"))
+        for field in (
+            "r", "r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson"
+        ):
+            check_bound_field(
+                metrics_view.get(field), metric_tokens.get(field), f"model.metrics.{field}"
+            )
+    for row in view.get("coef_rows") or []:
+        if row.get("pvalue") != "—":
+            check_bound_field(
+                row.get("pvalue"), row.get("pvalue_token"),
+                f"model.pvalues.{row.get('variable')}",
+            )
+
+    diagnostics_view = _as_mapping(view.get("statistical_diagnostics"))
+    normal_view = _as_mapping(diagnostics_view.get("normal_frequency"))
+    if normal_view.get("present"):
+        for index, row in enumerate(normal_view.get("rows") or []):
+            tokens = _as_mapping(row.get("tokens"))
+            interval = f"[-{row.get('z')};+{row.get('z')}]"
+            check_bound_field(
+                interval, tokens.get("z"), f"diagnostics.normal_frequency.{index}.z"
+            )
+            for field in ("nominal_percent", "observed_count", "observed_percent"):
+                check_bound_field(
+                    row.get(field), tokens.get(field),
+                    f"diagnostics.normal_frequency.{index}.{field}",
+                )
+    for matrix_name in ("correlation", "correlation_design"):
+        matrix = _as_mapping(diagnostics_view.get(matrix_name))
+        if not matrix.get("present"):
+            continue
+        for panel in matrix.get("panels") or []:
+            columns = list(panel.get("variables") or [])
+            for row in panel.get("rows") or []:
+                for index, value in enumerate(row.get("values") or []):
+                    token = list(row.get("cell_tokens") or [])[index]
+                    column = columns[index] if index < len(columns) else index
+                    check_bound_field(
+                        value, token,
+                        f"diagnostics.{matrix_name}.{row.get('variable')}.{column}",
+                    )
+    outliers_view = _as_mapping(diagnostics_view.get("outliers"))
+    if outliers_view.get("present"):
+        tokens = _as_mapping(outliers_view.get("tokens"))
+        for field in ("detected", "excluded", "influential"):
+            check_bound_field(
+                outliers_view.get(field), tokens.get(field),
+                f"diagnostics.outliers.{field}",
+            )
+    elasticity_view = _as_mapping(diagnostics_view.get("elasticities"))
+    if elasticity_view.get("present"):
+        for index, row in enumerate(elasticity_view.get("items") or []):
+            tokens = _as_mapping(row.get("tokens"))
+            for field in (
+                "variable", "elasticity", "base_value", "base_prediction", "step",
+                "derivative",
+            ):
+                check_bound_field(
+                    row.get(field), tokens.get(field),
+                    f"diagnostics.elasticities.{index}.{field}",
+                )
 
     target_col = str(target.get("column") or "")
     if not _equation_coherent(text, model, target_col):
