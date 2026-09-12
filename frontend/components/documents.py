@@ -1,0 +1,91 @@
+"""Persistent C03 document workflow; UI never grants qualification or signature status."""
+from __future__ import annotations
+
+import json
+from typing import Mapping
+
+import streamlit as st
+
+from .forms import ApiConnectionError, ApiResponseError, JobClient
+
+
+def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dict:
+    st.markdown("#### Conteúdo do laudo, revisão e assinatura")
+    if not client.job_id or snapshot is None:
+        st.info("Calcule ou reabra um trabalho para preparar os documentos.")
+        return {}
+    st.caption("As decisões são persistidas no trabalho e vinculadas ao cálculo e ao conteúdo. Nenhum ato institucional é executado aqui.")
+    namespace = f"documents_{client.job_id}"
+    try:
+        status = client.documents()
+        state = status.get("state") or status
+        st.write("Estado documental:", state.get("case_release_status") or state.get("document_state") or "Ainda não preparado")
+        context = json.loads(client.get_artifact("report_context.json"))
+        with st.expander("Completar conteúdo e anexos do laudo"):
+            fields = {}
+            for key, label in (
+                ("asset_identification", "Identificação do bem"),
+                ("region_characterization", "Caracterização da região"),
+                ("property_characterization", "Caracterização do imóvel"),
+                ("methodology_justification", "Justificativa do método"),
+                ("assumptions", "Pressupostos, ressalvas e limitações"),
+            ):
+                fields[key] = st.text_area(label, value=str(context.get(key) or ""), key=f"{namespace}_{key}")
+            st.caption("Documentos e anexos devem identificar os arquivos integrais e sua procedência. Referências vazias não satisfazem obrigações.")
+            documentary_json = st.text_area(
+                "Documentos, anexos e evidências estruturadas (JSON)",
+                value=json.dumps({"documents": context.get("documents") or [],
+                                  "annexes": context.get("annexes") or [],
+                                  "output_evidence": context.get("output_evidence") or {}}, ensure_ascii=False, indent=2),
+                key=f"{namespace}_evidence",
+            )
+            if st.button("Gerar PDF, DOCX e dossiê", key=f"{namespace}_generate"):
+                evidence = json.loads(documentary_json)
+                if not isinstance(evidence, dict) or set(evidence) - {"documents", "annexes", "output_evidence"}:
+                    raise ValueError("Use somente documents, annexes e output_evidence no objeto JSON.")
+                state = client.documents(method="POST", json={"report_context": {**fields, **evidence}})
+                st.session_state.pop(f"{namespace}_signing_request", None)
+                client.get_result()
+                st.info("Documentos gerados; consulte as pendências. Geração não é aprovação.")
+        professional_id = st.text_input("Profissional responsável pela decisão", key=f"{namespace}_professional")
+        motive = st.text_area("Motivo e evidências da revisão", key=f"{namespace}_motive")
+        revision = st.text_input("Identificador da revisão documental", key=f"{namespace}_revision")
+        if st.button("Registrar revisão (não assina o laudo)", key=f"{namespace}_review"):
+            state = client.documents("/review", method="POST", json={
+                "professional_id": professional_id, "motive": motive, "version": revision,
+            })
+            st.session_state.pop(f"{namespace}_signing_request", None)
+            client.get_result()
+            st.info("Revisão registrada pelo serviço; decisões e pendências permanecem no histórico.")
+        if st.button("Exportar para assinador externo", key=f"{namespace}_export"):
+            request = client.documents("/signature-request", method="POST", json={"revision_id": revision})
+            st.session_state[f"{namespace}_signing_request"] = request
+        if st.session_state.get(f"{namespace}_signing_request"):
+            st.download_button("Baixar vínculo de assinatura", json.dumps(
+                st.session_state[f"{namespace}_signing_request"], ensure_ascii=False, indent=2),
+                "signature_request.json", "application/json")
+            st.download_button("Baixar os bytes PDF para assinatura", client.get_artifact("report.pdf"),
+                               "report.pdf", "application/pdf")
+            st.caption("Assine estes bytes fora do produto e importe o PDF original. Não forneça chave privada.")
+        signed = st.file_uploader("Arquivo PDF assinado original", type=["pdf"], key=f"{namespace}_signed")
+        if st.button("Verificar arquivo assinado importado", key=f"{namespace}_verify"):
+            if signed is None:
+                st.warning("Selecione o PDF assinado original.")
+            else:
+                state = client.documents("/signature", method="POST", files={
+                    "file": (signed.name, signed.getvalue(), "application/pdf"),
+                })
+                client.get_result()
+                st.info("Verificação concluída pelo serviço. Consulte o resultado; integridade não é aprovação técnica.")
+        st.json(state)
+        for artifact in state.get("artifacts") or []:
+            name = artifact.get("name") if isinstance(artifact, dict) else str(artifact)
+            if name and st.button(f"Preparar download: {name}", key=f"{namespace}_prepare_{name}"):
+                st.download_button(f"Baixar {name}", client.get_artifact(name), name,
+                                   key=f"{namespace}_download_{name}")
+        return state
+    except (ApiConnectionError, ApiResponseError, ValueError) as exc:
+        st.error(str(exc))
+        if isinstance(exc, ApiResponseError) and getattr(exc, "payload", None):
+            st.json(exc.payload)
+        return {}

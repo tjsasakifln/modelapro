@@ -777,6 +777,7 @@ class JobClient:
         self.timeout = timeout
         self._http = client
         self.job_id: Optional[str] = None
+        self.access_token: Optional[str] = None
         self.status_url: Optional[str] = None
         self.last_status: Optional[dict] = None
         self.last_snapshot: Optional[dict] = None
@@ -900,6 +901,7 @@ class JobClient:
         self.last_submit_fingerprint = fingerprint
         self.last_request_spec = dict(request_spec)
         self.job_id = str(payload["job_id"])
+        self.access_token = payload.get("access_token")
         self.status_url = payload.get("status_url") or f"/jobs/{self.job_id}"
         if "state" in payload:
             self.last_status = {
@@ -914,6 +916,23 @@ class JobClient:
                 "result_available": False,
             }
         return payload
+
+    def operation(self, method: str, path: str, **kwargs):
+        response = self._call(method, path, **kwargs)
+        if response.status_code >= 400:
+            raise ApiResponseError(
+                f"Operação recusada (HTTP {response.status_code}).",
+                status_code=response.status_code, payload=_json_or_text(response),
+            )
+        return response
+
+    def documents(self, action: str = "", *, method: str = "GET", **kwargs) -> dict:
+        if not self.job_id:
+            raise ApiResponseError("Selecione um trabalho calculado antes da emissão.")
+        if not self.access_token:
+            self.access_token = self.operation("POST", f"/jobs/{self.job_id}/access-token").json()["access_token"]
+        return self.operation(method, f"/jobs/{self.job_id}/documents{action}",
+                              headers={"X-Job-Token": self.access_token or ""}, **kwargs).json()
 
     def get_status(self, job_id: Optional[str] = None) -> dict:
         jid = job_id or self.job_id
@@ -957,6 +976,8 @@ class JobClient:
         jid = job_id or self.job_id
         if not jid:
             return None
+        if jid != self.job_id:
+            self.access_token = None
         self.job_id = jid
         status = self.get_status(jid)
         if status.get("result_available"):
@@ -1190,6 +1211,7 @@ def restore_client_from_session(
 ) -> JobClient:
     job_client = JobClient(base_url=base_url, timeout=timeout, client=client)
     job_client.job_id = session.get("c09_job_id")
+    job_client.access_token = session.get("c06_job_access_token")
     job_client.last_status = session.get("c09_job_status")
     job_client.last_snapshot = session.get("c09_snapshot")
     job_client.last_submit_fingerprint = session.get("p02_submit_fingerprint")
@@ -1199,6 +1221,7 @@ def restore_client_from_session(
 
 def persist_client_to_session(session: MutableMapping[str, Any], job_client: JobClient) -> None:
     session["c09_job_id"] = job_client.job_id
+    session["c06_job_access_token"] = job_client.access_token
     session["c09_job_status"] = job_client.last_status
     session["c09_snapshot"] = job_client.last_snapshot
     session["p02_submit_fingerprint"] = job_client.last_submit_fingerprint
@@ -1911,6 +1934,8 @@ def upload_form(
             st.write("Estimativa de custo devolvida pela API:", cost["value"])
 
     evidence_state = _vistoria_and_identity_widgets(ns=ns, inspection_date=inspection_date)
+    request_spec["inspection"] = evidence_state.get("inspection")
+    request_spec["professional_identity"] = evidence_state.get("identity")
     st.markdown("**2. Imóvel avaliando**")
     st.caption(
         "Use as variáveis-base do esquema (categorias, números já interpretados, "

@@ -18,6 +18,9 @@ import streamlit as st
 
 from .forms import (
     ACTIVE_JOB_STATES,
+    ApiConnectionError,
+    ApiResponseError,
+    JobClient,
     TERMINAL_JOB_STATES,
     may_start_execution,
 )
@@ -556,12 +559,46 @@ def sidebar() -> dict:
         )
         reopen_job = st.text_input("Retomar trabalho pelo identificador", value="")
         project_id = st.text_input("Identificador do projeto", value="")
+        if st.checkbox("Licença, cópia de segurança e restauração", value=False):
+            _render_local_operations(JobClient(api_url))
         return {
             "visual_fixture": visual_fixture,
             "api_url": api_url,
             "reopen_job": reopen_job.strip() or None,
             "project_id": project_id.strip() or None,
         }
+
+
+def _render_local_operations(client: JobClient) -> None:
+    """Buyer-facing consumers of authenticated local operations, including after expiry."""
+    st.caption("A licença do produto não é assinatura do laudo nem qualificação profissional.")
+    try:
+        decision = client.operation("GET", "/operations/license").json()
+        st.write("Cálculo habilitado" if decision.get("calculate") else "Cálculo não habilitado pela licença")
+        st.caption("Consulta, exportação e backup permanecem disponíveis após expiração.")
+        entitlement = st.file_uploader("Licença do comprador fornecida pelo titular", type=["json"], key="buyer_license")
+        if st.button("Instalar licença"):
+            if entitlement is None:
+                st.warning("Selecione o envelope de licença recebido. Não informe chaves privadas.")
+            else:
+                client.operation("POST", "/operations/license", content=entitlement.getvalue())
+                st.success("Envelope de licença validado e armazenado localmente.")
+        if st.button("Preparar cópia de segurança"):
+            st.session_state["workspace_backup_bytes"] = client.operation("GET", "/operations/backup").content
+        if st.session_state.get("workspace_backup_bytes"):
+            st.download_button("Baixar cópia de segurança", st.session_state["workspace_backup_bytes"],
+                               file_name="modelapro-backup.zip", mime="application/zip")
+        backup = st.file_uploader("Cópia para restaurar em espaço vazio", type=["zip"], key="workspace_restore")
+        st.caption("A restauração exige espaço vazio e preserva os arquivos existentes. Verifica integridade antes de ativar.")
+        if st.button("Restaurar cópia verificada"):
+            if backup is None:
+                st.warning("Selecione uma cópia de segurança.")
+            else:
+                result = client.operation("POST", "/operations/restore",
+                                          files={"file": (backup.name, backup.getvalue(), "application/zip")}).json()
+                st.success(f"Cópia restaurada: {result['job_count']} trabalhos.")
+    except (ApiConnectionError, ApiResponseError) as exc:
+        st.error(str(exc))
 
 
 def render_flow_nav(current: int = 0) -> int:

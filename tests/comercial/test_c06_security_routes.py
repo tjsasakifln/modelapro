@@ -85,6 +85,19 @@ def test_websocket_cross_origin_and_url_secret_rejected(installation):
                 pytest.fail("guard accepted forbidden WebSocket")
 
 
+def test_job_token_recovery_requires_authenticated_workspace_and_csrf(installation):
+    from backend import api
+    client, headers, _ = installation
+    record = api.get_job_store().create(payload={"filename": "SYNTHETIC_TEST.csv"})
+    path = f"/jobs/{record['job_id']}/access-token"
+    assert client.post(path).status_code == 403
+    assert client.post(path, headers={**headers, "X-CSRF-Token": "wrong"}).status_code == 403
+    response = client.post(path, headers=headers)
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json()["access_token"] == record["access_token"]
+
+
 def test_real_backup_restore_preserves_bytes_and_survives_runtime_reset(installation, monkeypatch, tmp_path):
     from backend import api
     from modules.job_store import JobStore

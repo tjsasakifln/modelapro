@@ -256,6 +256,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     if args.check_pdf:
         return _print_pdf_probe()
+    # Provision before the UI and backend race to read first-use credentials.
+    from modules.operacao_local.runtime import get_security_policy
+    get_security_policy()
     if args.api_only:
         return main_api()
     if args.frontend_only:

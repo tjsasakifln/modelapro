@@ -972,6 +972,18 @@ async def cancel_job(job_id: str):
     )
 
 
+@app.post("/jobs/{job_id}/access-token")
+async def recover_job_access_token(job_id: str):
+    # LocalGuard authenticates the workspace bearer + Origin + CSRF before this
+    # endpoint. Recovery never places a credential in an URL or access log.
+    store, _runner = _require_c11()
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    return JSONResponse({"access_token": job["access_token"]},
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.get("/jobs/{job_id}/artifacts/{name}")
 async def get_job_artifact(job_id: str, name: str):
     try:

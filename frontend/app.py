@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 def _import_components():
     try:
+        from components.documents import render_document_workflow
         from components.charts import render_charts, render_snapshot_charts
         from components.forms import (
             DEFAULT_API_URL,
@@ -69,6 +70,7 @@ def _import_components():
         )
         return locals()
     except ImportError:
+        from frontend.components.documents import render_document_workflow
         from frontend.components.charts import render_charts, render_snapshot_charts
         from frontend.components.forms import (
             DEFAULT_API_URL,
@@ -559,91 +561,10 @@ def main() -> None:
                     st.error(str(exc))
 
     profile = form.get("qualification_profile") or {}
-    current_fp = form.get("fingerprint") or st.session_state.get("p02_form_fingerprint")
-    stored_events = list(st.session_state.get("c02_review_events") or [])
-    if current_fp:
-        stored_events = invalidate_review_events(stored_events, current_fingerprint=current_fp)
-        st.session_state.c02_review_events = stored_events
-    checklist = build_profile_checklist(profile)
-    inspection = form.get("inspection") or {}
-    identity = form.get("professional_identity") or {}
-    essential = bool(
-        inspection.get("recorded") or identity.get("recorded")
-    )
-    if profile.get("requires_art_rrt") and not (identity.get("art_rrt") or identity.get("documentary_reference")):
-        essential = False
-    gate = gate_ready_for_professional_signoff(
-        profile=profile,
-        essential_evidence_present=essential,
-        current_fingerprint=current_fp,
-        review_events=stored_events,
-    )
-    if gate.get("blocked"):
-        st.caption("Liberação para assinatura bloqueada: " + "; ".join(gate.get("reasons") or []))
-
-    review_actions = render_review_panel(
-        checklist=checklist,
-        review_stale=bool(st.session_state.get("c02_review_stale")),
-        signature_stale=bool(st.session_state.get("c02_signature_stale")),
-        fingerprint=current_fp,
-        requires_distinct_reviewer=bool(profile.get("requires_distinct_reviewer")),
-    )
-    if review_actions.get("decision") == "reviewed":
-        try:
-            item_evidence = review_actions.get("item_evidence") or {}
-            evidence_text = "; ".join(
-                f"{key}: {value}" for key, value in item_evidence.items() if str(value or "").strip()
-            ) or None
-            first_item = next((key for key, value in item_evidence.items() if str(value or "").strip()), None)
-            event = record_review_event(
-                fingerprint=current_fp or "",
-                professional_id=review_actions.get("professional_id") or "",
-                decision="reviewed",
-                motive=review_actions.get("motive") or "",
-                version="C02/1",
-                checklist_item_id=first_item,
-                evidence=evidence_text,
-                reviewer_id=review_actions.get("reviewer_id") or None,
-                distinct_reviewer_required=bool(profile.get("requires_distinct_reviewer")),
-            )
-            stored_events.append(event)
-            st.session_state.c02_review_events = stored_events
-            st.session_state.c02_review_stale = False
-            st.info("Revisão registrada no fingerprint atual, com evidência por item. Isso não assina o laudo.")
-        except ValueError as exc:
-            st.error(str(exc))
-    if review_actions.get("export_for_external_signer") and snapshot is not None:
-        package = export_recipient_package_manifest(
-            profile=profile,
-            fingerprint=current_fp or "",
-            artifact_names=["calculo_avaliacao.json"],
-        )
-        st.download_button(
-            "Baixar pacote para assinador externo",
-            data=json.dumps({"snapshot": snapshot, "package": package}, ensure_ascii=False, indent=2).encode("utf-8"),
-            file_name="pacote_assinador_externo.json",
-            mime="application/json",
-        )
-        st.caption("O produto não assina em nome do usuário. Importe o arquivo assinado original depois.")
-    signed_file = review_actions.get("signed_file")
-    if (review_actions.get("import_signed") or signed_file is not None) and current_fp:
-        if signed_file is None:
-            st.warning("Importe o arquivo assinado original para verificar o vínculo com o fingerprint.")
-        else:
-            payload = signed_file.getvalue()
-            imported_sha = sha256_bytes(payload)
-            declared = declared_fingerprint_from_imported(payload)
-            link = verify_imported_signature_link(
-                fingerprint=current_fp,
-                imported_sha256=imported_sha,
-                declared_fingerprint=declared,
-            )
-            st.session_state["c02_signature_link"] = link
-            if link.get("linked"):
-                st.info(link.get("note") or "Arquivo original vinculado ao fingerprint atual.")
-            else:
-                st.warning(link.get("note") or "Arquivo importado sem vínculo — consentimento antigo não reutilizado.")
-            st.caption(f"SHA-256 do arquivo importado: {imported_sha[:16]}…")
+    document_state = _COMP["render_document_workflow"](client, snapshot)
+    qualification = ((snapshot or {}).get("provenance") or {}).get("qualification_context") or {}
+    current_fp = document_state.get("result_fingerprint") or qualification.get("result_fingerprint")
+    stored_events = list(qualification.get("review_events") or [])
 
     submissions = list(st.session_state.get("c02_institution_events") or [])
     recipient_actions = render_recipient_panel(profile=profile, submissions=submissions)

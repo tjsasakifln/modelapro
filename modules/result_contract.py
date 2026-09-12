@@ -85,6 +85,14 @@ ALLOWED_ARTIFACT_NAMES = frozenset(
         "evidence_manifest.json",
         "frozen_project.json",
         "evidence_bundle.zip",
+        "report.docx",
+        "report_context.json",
+        "output_manifest.json",
+        "normative_assessment.json",
+        "document_state.json",
+        "signature_request.json",
+        "signed_report.pdf",
+        "submission.zip",
     }
 )
 

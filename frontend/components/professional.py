@@ -161,7 +161,7 @@ def known_profiles() -> list:
         }
         rows.append({
             **row, "known": row.get("resolved") is True,
-            "recipient_id": row.get("recipient_id") or "",
+            "recipient_id": row.get("recipient_id"),
             "label": row.get("label") or pid,
             "announced_offer": supported, "method_supports_purpose": supported,
             "compatibility_status": row.get("state"),
@@ -241,6 +241,8 @@ def select_qualification_profile(
 ) -> dict:
     from modules.qualification_profile import resolve_profile
     known = get_known_profile(profile_id)
+    if recipient_id == "":
+        recipient_id = None
     request = {"id": profile_id}
     for key, value in {
         "purpose": purpose, "value_basis": value_basis, "method": method,
@@ -291,7 +293,7 @@ def qualification_profile_wire(profile: Optional[Mapping[str, Any]]) -> dict:
         "value_basis": profile.get("value_basis") or "",
         "method": profile.get("method") or "",
         "asset_scope": profile.get("asset_scope") or "",
-        "recipient_id": profile.get("recipient_id") or "",
+        "recipient_id": profile.get("recipient_id"),
     }
 
 
