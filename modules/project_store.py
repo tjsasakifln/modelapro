@@ -48,16 +48,26 @@ class RevisionImmutableError(PersistenceError):
     pass
 
 
-def _validate_artifact_refs(root: Path, project_id: str, refs: Any) -> Dict[str, str]:
+def _validate_artifact_refs(root: Path, project_id: str, refs: Any) -> Dict[str, Any]:
     if refs is None:
         return {}
     if not isinstance(refs, Mapping):
         raise UnsafePayloadError("artifact_refs must be a mapping")
-    out: Dict[str, str] = {}
+    out: Dict[str, Any] = {}
     project_root = root / "projects" / safe_id_component(project_id, label="project_id")
     for name, rel in refs.items():
         if not isinstance(name, str) or not name:
             raise UnsafePayloadError("artifact_refs keys must be strings")
+        if isinstance(rel, Mapping):
+            # FrozenProject digest references are not filesystem paths.
+            digest = rel.get("sha256")
+            if set(rel) != {"sha256"} or not isinstance(digest, str) or len(digest) != 64 or any(
+                char not in "0123456789abcdef" for char in digest
+            ):
+                raise UnsafePayloadError(f"artifact_refs[{name!r}] has invalid digest metadata")
+            safe_relative_path(project_root, name, label=f"artifact_refs[{name!r}]")
+            out[name] = {"sha256": digest}
+            continue
         if not isinstance(rel, str):
             raise PathEscapeError(f"artifact_refs[{name!r}] must be a relative path string")
         safe_relative_path(project_root, rel, label=f"artifact_refs[{name!r}]")

@@ -1131,6 +1131,12 @@ async def save_project_revision(project_id: str, request: Request):
         canonical["snapshot_ref"] = {"job_id": linked_job}
         canonical["frozen_project_sha256"] = sha256_bytes(frozen_bytes)
         canonical["snapshot_sha256"] = sha256_bytes(dumps_strict(snapshot).encode("utf-8"))
+        canonical["document_snapshot"] = snapshot
+        canonical["document_artifact_inventory"] = {
+            name: {"sha256": sha256_bytes(raw), "size": len(raw)}
+            for name in ("report.pdf", "report.docx", "evidence_bundle.zip", "signed_report.pdf", "submission.zip")
+            if (raw := jobs.get_artifact(linked_job, name)) is not None
+        }
         for key in ("request_spec", "model_state", "encoder_state", "feature_schema", "provenance", "value"):
             if key in payload and payload[key] != canonical.get(key):
                 raise HTTPException(409, f"revision {key} differs from the linked calculation")

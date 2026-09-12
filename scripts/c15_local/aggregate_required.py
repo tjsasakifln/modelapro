@@ -241,6 +241,7 @@ def check_collection(root: Path, expected_sha: str | None) -> list[str]:
         "tests/comercial/test_c06_document_flow.py",
         "tests/comercial/test_c06_cost_flow.py",
         "tests/comercial/test_c06_cost_consumer.py",
+        "tests/comercial/test_c06_browser_document_flow.py",
         "tests/comercial/test_c06_security_routes.py",
         "tests/comercial/test_c06_runtime_bootstrap.py",
         "tests/comercial/c06/test_catalog_distribution.py",
