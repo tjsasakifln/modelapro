@@ -1,5 +1,32 @@
 # C06 — fechamento dos requisitos de saída na composição
 
+## Implementação e confirmação local
+
+Os produtores numérico, documental e de arbitramento estão compostos. Em
+`33314fa1016b1fbecad4a82cdafe58b1ca6f6ca0`, a coorte de interface profissional,
+superfícies comerciais, conformidade de saída e arbitramento passou **52 testes**.
+O worker real alcança PDF, DOCX, XLSX e manifesto: os 28 requisitos `emitted`
+anteriores à assinatura têm representação; os 11 requisitos humanos são
+contabilizados como presentes, pendentes ou não aplicáveis; a assinatura
+ICP-Brasil permanece explicitamente pendente. A capacidade de verificar assinatura
+não constitui assinatura real nem aceite institucional.
+
+A reabertura preserva IDs canônicos, precedência por campo e coordenadas zero.
+Uma falha de determinismo do XLSX foi corrigida normalizando também a data interna
+OOXML, com teste sob dois relógios diferentes. O navegador identificou depois
+coordenadas pt-BR mapeadas que não eram convertidas fora das oito linhas da prévia;
+`test_decimal_comma_mapping_covers_rows_beyond_preview_and_stays_strict` cobre
+12 linhas, zero, precedência e entradas inválidas. A coorte posterior de produtor
+e contratos Windows passou 87 testes; a confirmação do navegador está em curso.
+
+Os hashes dos seis arquivos do worker e os JUnits locais estão registrados em
+[evidence-local-documentary-20260912.json](evidence-local-documentary-20260912.json).
+São provas intermediárias locais. O CI e o executável instalado da candidata
+final continuam obrigatórios. O detalhamento de representação e assinatura está
+em [defeitos_abertos_nos_documentos.md](defeitos_abertos_nos_documentos.md).
+
+## Baseline histórico e obrigações preservadas
+
 Na retomada, a execução real de `resolve_profile` + `product_conformance_baseline`
 para BB 0.3.0 ainda contou 12 emitted, 15 partial, 11 missing e 2 human_input.
 Esses 26 gaps são obrigações internas de capacidade, distintas dos dados e atos

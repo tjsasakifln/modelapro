@@ -1,0 +1,76 @@
+{
+  "scope": "LOCAL_INTERMEDIATE_NOT_FINAL_CI_OR_INSTALLED_ARTIFACT",
+  "artifact_source_sha": "33314fa1016b1fbecad4a82cdafe58b1ca6f6ca0",
+  "artifact_source_tree": "45169b529f2fae4d7639a711697c854481312760",
+  "checks": [
+    {
+      "junit": "/tmp/c06-composed-producer-ui-arbitration-final.xml",
+      "sha256": "337f69dbe0ce984589d76aa3ecbc262632d767817e88c38890699ea5cb6ae6c9",
+      "size": 8452,
+      "exit_code": 0,
+      "tests": 52,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "source_sha": "33314fa1016b1fbecad4a82cdafe58b1ca6f6ca0",
+      "source_tree": "45169b529f2fae4d7639a711697c854481312760"
+    },
+    {
+      "junit": "/tmp/c06-ui-gate-final.xml",
+      "sha256": "2ea8f5fc634475e8ef86ff25f3bc31a26a039c11c0926c98ca28e61aab26e050",
+      "size": 10998,
+      "exit_code": 0,
+      "tests": 78,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "source_sha": "cb5bfb61b1805eabea99ecbd612986b75aaecf82",
+      "source_tree": "d1facb8eb53a33a68f180881ea9bc6647a5be5e5"
+    },
+    {
+      "junit": "/tmp/c06-windows-producer-integrated.xml",
+      "sha256": "16d0749273355f9dc49d442b7cdd939b65bbf10d4a6e401aa7350d67a6dc043b",
+      "size": 13152,
+      "exit_code": 0,
+      "tests": 87,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "source_sha": "28a463426dafdc076ccdc5759336360147e3471c",
+      "source_tree": "b499a1521e8914da10e33fc504b0ee0de7e4eb19",
+      "deselected": 1
+    }
+  ],
+  "artifacts": {
+    "artifacts": {
+      "output_representation_manifest.json": {
+        "sha256": "623de20edd5cbb3d6fefbb406be61eba7aaa457305a6e13630894c8749176211",
+        "size": 4979
+      },
+      "report.docx": {
+        "sha256": "7a8c5c15ad88176f3f7113514a100bd3e6775eae43b8c0f0b7c00b923501178c",
+        "size": 12904
+      },
+      "report.pdf": {
+        "sha256": "c0c1cc7e8cfdccde7321d467be6afce2ac430d5df2d63d692aa8f65c878ad6ff",
+        "size": 235875
+      },
+      "report_context.json": {
+        "sha256": "fea1b3342b0082ee9a818db22c291447943356277de117c55ae85d8c6f4a3712",
+        "size": 57410
+      },
+      "sample.xlsx": {
+        "sha256": "3fe0c58654a780682633954d05e502ba44cfa8a875573af444c7a9f4c1b40da4",
+        "size": 9952
+      },
+      "snapshot.json": {
+        "sha256": "31c983bd1b935cb8f8479ba87bb5df859e18a0172e3cdcf89e9f9f5dcf0cb4d3",
+        "size": 232398
+      }
+    },
+    "manifest_verification": {
+      "findings": [],
+      "ok": true
+    }
+  }
+}

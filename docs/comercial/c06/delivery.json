@@ -28,8 +28,8 @@
     "C05": "a877c14fca2f4ff175ee5419d25f914f044e40a4"
   },
   "internal_remaining": [
-    "Fechar os 26 gaps de capacidade de saída com worker real, PDF/DOCX/XLSX, assinatura e manifesto por requisito",
-    "Validar a preservação da evidência profissional por linha na reabertura e os consumidores UI/documentos integrados",
+    "Confirmar no CI final os produtores integrados de PDF/DOCX/XLSX, arbitramento e manifesto por requisito; coorte local de 52 testes passou",
+    "Concluir navegador real após correções da lista canônica de variáveis e das coordenadas pt-BR além da prévia; reabertura/zero passaram na coorte local",
     "Corrigir e provar Windows instalado operacional, seguido por atualização/restauração entre árvores distintas",
     "Confirmar inventários por bytes, regeneração nativa, SBOM/licenças e pacote/manual da candidata final",
     "Concluir CI final com identidade/coleta/JUnit/bytes; alteração histórica do checkout não reproduzida localmente e ausente nos dois C15 A2",

@@ -127,17 +127,21 @@ Build/testes falhos continuam a produzir evidência; artefatos não se sobrepõe
 
 ## Impedimentos internos ainda abertos nesta redação
 
-A auditoria executada na retomada identificou também os 26 gaps internos de
-capacidade do perfil BB resolvido: [output-gap-closure.md](output-gap-closure.md).
-Métricas sem consumidor, campos sem entrada, Excel e manifesto por representação
-ainda exigem fechamento; não são dependências externas nem simples texto histórico.
+Os 26 gaps de capacidade identificados na retomada têm produtores e verificadores
+integrados: [output-gap-closure.md](output-gap-closure.md). A coorte local de
+interface, superfícies comerciais, documentos e arbitramento passou 52 testes;
+as representações reais e os hashes estão no registro local vinculado. Isso
+não estende o SUCCESS de A2 aos commits posteriores.
 
+O navegador real está confirmando o formulário composto. Ele revelou duas
+incompatibilidades adicionais: classificação de variáveis em lista canônica e
+coordenadas pt-BR nas linhas além da prévia. O parser documental foi corrigido
+e testado; o ajuste do consumidor e a repetição do navegador estão em curso.
 
-Digest integral dos metadados do recibo implementado em `999680d`, confirmação
-na candidata pendente. Cobertura externa e estado da UI em correção;
-reexecução dos detectores comerciais nas superfícies atuais;
-confirmação da revisão adversarial final na candidata;
-nova suíte ampla/agregador sem falhas;
-Windows instalado e ciclo entre versões realmente distintas; inventário/revisão
-do artefato final. Esses itens continuam
-sendo trabalho C06, não handoffs sem consumidores nem dependências humanas.
+Permanecem obrigatórios a suíte ampla/agregador da candidata final, a confirmação
+das representações e guardas nos seus artefatos, o Windows instalado operacional
+e a atualização/restauração entre árvores distintas. A3 é a candidata operacional
+intermediária; um ciclo da mesma árvore deve dizer `OPERATIONAL_SAME_TREE_ONLY`.
+O ciclo distinto exige identidade de origem incorporada no executável, cálculo
+novo e conferência dos arquivos instalados. Esses itens continuam sendo trabalho
+C06, sem substituir os atos externos definidos acima.
