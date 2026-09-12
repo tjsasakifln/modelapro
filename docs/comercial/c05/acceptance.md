@@ -23,12 +23,16 @@ Estados usados, conforme o contrato comum — e distintos do estado do **PRODUTO
 Suíte da frente: **604 passed, 1 xfailed** (o xfail estrito é o handoff de A03).
 
 **Consequência declarada, não silenciada.** A correção do default documental (A03) faz
-falhar um teste pré-existente em arquivo que esta frente **não possui**:
-`tests/test_audit_fixes.py::TestAvaliandoDomainPreFilter::test_full_search_does_not_crash_and_does_not_bottom_rank_on_zero_avaliando`.
+falhar **dois** testes pré-existentes, em arquivos que esta frente **não possui**:
+
+- `tests/test_audit_fixes.py::TestAvaliandoDomainPreFilter::test_full_search_does_not_crash_and_does_not_bottom_rank_on_zero_avaliando` (`grau_fundamentacao is not None`)
+- `tests/test_full_flow.py::TestFullFlow::test_end_to_end_logic` (`is_valid is True`)
+
 A causa é a mesma do handoff a C01: a re-validação em `optimal_combination.py` descarta os
-itens documentais e o grau fica `None`. O teste afirma incidentalmente que o grau não é
-nulo e dependia do default aprovador. C05 não editou o arquivo, por propriedade de
-escrita; a correção de `handoff.md` §2.1 o faz passar sem tocá-lo. Ver `handoff.md` §2.1.
+itens documentais, o grau fica `None` e `is_valid` fica `False`. Em ambos a asserção é
+incidental e dependia do default aprovador. A lista foi levantada por varredura exaustiva
+das asserções de grau fora da propriedade desta frente, não por inferência. C05 não editou
+os arquivos; a correção de `handoff.md` §2.1 faz os dois passarem sem tocá-los.
 
 ## A01 — Fontes autorizadas e vigentes
 
@@ -184,9 +188,12 @@ assinatura, nada sobre o conteúdo técnico do laudo.
 
 **Bloqueado:** parecer de revisor profissional qualificado **independente dos autores** não
 existe. Não foi simulado, e não foi atribuído a quem não participou. Pendência
-identificada, sem assinatura fabricada de colegiado. Ressalva de versão: a Res. CONFEA
+identificada, sem assinatura fabricada de colegiado. **Ressalvas de versão, em todas as fontes deste bloco:** a Res. CONFEA
 1.137/2023 está alterada pela Res. 1.160/2025, cujo texto não foi lido (nenhuma alteração
-aos arts. 1º–4º foi identificada).
+aos arts. 1º–4º foi identificada); e as Resoluções CAU/BR nº 91/2014 (art. 3º) e nº 21/2012
+(art. 2º, VI) foram lidas em versões que **carregam alterações posteriores não revisadas**.
+A conclusão que nenhuma delas certifica software não depende dessas ressalvas, mas
+nenhuma das três pode ser citada como "texto vigente".
 
 Evidência: `test_a07_revisao_profissional.py`.
 

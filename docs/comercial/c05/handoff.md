@@ -55,6 +55,21 @@ best_model.validation_result = NBRValidator.validate_model(
 )
 ```
 
+**Segundo ponto de lavagem, na mesma correção.** Em `_evaluate_spec` (~linhas 1009-1010) o
+grau documental é lido como `int(evaluation_policy.get("grau_item1") or 1)`. O `or 1`
+converte um **0 declarado** em Grau I: quem declara explicitamente que o item documental
+não é atendido recebe um ponto de qualquer forma. Trocar por `None` quando ausente e
+preservar o 0 quando declarado:
+
+```python
+grau_item1=evaluation_policy.get("grau_item1")   # sem "or 1"
+grau_item3=evaluation_policy.get("grau_item3")
+```
+
+Corrigir apenas a chamada final (~linha 1024) e deixar este ponto resolve o descarte da
+declaração, mas mantém a fabricação de ponto para o 0 declarado. As duas linhas são a
+mesma correção.
+
 Além disso: retirar o `except Exception: pass` em torno do classificador normativo. Uma
 exceção ali produz silenciosamente um resultado sem grau, indistinguível de "grau não
 atingido" — são coisas diferentes e a segunda não pode absorver a primeira.
@@ -74,20 +89,30 @@ cd <worktree> && PYTHONPATH= python3 -m pytest \
   tests/test_nbr14653.py::TestOptimalCombinationTargetAchieved -q
 ```
 
-**Segundo teste afetado, em arquivo que C05 NÃO possui.** A mesma correção faz falhar:
+**DOIS testes afetados, em arquivos que C05 NÃO possui.** A mesma correção faz falhar:
 
+| teste | asserção | linha |
+|---|---|---|
+| `tests/test_audit_fixes.py::TestAvaliandoDomainPreFilter::test_full_search_does_not_crash_and_does_not_bottom_rank_on_zero_avaliando` | `vr.grau_fundamentacao is not None` | 180 |
+| `tests/test_full_flow.py::TestFullFlow::test_end_to_end_logic` | `val.is_valid is True` | 35 |
+
+Ambos chamam `find_best_model` e falham pela mesma causa desta seção: a re-validação
+descarta os itens documentais, o grau fica `None` e, por consequência, `is_valid` fica
+`False`. Em ambos a asserção de grau é **incidental** — um testa o pré-filtro de domínio do
+avaliando, o outro o fluxo ponta a ponta — e dependia do default aprovador.
+
+A lista foi levantada exaustivamente, não por inferência:
+
+```bash
+grep -rn "grau_fundamentacao is not None\|grau_fundamentacao >=\|is_valid is True\|target_achieved is True" \
+  tests/ --include=*.py | grep -v "tests/comercial/c05/\|tests/c03_normative/\|tests/test_nbr14653.py"
 ```
-tests/test_audit_fixes.py::TestAvaliandoDomainPreFilter::
-  test_full_search_does_not_crash_and_does_not_bottom_rank_on_zero_avaliando
-```
 
-Ele chama `find_best_model` e, na linha 180, afirma `vr.grau_fundamentacao is not None`.
-Passa a falhar pela mesma causa desta seção: a re-validação descarta os itens documentais
-e o grau fica `None`. O teste é sobre o pré-filtro de domínio do avaliando; a asserção de
-grau é incidental e dependia do default aprovador.
+Quatro ocorrências fora da propriedade desta frente; as outras duas
+(`tests/test_data_loader.py:33` e `tests/test_full_flow.py:36`) passam.
 
-C05 **não editou** esse arquivo — está fora da sua propriedade de escrita, e a falha está
-declarada em vez de silenciada. Duas saídas, ambas do proprietário:
+C05 **não editou** esses arquivos — estão fora da sua propriedade de escrita, e as falhas
+estão declaradas em vez de silenciadas. Duas saídas, ambas do proprietário:
 
 1. **Preferida:** aplicar a correção de 2.1. A re-validação passa a receber as declarações
    e o teste volta a passar sem ser tocado.

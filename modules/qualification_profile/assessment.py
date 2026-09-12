@@ -614,6 +614,10 @@ def _evaluate_profile_claims(
         evidence=evidence.get(claims_mod.CLAIM_PROFILE_COMPATIBLE),
         subject={"profile": profile.get("id"), "profile_version": profile.get("version")},
     ))
+    # No profile_state here, deliberately: calculation_verified is scoped to the
+    # SOFTWARE VERSION (CLAIM_SCOPE), not to a profile. An unverified profile
+    # says nothing about whether the arithmetic was checked against an
+    # independent numeric reference. Do not "fix" this by adding the argument.
     out.append(claims_mod.evaluate_claim(
         claims_mod.CLAIM_CALCULATION_VERIFIED,
         evidence=evidence.get(claims_mod.CLAIM_CALCULATION_VERIFIED),
