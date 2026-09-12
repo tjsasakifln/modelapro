@@ -1,6 +1,8 @@
 # PyInstaller specification for the local Windows product.  It is consumed only
 # on Windows by build_windows.py; importing this file must not be needed in tests.
 import os
+import json
+import re
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
@@ -41,6 +43,17 @@ trusted_anchor = (
 )
 if not trusted_anchor.is_file():
     raise RuntimeError("trusted vendor anchor resource is absent")
+build_identity_value = os.environ.get("MODELA_BUILD_SOURCE_IDENTITY_FILE", "").strip()
+build_identity = Path(build_identity_value) if build_identity_value else None
+if not build_identity or not build_identity.is_file():
+    raise RuntimeError("verified build source identity resource is absent")
+build_identity_payload = json.loads(build_identity.read_text(encoding="utf-8"))
+if (
+    build_identity_payload.get("schema_version") != "MP-COM-BUILD-IDENTITY/1"
+    or not re.fullmatch(r"[0-9a-f]{40}", str(build_identity_payload.get("source_sha") or ""))
+    or not re.fullmatch(r"[0-9a-f]{40}", str(build_identity_payload.get("tree_sha") or ""))
+):
+    raise RuntimeError("verified build source identity resource is invalid")
 datas = (
     collect_data_files("frontend")
     + collect_data_files("streamlit")
@@ -51,6 +64,7 @@ datas = (
     + frontend_sources
     + native_evidence
     + [(str(trusted_anchor), "modules/commercial_license")]
+    + [(str(build_identity), ".")]
     + [
         (str(root / "THIRD_PARTY_NOTICES.md"), "."),
         (str(root / "SECURITY.md"), "."),

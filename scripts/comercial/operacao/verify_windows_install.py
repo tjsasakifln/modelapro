@@ -16,7 +16,7 @@ import os
 import platform
 import re
 import secrets
-import signal
+import socket
 import subprocess
 import sys
 import time
@@ -29,6 +29,8 @@ from typing import Any
 
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+BUILD_IDENTITY_FILENAME = "build-source-identity.json"
 _INNO_RUNTIME_FILE_RE = re.compile(
     r"^unins[0-9]{3}\.(?:exe|dat|log)$", re.IGNORECASE
 )
@@ -42,18 +44,16 @@ PROFILE = {
     "asset_scope": "imovel_urbano",
 }
 REQUIRED_ARTIFACTS = ("frozen_project.json", "report.pdf", "report.docx", "evidence_bundle.zip")
-VOLATILE_RESULT_KEYS = frozenset(
+VOLATILE_RESULT_PATHS = frozenset(
     {
-        "code_sha",
-        "completed_at",
-        "created_at",
-        "duration_seconds",
-        "elapsed_seconds",
-        "generated_at",
-        "job_id",
-        "result_snapshot_id",
-        "started_at",
-        "updated_at",
+        ("code_sha",),
+        ("generated_at",),
+        ("job_id",),
+        ("provenance", "qualification_context", "report_content_fingerprint"),
+        ("provenance", "qualification_context", "result_fingerprint"),
+        ("search", "audit", "profile", "elapsed_s"),
+        ("search", "audit", "profile", "rss_bytes_after"),
+        ("search", "audit", "profile", "rss_bytes_before"),
     }
 )
 
@@ -156,6 +156,10 @@ def _verify_installed_bundle(
             raise VerificationError("bundle inventory total_size does not match files")
         if payload.get("inventory_sha256") != inventory_digest:
             raise VerificationError("bundle inventory digest does not match files")
+        source_sha = str(payload.get("source_sha") or "")
+        tree_sha = str(payload.get("tree_sha") or "")
+        if not _GIT_SHA_RE.fullmatch(source_sha) or not _GIT_SHA_RE.fullmatch(tree_sha):
+            raise VerificationError("bundle inventory has no verified source identity")
 
         missing: list[str] = []
         mismatched: list[dict[str, Any]] = []
@@ -227,6 +231,8 @@ def _verify_installed_bundle(
                 "declared_file_count": len(normalized),
                 "declared_total_size": payload["total_size"],
                 "inventory_sha256": inventory_digest,
+                "source_sha": source_sha,
+                "tree_sha": tree_sha,
                 "missing": missing,
                 "mismatched": mismatched,
                 "unexpected": unexpected,
@@ -238,6 +244,19 @@ def _verify_installed_bundle(
                 "installed bundle differs from inventory: "
                 f"missing={len(missing)}, mismatched={len(mismatched)}, "
                 f"unexpected={len(unexpected)}"
+            )
+        identity_path = install_root / BUILD_IDENTITY_FILENAME
+        try:
+            build_identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise VerificationError("installed build source identity is absent or invalid") from exc
+        if (
+            build_identity.get("schema_version") != "MP-COM-BUILD-IDENTITY/1"
+            or build_identity.get("source_sha") != source_sha
+            or build_identity.get("tree_sha") != tree_sha
+        ):
+            raise VerificationError(
+                "installed build source identity differs from bundle inventory"
             )
         result["status"] = "PASSED"
         return result
@@ -471,10 +490,46 @@ def _start(executable: Path, log_path: Path) -> tuple[subprocess.Popen, Any]:
     return process, log
 
 
-def _stop(process: subprocess.Popen, log: Any) -> None:
+def _open_product_ports() -> list[str]:
+    endpoints = [
+        (
+            os.environ.get("API_HOST", "127.0.0.1"),
+            int(os.environ.get("API_PORT", "8000")),
+        ),
+        (
+            os.environ.get("FRONTEND_HOST", "127.0.0.1"),
+            int(os.environ.get("FRONTEND_PORT", "8501")),
+        ),
+    ]
+    open_ports = []
+    for host, port in endpoints:
+        try:
+            with socket.create_connection((host, port), timeout=0.25):
+                open_ports.append(f"{host}:{port}")
+        except OSError:
+            pass
+    return open_ports
+
+
+def _wait_for_product_ports_closed(timeout: float = 15.0) -> list[str]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        open_ports = _open_product_ports()
+        if not open_ports:
+            return []
+        time.sleep(0.25)
+    return _open_product_ports()
+
+
+def _stop(process: subprocess.Popen, log: Any) -> dict[str, Any]:
+    shutdown: dict[str, Any] = {"status": "PASSED", "parent_pid": process.pid}
     if process.poll() is None:
-        if os.name == "nt" and hasattr(signal, "CTRL_BREAK_EVENT"):
-            process.send_signal(signal.CTRL_BREAK_EVENT)
+        if os.name == "nt":
+            # Abrupt parent termination is deliberate: the frozen launcher
+            # owns both services in a kill-on-close Job Object.  Closed ports
+            # prove that containment worked before update or uninstall.
+            shutdown["method"] = "parent_termination_with_job_containment"
+            process.terminate()
         else:
             process.terminate()
         try:
@@ -482,19 +537,93 @@ def _stop(process: subprocess.Popen, log: Any) -> None:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=10)
-    log.close()
+            shutdown["forced_parent_kill"] = True
+    else:
+        shutdown["process_already_exited"] = True
+    shutdown["parent_returncode"] = process.returncode
+    if os.name == "nt":
+        open_ports = _wait_for_product_ports_closed()
+        shutdown["service_ports_closed"] = not open_ports
+        if open_ports:
+            # Cleanup is best effort after recording a failed containment
+            # check; it must never turn that failure into passing evidence.
+            system_root = os.environ.get("SystemRoot", r"C:\Windows").rstrip("\\/")
+            taskkill = system_root + r"\System32\taskkill.exe"
+            completed = subprocess.run(
+                [taskkill, "/IM", "MODELA-PRO.exe", "/T", "/F"],
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+            shutdown["fallback_taskkill_exit_code"] = completed.returncode
+            shutdown["status"] = "FAILED"
+            shutdown["error"] = {
+                "type": "VerificationError",
+                "detail": (
+                    "launcher termination left installed service ports open: "
+                    + ", ".join(open_ports)
+                ),
+            }
+    return shutdown
 
 
-def _stable_semantic_result(value: Any) -> Any:
+def _stable_semantic_result(value: Any, path: tuple[str, ...] = ()) -> Any:
     if isinstance(value, dict):
         return {
-            key: _stable_semantic_result(item)
+            key: _stable_semantic_result(item, path + (str(key),))
             for key, item in sorted(value.items())
-            if key not in VOLATILE_RESULT_KEYS
+            if path + (str(key),) not in VOLATILE_RESULT_PATHS
         }
     if isinstance(value, list):
-        return [_stable_semantic_result(item) for item in value]
+        return [_stable_semantic_result(item, path + (str(index),)) for index, item in enumerate(value)]
     return value
+
+
+def _document_binding_evidence(generated: dict, snapshot: dict, job_id: str) -> dict:
+    document_state = generated.get("document_state") or {}
+    qualification = ((snapshot.get("provenance") or {}).get("qualification_context") or {})
+    result_fingerprint = generated.get("result_fingerprint")
+    report_fingerprint = generated.get("report_content_fingerprint")
+    if generated.get("job_id") != job_id:
+        raise VerificationError("document response is bound to a different job")
+    if not _SHA256_RE.fullmatch(str(result_fingerprint or "")):
+        raise VerificationError("document response has no valid result fingerprint")
+    if not _SHA256_RE.fullmatch(str(report_fingerprint or "")):
+        raise VerificationError("document response has no valid report-content fingerprint")
+    if qualification.get("result_fingerprint") != result_fingerprint:
+        raise VerificationError("document result fingerprint differs from final snapshot")
+    if document_state.get("result_fingerprint") != result_fingerprint:
+        raise VerificationError("document-state result fingerprint is inconsistent")
+    if document_state.get("report_content_fingerprint") != report_fingerprint:
+        raise VerificationError("document-state report-content fingerprint is inconsistent")
+    return {
+        "job_id": job_id,
+        "result_fingerprint": result_fingerprint,
+        "report_content_fingerprint": report_fingerprint,
+    }
+
+
+def _validated_document_artifacts(generated: dict) -> dict[str, dict]:
+    artifacts = generated.get("artifacts") or {}
+    if not isinstance(artifacts, dict) or not set(REQUIRED_ARTIFACTS[1:]).issubset(
+        artifacts
+    ):
+        raise VerificationError(
+            f"explicit document generation did not emit required artifacts: {artifacts}"
+        )
+    for name in REQUIRED_ARTIFACTS[1:]:
+        declared = artifacts[name]
+        if (
+            not isinstance(declared, dict)
+            or not isinstance(declared.get("size"), int)
+            or isinstance(declared.get("size"), bool)
+            or declared["size"] <= 0
+            or not _SHA256_RE.fullmatch(str(declared.get("sha256") or ""))
+        ):
+            raise VerificationError(
+                f"document response has invalid hash/size for {name}"
+            )
+    return artifacts
 
 
 def _semantic_result_evidence(snapshot: dict, destination: Path) -> str:
@@ -553,7 +682,10 @@ def _run_job(
     evidence_dir: Path,
     variant: int,
     namespace: str,
-) -> tuple[str, dict, dict, str]:
+    expected_code_sha: str,
+    *,
+    allow_idempotent_replay: bool = False,
+) -> tuple[str, dict, dict, str, dict]:
     csv_bytes, spec, subject = _synthetic_case(variant=variant)
     body, media = _multipart(
         {"request_json": json.dumps(spec), "subject_json": json.dumps(subject), "project_id": "TESTE-C06-PROJETO"},
@@ -563,8 +695,28 @@ def _run_job(
     created = json.loads(created_raw)
     job_id = created.get("job_id")
     job_token = created.get("access_token")
-    if not job_id or not job_token:
-        raise VerificationError("POST /jobs did not return job_id and access_token")
+    if not job_id:
+        raise VerificationError("POST /jobs did not return job_id")
+    replayed = created.get("idempotent_replay")
+    if type(replayed) is not bool:
+        raise VerificationError("POST /jobs did not report idempotent_replay state")
+    if replayed and not allow_idempotent_replay:
+        raise VerificationError(
+            "installed calculation reused an existing job; recalculation was not exercised"
+        )
+    if not job_token:
+        if replayed is not True:
+            raise VerificationError("new POST /jobs response did not return access_token")
+        recovered = _json_request(
+            f"{api}/jobs/{job_id}/access-token",
+            method="POST",
+            payload={},
+        )
+        job_token = recovered.get("access_token")
+        if not job_token:
+            raise VerificationError(
+                "authenticated idempotent replay did not recover access_token"
+            )
     deadline = time.time() + 300
     status = {}
     while time.time() < deadline:
@@ -575,6 +727,12 @@ def _run_job(
     if status.get("state") != "succeeded":
         raise VerificationError(f"synthetic job did not succeed: {status}")
     snapshot = _json_request(f"{api}/jobs/{job_id}/result")
+    if snapshot.get("code_sha") != expected_code_sha:
+        raise VerificationError(
+            "calculation snapshot is not bound to the installed build source identity"
+        )
+    if snapshot.get("job_id") != job_id:
+        raise VerificationError("calculation snapshot is bound to a different job")
     qualification = ((snapshot.get("provenance") or {}).get("qualification_context") or {})
     profile = qualification.get("profile") or qualification.get("qualification_profile") or {}
     if profile.get("id") != PROFILE["id"] and qualification.get("profile_id") != PROFILE["id"]:
@@ -605,29 +763,41 @@ def _run_job(
         job_token=str(job_token),
         timeout=240,
     )
-    generated_artifacts = generated.get("artifacts") or {}
-    if not set(REQUIRED_ARTIFACTS[1:]).issubset(generated_artifacts):
-        raise VerificationError(
-            f"explicit document generation did not emit required artifacts: {generated_artifacts}"
-        )
+    generated_artifacts = _validated_document_artifacts(generated)
     (evidence_dir / f"{namespace}-job-{variant}-documents.json").write_text(
         json.dumps(generated, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     # Document composition reassesses and persists qualification/document state.
     snapshot = _json_request(f"{api}/jobs/{job_id}/result")
+    if snapshot.get("code_sha") != expected_code_sha or snapshot.get("job_id") != job_id:
+        raise VerificationError("final snapshot lost its job/build identity binding")
+    document_bindings = _document_binding_evidence(generated, snapshot, job_id)
     for name in REQUIRED_ARTIFACTS:
-        payload = _request(f"{api}/jobs/{job_id}/artifacts/{name}")
-        if not payload:
+        artifact_bytes = _request(f"{api}/jobs/{job_id}/artifacts/{name}")
+        if not artifact_bytes:
             raise VerificationError(f"installed product returned empty artifact {name}")
-        if name.endswith(".pdf") and not payload.startswith(b"%PDF"):
+        if name.endswith(".pdf") and not artifact_bytes.startswith(b"%PDF"):
             raise VerificationError(f"{name} is not a PDF")
-        if name.endswith((".docx", ".zip")) and not payload.startswith(b"PK"):
+        if name.endswith((".docx", ".zip")) and not artifact_bytes.startswith(b"PK"):
             raise VerificationError(f"{name} is not a ZIP/OOXML container")
+        declared_artifact = generated_artifacts.get(name)
+        if name in REQUIRED_ARTIFACTS[1:] and (
+            declared_artifact.get("size") != len(artifact_bytes)
+            or declared_artifact.get("sha256")
+            != hashlib.sha256(artifact_bytes).hexdigest()
+        ):
+            raise VerificationError(
+                f"downloaded {name} differs from document response hash/size"
+            )
         target = evidence_dir / f"{namespace}-job-{variant}-{name}"
-        target.write_bytes(payload)
+        target.write_bytes(artifact_bytes)
     frozen_path = evidence_dir / f"{namespace}-job-{variant}-frozen_project.json"
     frozen = json.loads(frozen_path.read_text(encoding="utf-8"))
+    if (frozen.get("provenance") or {}).get("code_sha") != expected_code_sha:
+        raise VerificationError(
+            "frozen project is not bound to the installed build source identity"
+        )
     saved = _json_request(
         f"{api}/projects/TESTE-C06-PROJETO/revisions",
         method="POST",
@@ -641,7 +811,13 @@ def _run_job(
         snapshot,
         evidence_dir / f"{namespace}-semantic-result.json",
     )
-    return job_id, snapshot, saved, semantic_hash
+    return job_id, snapshot, saved, semantic_hash, {
+        "idempotent_replay": replayed,
+        "recalculation_performed": not replayed,
+        "snapshot_code_sha": snapshot.get("code_sha"),
+        "frozen_project_code_sha": (frozen.get("provenance") or {}).get("code_sha"),
+        "document_bindings": document_bindings,
+    }
 
 
 def _verify_existing_project(api: str) -> dict:
@@ -650,6 +826,25 @@ def _verify_existing_project(api: str) -> dict:
     if not revision.get("revision_id") or not revision.get("model_state"):
         raise VerificationError("existing project did not survive install/version transition")
     return reopened
+
+
+def _transition_scope(
+    previous_source_sha: str,
+    previous_tree_sha: str,
+    current_source_sha: str,
+    current_tree_sha: str,
+) -> str:
+    if (
+        previous_source_sha == current_source_sha
+        and previous_tree_sha == current_tree_sha
+    ):
+        return "OPERATIONAL_SAME_TREE_ONLY"
+    if (
+        previous_source_sha != current_source_sha
+        and previous_tree_sha != current_tree_sha
+    ):
+        return "DISTINCT_SOURCE_RECALCULATION"
+    raise VerificationError("upgrade source/tree identities are only partially distinct")
 
 
 def _backup(api: str, destination: Path) -> str:
@@ -710,6 +905,18 @@ def verify(args: argparse.Namespace) -> dict:
             args.bundle_inventory.resolve(),
             evidence_dir / f"{args.phase}-installed-bundle.json",
         )
+        installed_source_sha = result["checks"]["installed_bundle_verification"][
+            "source_sha"
+        ]
+        installed_tree_sha = result["checks"]["installed_bundle_verification"][
+            "tree_sha"
+        ]
+        stale_ports = _open_product_ports()
+        if stale_ports:
+            raise VerificationError(
+                "installed-product ports were already occupied before launch: "
+                + ", ".join(stale_ports)
+            )
         process, log = _start(executable, evidence_dir / f"{args.phase}-product.log")
         health, ui_size = _wait_ready(api, ui)
         result["checks"]["backend_and_ui"] = {"status": "PASSED", "health": health, "ui_bytes": ui_size}
@@ -724,17 +931,58 @@ def verify(args: argparse.Namespace) -> dict:
             "screenshot": browser_result["screenshot"],
         }
         if args.phase == "initial":
-            job_id, snapshot, saved, semantic_hash = _run_job(api, evidence_dir, 0, "initial")
+            job_id, snapshot, saved, semantic_hash, submission = _run_job(
+                api,
+                evidence_dir,
+                0,
+                "initial",
+                installed_source_sha,
+                allow_idempotent_replay=getattr(
+                    args, "allow_idempotent_replay", False
+                ),
+            )
             result["checks"]["calculate_documents_save_reopen"] = {
                 "status": "PASSED", "job_id": job_id, "revision_id": saved["revision_id"],
                 "point": (snapshot.get("value") or {}).get("point"),
                 "semantic_result_sha256": semantic_hash,
+                "source_sha": installed_source_sha,
+                "tree_sha": installed_tree_sha,
+                **submission,
             }
             result["checks"]["backup"] = {"status": "PASSED", "sha256": _backup(api, args.backup)}
         elif args.phase == "upgrade":
             existing = _verify_existing_project(api)
-            job_id, snapshot, saved, semantic_hash = _run_job(api, evidence_dir, 0, "upgrade")
             initial = json.loads((evidence_dir / "initial.json").read_text(encoding="utf-8"))
+            initial_source_sha = initial["checks"]["calculate_documents_save_reopen"][
+                "source_sha"
+            ]
+            initial_job_id = initial["checks"]["calculate_documents_save_reopen"][
+                "job_id"
+            ]
+            initial_tree_sha = initial["checks"]["calculate_documents_save_reopen"][
+                "tree_sha"
+            ]
+            transition_scope = _transition_scope(
+                initial_source_sha,
+                initial_tree_sha,
+                installed_source_sha,
+                installed_tree_sha,
+            )
+            same_identity = transition_scope == "OPERATIONAL_SAME_TREE_ONLY"
+            distinct_identity = transition_scope == "DISTINCT_SOURCE_RECALCULATION"
+            allow_replay = same_identity
+            job_id, snapshot, saved, semantic_hash, submission = _run_job(
+                api,
+                evidence_dir,
+                0,
+                "upgrade",
+                installed_source_sha,
+                allow_idempotent_replay=allow_replay,
+            )
+            if distinct_identity and job_id == initial_job_id:
+                raise VerificationError(
+                    "upgrade reused the initial job instead of recalculating"
+                )
             expected_hash = initial["checks"]["calculate_documents_save_reopen"][
                 "semantic_result_sha256"
             ]
@@ -748,7 +996,16 @@ def verify(args: argparse.Namespace) -> dict:
                 "point": (snapshot.get("value") or {}).get("point"),
                 "semantic_result_sha256": semantic_hash,
                 "matches_initial_result": True,
+                "source_sha": installed_source_sha,
+                "previous_source_sha": initial_source_sha,
+                "tree_sha": installed_tree_sha,
+                "previous_tree_sha": initial_tree_sha,
+                "verification_scope": transition_scope,
+                **submission,
             }
+            result["verification_scope"] = result["checks"][
+                "upgrade_reopen_and_recalculate"
+            ]["verification_scope"]
         elif args.phase == "restore":
             result["checks"]["restore"] = {"status": "PASSED", "response": _restore(api, args.backup)}
             existing = _verify_existing_project(api)
@@ -764,12 +1021,41 @@ def verify(args: argparse.Namespace) -> dict:
         result["error"] = {"type": type(exc).__name__, "detail": str(exc)}
         raise
     finally:
+        cleanup_error = None
+        raise_cleanup_error = False
         if process is not None and log is not None:
-            _stop(process, log)
+            try:
+                shutdown = _stop(process, log)
+                result["checks"]["installed_process_shutdown"] = shutdown
+                if shutdown.get("status") != "PASSED":
+                    raise VerificationError(shutdown["error"]["detail"])
+            except BaseException as exc:
+                cleanup_error = exc
+                if (
+                    result["checks"].get("installed_process_shutdown", {}).get(
+                        "status"
+                    )
+                    != "FAILED"
+                ):
+                    result["checks"]["installed_process_shutdown"] = {
+                        "status": "FAILED",
+                        "error": {"type": type(exc).__name__, "detail": str(exc)},
+                    }
+                if result.get("status") == "PASSED":
+                    raise_cleanup_error = True
+                    result["status"] = "FAILED"
+                    result["error"] = {
+                        "type": type(exc).__name__,
+                        "detail": str(exc),
+                    }
+            finally:
+                log.close()
         (evidence_dir / f"{args.phase}.json").write_text(
             json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+        if cleanup_error is not None and raise_cleanup_error:
+            raise cleanup_error
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -780,6 +1066,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--browser-python", type=Path, required=True)
     parser.add_argument("--bundle-inventory", type=Path, required=True)
     parser.add_argument("--phase", choices=("initial", "upgrade", "restore"), required=True)
+    parser.add_argument(
+        "--allow-idempotent-replay",
+        action="store_true",
+        help=(
+            "permit a same-source local retry while recording that no recalculation "
+            "was proved; hosted distinct-source verification must omit this option"
+        ),
+    )
     args = parser.parse_args(argv)
     verify(args)
     return 0

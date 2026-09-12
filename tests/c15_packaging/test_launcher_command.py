@@ -9,10 +9,13 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import uvicorn
 
+from backend import worker as worker_module
 from c15_local import launcher as launcher_module
 from c15_local.launcher import (
     _entrypoint,
@@ -55,14 +58,71 @@ def test_backend_command_is_uvicorn_on_loopback():
 
 
 def test_service_environment_binds_frontend_client_to_selected_api(monkeypatch):
-    from types import SimpleNamespace
-
     monkeypatch.delenv("MODELA_API_URL", raising=False)
     cfg = SimpleNamespace(API_PUBLIC_URL="http://127.0.0.1:18765")
     assert service_environment(cfg)["MODELA_API_URL"] == cfg.API_PUBLIC_URL
 
     monkeypatch.setenv("MODELA_API_URL", "http://127.0.0.1:19999")
     assert service_environment(cfg)["MODELA_API_URL"] == "http://127.0.0.1:19999"
+
+
+def test_windows_process_tree_assigns_children_and_closes_job_handle():
+    tree = object.__new__(launcher_module._WindowsProcessTree)
+    tree._handle = 101
+    tree._kernel32 = SimpleNamespace(
+        AssignProcessToJobObject=Mock(return_value=1),
+        CloseHandle=Mock(return_value=1),
+    )
+    process = SimpleNamespace(_handle=202)
+
+    tree.add(process)
+    tree.close()
+    tree.close()
+
+    tree._kernel32.AssignProcessToJobObject.assert_called_once_with(101, 202)
+    tree._kernel32.CloseHandle.assert_called_once_with(101)
+    assert tree._handle is None
+
+
+def test_frozen_code_identity_uses_immutable_resource_and_ignores_environment(
+    tmp_path, monkeypatch
+):
+    identity = {
+        "schema_version": "MP-COM-BUILD-IDENTITY/1",
+        "source_sha": "a" * 40,
+        "tree_sha": "b" * 40,
+    }
+    (tmp_path / "build-source-identity.json").write_text(
+        json.dumps(identity), encoding="utf-8"
+    )
+    monkeypatch.setattr(worker_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(worker_module.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setenv("MP_CODE_SHA", "environment-must-not-override-frozen-build")
+
+    assert worker_module.current_code_sha() == "a" * 40
+
+
+def test_frozen_code_identity_fails_closed_without_verified_resource(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(worker_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(worker_module.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setenv("MP_CODE_SHA", "environment-must-not-rescue-frozen-build")
+
+    with pytest.raises(RuntimeError, match="frozen build source identity"):
+        worker_module.current_code_sha()
+
+    (tmp_path / "build-source-identity.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "MP-COM-BUILD-IDENTITY/1",
+                "source_sha": "a" * 40,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="frozen build source identity"):
+        worker_module.current_code_sha()
 
 
 def test_internal_api_disables_uvicorn_console_formatter(monkeypatch):

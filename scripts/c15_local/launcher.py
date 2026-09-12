@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import importlib.metadata
 import json
 import os
@@ -238,6 +239,99 @@ def _terminate(procs: Sequence[subprocess.Popen]) -> None:
             proc.kill()
 
 
+class _WindowsProcessTree:
+    """Own frozen service children in a kill-on-close Windows Job Object."""
+
+    _EXTENDED_LIMIT_INFORMATION = 9
+    _KILL_ON_JOB_CLOSE = 0x00002000
+
+    def __init__(self) -> None:
+        from ctypes import wintypes
+
+        class _BasicLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class _ExtendedLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _BasicLimitInformation),
+                ("IoInfo", _IoCounters),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        ]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        limits = _ExtendedLimitInformation()
+        limits.BasicLimitInformation.LimitFlags = self._KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            handle,
+            self._EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        ):
+            error = ctypes.get_last_error()
+            kernel32.CloseHandle(handle)
+            raise ctypes.WinError(error)
+        self._kernel32 = kernel32
+        self._handle = handle
+
+    def add(self, process: subprocess.Popen) -> None:
+        if not self._handle:
+            raise RuntimeError("Windows process tree is already closed")
+        process_handle = getattr(process, "_handle", None)
+        if process_handle is None or not self._kernel32.AssignProcessToJobObject(
+            self._handle, process_handle
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def close(self) -> None:
+        if self._handle:
+            self._kernel32.CloseHandle(self._handle)
+            self._handle = None
+
+
+def _windows_process_tree() -> Optional[_WindowsProcessTree]:
+    return _WindowsProcessTree() if os.name == "nt" else None
+
+
 def _log_frozen_child_diagnostics(logger, log_dir: Path) -> None:
     """Copy frozen child tracebacks into the parent product log."""
     for diagnostic in sorted(log_dir.glob("frozen-child-error-*.log")):
@@ -330,12 +424,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         signal.signal(signal.SIGBREAK, handle_signal)
 
     env = service_environment(cfg)
-    backend = subprocess.Popen(backend_cmd, env=env)
-    procs.append(backend)
-    frontend = subprocess.Popen(frontend_cmd, env=env)
-    procs.append(frontend)
-
+    process_tree = _windows_process_tree()
     try:
+        backend = subprocess.Popen(backend_cmd, env=env)
+        procs.append(backend)
+        if process_tree is not None:
+            process_tree.add(backend)
+        frontend = subprocess.Popen(frontend_cmd, env=env)
+        procs.append(frontend)
+        if process_tree is not None:
+            process_tree.add(frontend)
         payload = wait_for_health(
             health_url(cfg.API_PUBLIC_URL),
             timeout=args.health_timeout,
@@ -357,6 +455,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         _terminate(procs)
         _log_frozen_child_diagnostics(logger, Path(cfg.LOG_DIR))
         raise
+    finally:
+        _terminate(procs)
+        if process_tree is not None:
+            process_tree.close()
 
 
 def _entrypoint(run=main) -> int:

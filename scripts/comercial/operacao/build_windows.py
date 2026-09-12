@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.comercial.operacao import audit, sbom
+
+
+BUILD_IDENTITY_FILENAME = "build-source-identity.json"
+_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def sha256(path: Path) -> str:
@@ -24,8 +29,18 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _write_bundle_inventory(bundle: Path, destination: Path) -> dict:
+def _write_bundle_inventory(
+    bundle: Path,
+    destination: Path,
+    *,
+    source_sha: str,
+    tree_sha: str,
+) -> dict:
     """Hash every file that Inno Setup will consume from the onedir bundle."""
+    if not _GIT_SHA_RE.fullmatch(source_sha or "") or not _GIT_SHA_RE.fullmatch(
+        tree_sha or ""
+    ):
+        raise RuntimeError("bundle inventory requires verified source and tree identities")
     entries = [
         {
             "path": path.relative_to(bundle).as_posix(),
@@ -41,6 +56,8 @@ def _write_bundle_inventory(bundle: Path, destination: Path) -> dict:
     payload = {
         "schema_version": "MP-COM-WINDOWS-BUNDLE-INVENTORY/1",
         "scope": "complete-pyinstaller-onedir-consumed-by-inno-setup",
+        "source_sha": source_sha,
+        "tree_sha": tree_sha,
         "file_count": len(entries),
         "total_size": sum(entry["size"] for entry in entries),
         "inventory_sha256": hashlib.sha256(encoded).hexdigest(),
@@ -250,9 +267,21 @@ def build(
         stage(current_stage, "PASSED")
         current_stage = "pyinstaller"
         stage(current_stage, "RUNNING")
+        build_identity = evidence / BUILD_IDENTITY_FILENAME
+        _write_status(
+            build_identity,
+            {
+                "schema_version": "MP-COM-BUILD-IDENTITY/1",
+                "source_sha": source_sha,
+                "tree_sha": status["tree_sha"],
+            },
+        )
+        pyinstaller_env = os.environ.copy()
+        pyinstaller_env["MODELA_BUILD_SOURCE_IDENTITY_FILE"] = str(build_identity)
         subprocess.run(
             [sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(output), str(spec)],
             cwd=root,
+            env=pyinstaller_env,
             check=True,
         )
         bundle = output / "MODELA-PRO"
@@ -262,7 +291,12 @@ def build(
         shutil.copy2(audit_path, bundle / audit_path.name)
         shutil.copy2(native_manifest, evidence / native_manifest.name)
         shutil.copy2(trusted_anchor, evidence / "artifact-trusted-vendor-anchor.json")
-        _write_bundle_inventory(bundle, evidence / "bundle-file-inventory.json")
+        _write_bundle_inventory(
+            bundle,
+            evidence / "bundle-file-inventory.json",
+            source_sha=source_sha,
+            tree_sha=status["tree_sha"],
+        )
         stage(current_stage, "PASSED")
         current_stage = "installer"
         stage(current_stage, "RUNNING")

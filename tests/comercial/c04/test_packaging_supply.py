@@ -25,6 +25,29 @@ from scripts.comercial.operacao import (
 from scripts.comercial.operacao.operational_harness import run_harness
 
 
+TEST_SOURCE_SHA = "a" * 40
+TEST_TREE_SHA = "b" * 40
+TEST_RESULT_FINGERPRINT = "c" * 64
+TEST_REPORT_FINGERPRINT = "d" * 64
+
+
+def _write_test_bundle_inventory(installed: Path, inventory: Path) -> dict:
+    identity = {
+        "schema_version": "MP-COM-BUILD-IDENTITY/1",
+        "source_sha": TEST_SOURCE_SHA,
+        "tree_sha": TEST_TREE_SHA,
+    }
+    (installed / build_windows.BUILD_IDENTITY_FILENAME).write_text(
+        json.dumps(identity), encoding="utf-8"
+    )
+    return build_windows._write_bundle_inventory(
+        installed,
+        inventory,
+        source_sha=TEST_SOURCE_SHA,
+        tree_sha=TEST_TREE_SHA,
+    )
+
+
 def _native_fixture(tmp_path: Path, monkeypatch) -> Path:
     native = tmp_path / "windows-native"
     (native / "dlls").mkdir(parents=True)
@@ -416,11 +439,15 @@ def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
             bundle = output / "MODELA-PRO"
             bundle.mkdir(parents=True)
             (bundle / "MODELA-PRO.exe").write_bytes(b"synthetic-exe")
+            identity = Path(_kwargs["env"]["MODELA_BUILD_SOURCE_IDENTITY_FILE"])
+            (bundle / build_windows.BUILD_IDENTITY_FILENAME).write_bytes(
+                identity.read_bytes()
+            )
         elif str(command[0]).lower().endswith("iscc.exe"):
             (output / "MODELA-PRO-1.0-win64.exe").write_bytes(b"synthetic-installer")
         result = Result()
         if "rev-parse" in command:
-            result.stdout = "deadbeef\n"
+            result.stdout = TEST_SOURCE_SHA + "\n"
         return result
 
     monkeypatch.setattr(build_windows.subprocess, "run", fake_run)
@@ -432,7 +459,7 @@ def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
         lock=root / "constraints" / "commercial-build.txt",
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["source_sha"] == "deadbeef"
+    assert manifest["source_sha"] == TEST_SOURCE_SHA
     assert manifest["signing_status"] == "UNSIGNED"
     assert manifest["signing_requirement"] == "OPTIONAL_UNLESS_APPROVED_OFFER_REQUIRES_CODE_SIGNING"
     assert manifest["commercial_release_ready"] is False
@@ -451,8 +478,11 @@ def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
     assert {item["path"] for item in bundle_inventory["files"]} == {
         "MODELA-PRO.exe",
         "SBOM.modelapro.json",
+        build_windows.BUILD_IDENTITY_FILENAME,
         "pip-audit.json",
     }
+    assert bundle_inventory["source_sha"] == TEST_SOURCE_SHA
+    assert bundle_inventory["tree_sha"] == TEST_SOURCE_SHA
 
 
 def test_windows_bundle_requires_native_runtime_and_hardens_distribution_evidence() -> None:
@@ -519,7 +549,7 @@ def test_installed_bundle_verifier_matches_bytes_and_allows_only_inno_files(
     (installed / "MODELA-PRO.exe").write_bytes(b"exe")
     (installed / "nested" / "runtime.dll").write_bytes(b"dll")
     inventory = tmp_path / "bundle-file-inventory.json"
-    build_windows._write_bundle_inventory(installed, inventory)
+    _write_test_bundle_inventory(installed, inventory)
     (installed / "unins000.exe").write_bytes(b"inno-exe")
     (installed / "unins000.dat").write_bytes(b"inno-dat")
     evidence = tmp_path / "installed-bundle.json"
@@ -529,7 +559,9 @@ def test_installed_bundle_verifier_matches_bytes_and_allows_only_inno_files(
     )
 
     assert result["status"] == "PASSED"
-    assert result["declared_file_count"] == 2
+    assert result["declared_file_count"] == 3
+    assert result["source_sha"] == TEST_SOURCE_SHA
+    assert result["tree_sha"] == TEST_TREE_SHA
     assert [item["path"] for item in result["allowed_inno_runtime_files"]] == [
         "unins000.dat",
         "unins000.exe",
@@ -572,7 +604,7 @@ def test_installed_bundle_verifier_rejects_tree_differences(
     target = installed / "MODELA-PRO.exe"
     target.write_bytes(b"expected")
     inventory = tmp_path / "bundle-file-inventory.json"
-    build_windows._write_bundle_inventory(installed, inventory)
+    _write_test_bundle_inventory(installed, inventory)
     if failure == "missing":
         target.unlink()
     elif failure == "mismatch":
@@ -603,7 +635,7 @@ def test_installed_bundle_verifier_rejects_windows_path_escape_forms(
     installed.mkdir()
     (installed / "MODELA-PRO.exe").write_bytes(b"expected")
     inventory = tmp_path / "bundle-file-inventory.json"
-    payload = build_windows._write_bundle_inventory(installed, inventory)
+    payload = _write_test_bundle_inventory(installed, inventory)
     payload["files"][0]["path"] = unsafe_path
     payload["inventory_sha256"] = hashlib.sha256(
         json.dumps(
@@ -624,7 +656,7 @@ def test_installed_bundle_verifier_rejects_casefold_collision(tmp_path: Path) ->
     (installed / "FILE.dll").write_bytes(b"upper")
     (installed / "file.dll").write_bytes(b"lower")
     inventory = tmp_path / "bundle-file-inventory.json"
-    build_windows._write_bundle_inventory(installed, inventory)
+    _write_test_bundle_inventory(installed, inventory)
 
     with pytest.raises(
         verify_windows_install.VerificationError,
@@ -642,7 +674,7 @@ def test_installed_bundle_verifier_rejects_symlink_escaping_root(tmp_path: Path)
     outside.write_bytes(b"outside")
     (installed / "runtime.dll").symlink_to(outside)
     inventory = tmp_path / "bundle-file-inventory.json"
-    build_windows._write_bundle_inventory(installed, inventory)
+    _write_test_bundle_inventory(installed, inventory)
 
     with pytest.raises(verify_windows_install.VerificationError, match="escapes its root"):
         verify_windows_install._verify_installed_bundle(
@@ -656,8 +688,13 @@ def test_windows_job_verifier_explicitly_generates_documents_with_job_token(
     document_calls = []
     result_reads = []
     snapshot = {
+        "job_id": "job-test",
+        "code_sha": TEST_SOURCE_SHA,
         "provenance": {
-            "qualification_context": {"profile": {"id": verify_windows_install.PROFILE["id"]}}
+            "qualification_context": {
+                "profile": {"id": verify_windows_install.PROFILE["id"]},
+                "result_fingerprint": TEST_RESULT_FINGERPRINT,
+            }
         },
         "value": {"point": 123.0},
     }
@@ -665,11 +702,17 @@ def test_windows_job_verifier_explicitly_generates_documents_with_job_token(
     def request(url: str, **kwargs) -> bytes:
         if url.endswith("/jobs"):
             return json.dumps(
-                {"job_id": "job-test", "access_token": "job-secret"}
+                {
+                    "job_id": "job-test",
+                    "access_token": "job-secret",
+                    "idempotent_replay": False,
+                }
             ).encode()
         name = url.rsplit("/", 1)[-1]
         if name == "frozen_project.json":
-            return b"{}"
+            return json.dumps(
+                {"provenance": {"code_sha": TEST_SOURCE_SHA}}
+            ).encode()
         if name == "report.pdf":
             return b"%PDF-test"
         if name in {"report.docx", "evidence_bundle.zip"}:
@@ -679,12 +722,26 @@ def test_windows_job_verifier_explicitly_generates_documents_with_job_token(
     def json_request(url: str, **kwargs) -> dict:
         if url.endswith("/documents"):
             document_calls.append(kwargs)
+            artifacts = {
+                "report.pdf": b"%PDF-test",
+                "report.docx": b"PK-test",
+                "evidence_bundle.zip": b"PK-test",
+            }
             return {
+                "job_id": "job-test",
+                "result_fingerprint": TEST_RESULT_FINGERPRINT,
+                "report_content_fingerprint": TEST_REPORT_FINGERPRINT,
+                "document_state": {
+                    "result_fingerprint": TEST_RESULT_FINGERPRINT,
+                    "report_content_fingerprint": TEST_REPORT_FINGERPRINT,
+                },
                 "artifacts": {
-                    "report.pdf": {},
-                    "report.docx": {},
-                    "evidence_bundle.zip": {},
-                }
+                    name: {
+                        "size": len(value),
+                        "sha256": hashlib.sha256(value).hexdigest(),
+                    }
+                    for name, value in artifacts.items()
+                },
             }
         if url.endswith("/result"):
             result_reads.append(url)
@@ -700,7 +757,9 @@ def test_windows_job_verifier_explicitly_generates_documents_with_job_token(
     monkeypatch.setattr(verify_windows_install, "_request", request)
     monkeypatch.setattr(verify_windows_install, "_json_request", json_request)
 
-    verify_windows_install._run_job("http://127.0.0.1:1", tmp_path, 0, "initial")
+    verify_windows_install._run_job(
+        "http://127.0.0.1:1", tmp_path, 0, "initial", TEST_SOURCE_SHA
+    )
 
     assert len(document_calls) == 1
     assert document_calls[0]["method"] == "POST"
@@ -711,21 +770,314 @@ def test_windows_job_verifier_explicitly_generates_documents_with_job_token(
     assert (tmp_path / "initial-job-0-documents.json").is_file()
 
 
+def test_windows_job_verifier_recovers_token_for_authenticated_idempotent_replay(
+    tmp_path: Path, monkeypatch
+) -> None:
+    recovered_calls = []
+    document_calls = []
+    snapshot = {
+        "job_id": "job-replayed",
+        "code_sha": TEST_SOURCE_SHA,
+        "provenance": {
+            "qualification_context": {
+                "profile": {"id": verify_windows_install.PROFILE["id"]},
+                "result_fingerprint": TEST_RESULT_FINGERPRINT,
+            }
+        },
+        "value": {"point": 123.0},
+    }
+
+    def request(url: str, **kwargs) -> bytes:
+        if url.endswith("/jobs"):
+            return json.dumps(
+                {"job_id": "job-replayed", "idempotent_replay": True}
+            ).encode()
+        name = url.rsplit("/", 1)[-1]
+        if name == "frozen_project.json":
+            return json.dumps(
+                {"provenance": {"code_sha": TEST_SOURCE_SHA}}
+            ).encode()
+        if name == "report.pdf":
+            return b"%PDF-test"
+        if name in {"report.docx", "evidence_bundle.zip"}:
+            return b"PK-test"
+        raise AssertionError((url, kwargs))
+
+    def json_request(url: str, **kwargs) -> dict:
+        if url.endswith("/access-token"):
+            recovered_calls.append(kwargs)
+            return {"access_token": "recovered-secret"}
+        if url.endswith("/documents"):
+            document_calls.append(kwargs)
+            artifacts = {
+                "report.pdf": b"%PDF-test",
+                "report.docx": b"PK-test",
+                "evidence_bundle.zip": b"PK-test",
+            }
+            return {
+                "job_id": "job-replayed",
+                "result_fingerprint": TEST_RESULT_FINGERPRINT,
+                "report_content_fingerprint": TEST_REPORT_FINGERPRINT,
+                "document_state": {
+                    "result_fingerprint": TEST_RESULT_FINGERPRINT,
+                    "report_content_fingerprint": TEST_REPORT_FINGERPRINT,
+                },
+                "artifacts": {
+                    name: {
+                        "size": len(value),
+                        "sha256": hashlib.sha256(value).hexdigest(),
+                    }
+                    for name, value in artifacts.items()
+                },
+            }
+        if url.endswith("/result"):
+            return snapshot
+        if url.endswith("/jobs/job-replayed"):
+            return {"state": "succeeded"}
+        if url.endswith("/revisions"):
+            return {"revision_id": "revision-test"}
+        if url.endswith("/projects/TESTE-C06-PROJETO"):
+            return {"revision": {"revision_id": "revision-test"}}
+        raise AssertionError((url, kwargs))
+
+    monkeypatch.setattr(verify_windows_install, "_request", request)
+    monkeypatch.setattr(verify_windows_install, "_json_request", json_request)
+
+    verify_windows_install._run_job(
+        "http://127.0.0.1:1",
+        tmp_path,
+        0,
+        "initial",
+        TEST_SOURCE_SHA,
+        allow_idempotent_replay=True,
+    )
+
+    assert recovered_calls == [{"method": "POST", "payload": {}}]
+    assert document_calls[0]["job_token"] == "recovered-secret"
+
+
+def test_windows_job_verifier_rejects_replay_as_recalculation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        verify_windows_install,
+        "_request",
+        lambda *_args, **_kwargs: json.dumps(
+            {"job_id": "old-job", "idempotent_replay": True}
+        ).encode(),
+    )
+
+    with pytest.raises(
+        verify_windows_install.VerificationError,
+        match="recalculation was not exercised",
+    ):
+        verify_windows_install._run_job(
+            "http://127.0.0.1:1", tmp_path, 0, "upgrade", TEST_SOURCE_SHA
+        )
+
+
+@pytest.mark.parametrize("invalid_replay", [0, 1, None, "false"])
+def test_windows_job_verifier_requires_boolean_replay_state(
+    tmp_path: Path, monkeypatch, invalid_replay
+) -> None:
+    monkeypatch.setattr(
+        verify_windows_install,
+        "_request",
+        lambda *_args, **_kwargs: json.dumps(
+            {
+                "job_id": "job-test",
+                "access_token": "job-secret",
+                "idempotent_replay": invalid_replay,
+            }
+        ).encode(),
+    )
+
+    with pytest.raises(
+        verify_windows_install.VerificationError,
+        match="idempotent_replay state",
+    ):
+        verify_windows_install._run_job(
+            "http://127.0.0.1:1", tmp_path, 0, "upgrade", TEST_SOURCE_SHA
+        )
+
+
+def test_document_binding_rejects_null_artifact_metadata() -> None:
+    generated = {
+        "job_id": "job-test",
+        "result_fingerprint": TEST_RESULT_FINGERPRINT,
+        "report_content_fingerprint": TEST_REPORT_FINGERPRINT,
+        "document_state": {
+            "result_fingerprint": TEST_RESULT_FINGERPRINT,
+            "report_content_fingerprint": TEST_REPORT_FINGERPRINT,
+        },
+        "artifacts": {
+            "report.pdf": None,
+            "report.docx": None,
+            "evidence_bundle.zip": None,
+        },
+    }
+    snapshot = {
+        "provenance": {
+            "qualification_context": {
+                "result_fingerprint": TEST_RESULT_FINGERPRINT,
+            }
+        }
+    }
+
+    with pytest.raises(
+        verify_windows_install.VerificationError,
+        match="invalid hash/size",
+    ):
+        verify_windows_install._validated_document_artifacts(generated)
+
+
+def test_windows_product_shutdown_kills_complete_process_tree(
+    monkeypatch,
+) -> None:
+    class Process:
+        pid = 4242
+        returncode = None
+        terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, *, timeout):
+            assert timeout == 20
+            self.returncode = 1
+            return self.returncode
+
+    monkeypatch.setattr(verify_windows_install.os, "name", "nt")
+    monkeypatch.setattr(
+        verify_windows_install, "_wait_for_product_ports_closed", lambda: []
+    )
+    process = Process()
+
+    result = verify_windows_install._stop(process, None)
+
+    assert process.terminated is True
+    assert result == {
+        "status": "PASSED",
+        "parent_pid": 4242,
+        "method": "parent_termination_with_job_containment",
+        "parent_returncode": 1,
+        "service_ports_closed": True,
+    }
+
+
+def test_windows_product_shutdown_fails_before_using_cleanup_fallback(
+    monkeypatch,
+) -> None:
+    process = SimpleNamespace(
+        pid=4242,
+        returncode=None,
+        poll=lambda: None,
+        terminate=lambda: None,
+        wait=lambda *, timeout: 1,
+    )
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(verify_windows_install.os, "name", "nt")
+    monkeypatch.setenv("SystemRoot", r"C:\WINDOWS")
+    monkeypatch.setattr(
+        verify_windows_install,
+        "_wait_for_product_ports_closed",
+        lambda: ["127.0.0.1:8000"],
+    )
+    monkeypatch.setattr(verify_windows_install.subprocess, "run", run)
+
+    result = verify_windows_install._stop(process, None)
+
+    assert calls[0][0] == [
+        r"C:\WINDOWS\System32\taskkill.exe",
+        "/IM",
+        "MODELA-PRO.exe",
+        "/T",
+        "/F",
+    ]
+    assert result["status"] == "FAILED"
+    assert result["service_ports_closed"] is False
+    assert result["fallback_taskkill_exit_code"] == 0
+    assert "ports open" in result["error"]["detail"]
+
+
+def test_windows_transition_scope_separates_bootstrap_from_distinct_recalculation():
+    assert (
+        verify_windows_install._transition_scope(
+            TEST_SOURCE_SHA, TEST_TREE_SHA, TEST_SOURCE_SHA, TEST_TREE_SHA
+        )
+        == "OPERATIONAL_SAME_TREE_ONLY"
+    )
+    assert (
+        verify_windows_install._transition_scope(
+            TEST_SOURCE_SHA, TEST_TREE_SHA, "c" * 40, "d" * 40
+        )
+        == "DISTINCT_SOURCE_RECALCULATION"
+    )
+    with pytest.raises(
+        verify_windows_install.VerificationError,
+        match="partially distinct",
+    ):
+        verify_windows_install._transition_scope(
+            TEST_SOURCE_SHA, TEST_TREE_SHA, "c" * 40, TEST_TREE_SHA
+        )
+
+
 def test_windows_update_semantic_comparison_ignores_only_execution_identity(tmp_path: Path) -> None:
     first = {
         "job_id": "job-a",
         "generated_at": "2026-09-12T00:00:00Z",
         "code_sha": "a" * 40,
         "value": {"point": 123.0, "mean_ci80": [120.0, 126.0]},
-        "policy": {"mode": "exact"},
+        "policy": {"mode": "exact", "generated_at": "material-policy-date"},
+        "search": {
+            "audit": {
+                "profile": {
+                    "elapsed_s": 1.0,
+                    "rss_bytes_before": 100,
+                    "rss_bytes_after": 200,
+                    "host": "this_process_only",
+                }
+            }
+        },
+        "provenance": {
+            "qualification_context": {
+                "result_fingerprint": "1" * 64,
+                "report_content_fingerprint": "2" * 64,
+                "rule_results": [{"rule_id": "rule-a", "status": "passed"}],
+            }
+        },
     }
-    second = {**first, "job_id": "job-b", "generated_at": "later", "code_sha": "b" * 40}
+    second = json.loads(json.dumps(first))
+    second.update({"job_id": "job-b", "generated_at": "later", "code_sha": "b" * 40})
+    second["provenance"]["qualification_context"].update(
+        {
+            "result_fingerprint": "3" * 64,
+            "report_content_fingerprint": "4" * 64,
+        }
+    )
+    second["search"]["audit"]["profile"].update(
+        {"elapsed_s": 2.0, "rss_bytes_before": 300, "rss_bytes_after": 400}
+    )
     first_hash = verify_windows_install._semantic_result_evidence(first, tmp_path / "first.json")
     second_hash = verify_windows_install._semantic_result_evidence(second, tmp_path / "second.json")
     assert first_hash == second_hash
     second["value"] = {"point": 123.0, "mean_ci80": [119.0, 127.0]}
     changed_hash = verify_windows_install._semantic_result_evidence(second, tmp_path / "changed.json")
     assert changed_hash != first_hash
+    second = json.loads(json.dumps(first))
+    second["policy"]["generated_at"] = "changed-material-policy-date"
+    nested_change_hash = verify_windows_install._semantic_result_evidence(
+        second, tmp_path / "nested-change.json"
+    )
+    assert nested_change_hash != first_hash
 
 
 def test_windows_build_preserves_failed_stage_evidence(tmp_path: Path, monkeypatch) -> None:
