@@ -212,6 +212,37 @@ Estas **não** foram corrigidas — a remediação delas nunca foi lançada:
   ser skip nem xfail, é invisível ao relatório de skips e ao agregador. É
   arquivo de P02/C02: handoff, não conserto meu.
 
+## Achado sobre o próprio portão: a evidência é cancelável
+
+`c15-ci.yml` tem `concurrency` com `cancel-in-progress: true`. Perdi **dois**
+runs de evidência nesta sessão por empurrar um commit em cima de um run em
+andamento: `815251f` (cancelado por `be464a2`) e `a1f43a2` (cancelado por
+`cdb55ca`).
+
+Isso não é um incômodo de CI. O contrato exige registrar evidência por
+candidato — comandos, exit code, SHA, artefatos — e publicar o SHA depois do
+commit. Se o run daquele SHA pode ser cancelado antes de terminar, **a
+evidência daquele candidato simplesmente não existe**, e o que sobra é a
+evidência de um SHA vizinho. Para um portão cuja razão de ser é produzir prova,
+descartar a prova é defeito de projeto, não economia.
+
+O lado bom, observado: o agregador **reprovou** nos dois runs cancelados, com
+`{"c16-harness": "cancelled", ...}`. Produtor cancelado não é sucesso, e isso
+já estava certo — o `if: always()` mais a exigência de artefato garantem que um
+run interrompido nunca pareça verde.
+
+O que fica para decidir, e não decidi porque tem custo de minutos de CI e toca
+o que C04/C15 possuem:
+
+- `cancel-in-progress: false` no gatilho de `push` (mantendo `true` em
+  `pull_request`, onde o último commit é o que importa), para que todo candidato
+  publicado tenha run próprio e completo;
+- ou um job de evidência separado, não cancelável, que rode o mínimo necessário
+  para o registro do candidato.
+
+Enquanto for `true`, vale a regra operacional: **não empurrar em cima de um run
+cujo resultado vai ser citado como evidência.** Eu violei isso duas vezes hoje.
+
 ## O que isto não muda
 
 Nenhum aceite sobe por causa destas correções. `COMMERCIAL_RELEASE_READY`
