@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import zipfile
 
 import pytest
 
@@ -9,6 +11,7 @@ from modules.evidence_bundle import (
     assess_bundle_status,
     build_evidence_bundle,
     reproduce_from_bundle,
+    refresh_evidence_bundle_archive,
     verify_bundle,
 )
 from modules.provenance import canonical_json
@@ -17,6 +20,37 @@ from modules.report_presenter.qualification import signable_snapshot_sha256
 from tests.c12_evidence.helpers import make_complete_evaluation
 
 from .fixtures import qualification_context
+
+
+def test_refresh_replaces_managed_proofs_but_preserves_worker_documents(tmp_path):
+    ev = make_complete_evaluation()
+    original = b"SYNTHETIC TEST ORIGINAL WORKER DOCUMENT"
+    ev["artifacts"]["photos"] = [
+        {"filename": "worker-source.txt", "bytes": original, "type": "text/plain"}
+    ]
+    root = tmp_path / "dossier"
+    build_evidence_bundle(ev["snapshot"], ev["input_bundle"], ev["prepared_dataset"], ev["artifacts"], root)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        for path in root.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(root).as_posix())
+    current = output.getvalue()
+    for filename, proof in (("first.txt", b"TEST PROOF A"), ("second.txt", b"TEST PROOF B")):
+        current = refresh_evidence_bundle_archive(
+            current, snapshot=ev["snapshot"], report_pdf=ev["artifacts"]["report_pdf"]["bytes"],
+            report_docx=build_docx(ev["snapshot"], {}), documentary_files=[{
+                "filename": filename, "bytes": proof, "sha256": hashlib.sha256(proof).hexdigest(),
+                "media_type": "text/plain",
+            }],
+        )
+    with zipfile.ZipFile(io.BytesIO(current)) as archive:
+        assert archive.read("artifacts/documents/worker-source.txt") == original
+        assert "artifacts/documents/c06/001-first.txt" not in archive.namelist()
+        assert archive.read("artifacts/documents/c06/001-second.txt") == b"TEST PROOF B"
+        manifest = json.loads(archive.read("MANIFEST.json"))
+        assert not any(item["path"].endswith("first.txt") for item in manifest["files"])
+        assert "signature_record" in manifest["completeness_missing"]
 
 
 def test_a04_maps_representations_reviews_and_separates_three_statuses(tmp_path):

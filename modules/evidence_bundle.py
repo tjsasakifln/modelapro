@@ -1015,7 +1015,7 @@ def refresh_evidence_bundle_archive(
         filename = sanitize_internal_name(
             str(item.get("filename") or f"document_{index + 1}.bin")
         )
-        path = f"artifacts/documents/{index + 1:03d}-{filename}"
+        path = f"artifacts/documents/c06/{index + 1:03d}-{filename}"
         attachment_paths.append(path)
         replacements[path] = (
             payload,
@@ -1029,6 +1029,14 @@ def refresh_evidence_bundle_archive(
         for item in manifest.get("files") or []
         if isinstance(item, Mapping) and item.get("path")
     }
+    # This namespace represents the current document, not accumulated history.
+    # The workflow archives the previous complete bundle before publishing the
+    # replacement. Rebuild managed attachments so withdrawn/superseded proofs
+    # do not remain silently authorized in the current dossier.
+    for path, entry in list(listed.items()):
+        if entry.get("function") == "authorized_documentary_attachment":
+            members.pop(path, None)
+            listed.pop(path, None)
     for path, (data, media_type, version, function) in replacements.items():
         members[path] = data
         listed[path] = {
@@ -1076,15 +1084,25 @@ def refresh_evidence_bundle_archive(
     mark("docx_artifact", COMPLETENESS_PRESENT, "artifacts.report_docx")
     if review_events:
         mark("review_history", COMPLETENESS_PRESENT, "qualification.review_events")
+    else:
+        mark("review_history", COMPLETENESS_MISSING, "qualification.review_events")
     if signature_record is not None:
         mark("signature_record", COMPLETENESS_PRESENT, "signature/verification.json")
-    if attachment_paths:
+    else:
+        mark("signature_record", COMPLETENESS_MISSING, "signature/verification.json")
+    current_document_paths = attachment_paths + [
+        path for path, entry in listed.items()
+        if entry.get("function") == "documentary_file" and path in members
+    ]
+    if current_document_paths:
         mark(
             "photos_documents",
             COMPLETENESS_PRESENT,
-            ",".join(attachment_paths),
+            ",".join(current_document_paths),
             "Arquivos documentais autorizados e vinculados por SHA-256.",
         )
+    else:
+        mark("photos_documents", COMPLETENESS_MISSING, "documentary_files")
     ledger["items"] = sorted(by_component.values(), key=lambda item: str(item.get("component")))
     statuses = [item.get("status") for item in ledger["items"]]
     ledger["counts"] = {
