@@ -1,0 +1,54 @@
+{
+  "schema": "MP-C06-EVIDENCE/1",
+  "pr_head_sha": "1b57df2ccdce2c79852a3f731afad8131374e09a",
+  "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "tested_commit_sha": "9d5ff9d3f523cd1fedd4b9d98b36d5a4fe0cd60b",
+  "tree_sha": "5126d87be0d6f86a9ee1efcf84506195974aaee1",
+  "parents": [
+    "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+    "1b57df2ccdce2c79852a3f731afad8131374e09a"
+  ],
+  "event": "pull_request",
+  "run_id": "34719940149",
+  "run_attempt": "1",
+  "job": "wide-suite-linux",
+  "source_dirty": false,
+  "tracked_source_dirty_after": true,
+  "unexpected_untracked_source": [],
+  "files": {
+    "collection.json": "98635c0605c90e0651739eb97c7d26d43a1381721dcd0ea222a66174aa43a16b",
+    "inventory-check.log": "c6291eee22fc07b21e5b65cc18a4c177cf2065d760bf128b536f440ffba86bbe",
+    "ui-e2e/P02/desktop-empty.png": "c66a92997909632841b2f7f66567bf7af9af25006a8899e8842a31f9e539e8f5",
+    "ui-e2e/P02/narrow-result.png": "930c152a62912cc8f1a2c0d9bf03636361446494fed14a8595e7b30e7a71d0f4",
+    "ui-e2e/P02/requests.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "ui-e2e/P02/result-csv.png": "eb71baa3639eceb634471ba60303bfbb846205e40196359ea586b685b9b27667",
+    "ui-e2e/P02/result-xlsx.png": "43c83eaf860eddd41698d6f1c0975488babe75595536a509673b7f6525ffb321",
+    "ui-e2e/P02/trace.zip": "aeeea44354e8f6f838cd8b2b2a46341798e6c42c3a9bb8f6252a95d75bd4235e",
+    "ui-e2e/c06-cost-flow/artifact-inventory.json": "c279382efa842c0dc9b850889c6b173149f257da02e59b6876296e0bb6d8a243",
+    "ui-e2e/c06-cost-flow/store/jobs/job_958113f36966491b99dee466442dfebe/artifacts/evidence_bundle.zip": "b7ef685277350cb3d77366524b650a7933ea86d8e8fa8e11ee69947de594e25e",
+    "ui-e2e/c06-cost-flow/store/jobs/job_958113f36966491b99dee466442dfebe/artifacts/report.pdf": "eb4ce9dc7fb31f15c1949a16c038ef4d3eae0ba009f39d2f82fd6cc2d8b5839c",
+    "ui-e2e/c06-document-flow/artifact-inventory.json": "5f8bd9b0e85b85d0dbaa002e7ac8e87423123fbcc5bda85911b6bc6f6cb7d7f2",
+    "ui-e2e/c06-document-flow/browser-document-flow-body.txt": "7b619fe476383c15e0900546f43b7dbde8224bbaad833e4b7a74997c048e933a",
+    "ui-e2e/c06-document-flow/browser-document-flow-failure.png": "fd84b37ae57464ab4f71bd7479c1fa46b9c77417fe6a7eb466a74047650aa09e",
+    "ui-e2e/c16_ui.png": "9a3f1bd8d54afa6d582f724ce9b59df5b6f99c552d7f28a533796ecd29349310",
+    "ui-e2e/pw_trace.zip": "d6fab2b45e39a6e10b8a4665d74d6756fb4b71615ef0bcb293b45caf77407714",
+    "ui-e2e/report.pdf": "de649f34c93de1e89ba5023a8e793beb7ec87234079c05ecf8b272b08b40d3e3",
+    "ui-e2e/ui_api.log": "e103abddf27d279ccbb2510823e1789b15cbe7015fdd861e485aa87b2b3ec3b4",
+    "ui-e2e/ui_body.txt": "aa3f94c31b8017030d78c271bb7540daa8d86422cf9145b8bd0db418d322518e",
+    "wide.junit.xml": "34360ae6fb79199cd193ef58217f425916d4d2979e0049b46add1ee61a9cb6e0",
+    "wide.log": "747e4703ad65fc4246d854d1825199fbe704714b218f41cf5329b9eaf5d130bd"
+  },
+  "package_hashes": {},
+  "status": "FAILURE_NOT_APPROVAL_OF_CURRENT_HEAD",
+  "wide_result": {
+    "collected": 1736,
+    "passed": 1734,
+    "failed": 1,
+    "skipped": 1,
+    "failed_cases": [
+      "tests.comercial.test_c06_browser_document_flow::test_browser_completes_test_report_review_and_external_signature"
+    ]
+  },
+  "downloaded_file_hashes_verified": true,
+  "source_mutation": "tracked_source_dirty_after=true; cause under investigation, remains disqualifying"
+}

@@ -1,11 +1,29 @@
 # C06 — matriz da composição, não dos componentes isolados
 
 Retomada em trabalho em 2026-09-12. Última candidata publicada, ainda reprovada:
-`c60fbebd11816e358756a50ca8a09b74a815aa34`. Os commits posteriores da mesma PR
+`1b57df2ccdce2c79852a3f731afad8131374e09a`. Os commits posteriores da mesma PR
 precisam de execução própria antes de serem aprovados. Os oito aceites de cada
 produtor permanecem nos arquivos originais como histórico do componente; esta
 matriz identifica seus consumidores na composição. Não declara conclusão pelo
 número de testes.
+
+A primeira candidata da retomada terminou reprovada: C15 PR **34719940149** e
+push **34719939405** tiveram, cada um, **1.734 passed, 1 failed, 1 skipped**.
+Falhou o navegador documental; ambos também registraram
+`tracked_source_dirty_after=true`, que o agregador recusou. Os arquivos baixados
+tiveram todos os hashes comparados à identidade de cada namespace, preservada
+em [evidence-run-34719940149.json](evidence-run-34719940149.json) e
+[evidence-run-34719939405.json](evidence-run-34719939405.json).
+PR testou merge `9d5ff9d3f523cd1fedd4b9d98b36d5a4fe0cd60b`; push testou o HEAD;
+árvore comum `5126d87be0d6f86a9ee1efcf84506195974aaee1`.
+
+Windows **34719940134** também terminou FAILURE. Instalação/preflight/ACL e
+desinstalação passaram; operação A falhou antes do cálculo. O instalador real
+reproduziu um modal Streamlit com conflito entre developmentMode e server.port.
+A correção fixa developmentMode=false e registra exceções do processo filho em
+stderr, mas ainda exige nova prova instalada. Não existe A operacional aprovada
+para a transição entre árvores distintas. As referências E1/E2 abaixo preservam
+o histórico anterior; não aprovam os commits locais posteriores.
 
 ## Execução → artefato
 
