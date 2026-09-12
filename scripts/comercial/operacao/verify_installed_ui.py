@@ -109,9 +109,10 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
             profile = page.locator("[data-testid='stSelectbox']").filter(
                 has_text="Perfil de qualificação (versionado, catálogo conhecido)"
             )
+            profile.first.wait_for(state="visible", timeout=60000)
             if profile.count() != 1:
                 raise BrowserVerificationError("installed UI profile selector is absent or duplicated")
-            profile.locator("[data-baseweb='select']").click()
+            profile.get_by_role("combobox").click()
             options = page.locator("[role='option']")
             options.first.wait_for(timeout=15000)
             labels = {text.strip() for text in options.all_inner_texts() if text.strip()}
@@ -124,6 +125,7 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
             uploader = page.locator("[data-testid='stFileUploader']").filter(
                 has_text="Arquivo de dados de mercado"
             ).locator("input[type=file]")
+            uploader.first.wait_for(state="attached", timeout=60000)
             if uploader.count() != 1:
                 raise BrowserVerificationError("installed UI market-data uploader is absent or duplicated")
             uploader.set_input_files(str(input_path))
