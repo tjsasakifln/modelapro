@@ -99,6 +99,13 @@ def health_url(public_url: str) -> str:
     return public_url.rstrip("/") + "/health"
 
 
+def service_environment(cfg) -> dict[str, str]:
+    """Bind the packaged UI client to the API address selected by the launcher."""
+    env = os.environ.copy()
+    env.setdefault("MODELA_API_URL", cfg.API_PUBLIC_URL)
+    return env
+
+
 def wait_for_health(
     url: str,
     timeout: float = 30.0,
@@ -196,6 +203,7 @@ def main_api(argv: Optional[Sequence[str]] = None) -> int:
 
 def main_frontend(argv: Optional[Sequence[str]] = None) -> int:
     cfg = _config()
+    os.environ.setdefault("MODELA_API_URL", cfg.API_PUBLIC_URL)
     cmd = frontend_command(frontend_app_path(), cfg.FRONTEND_HOST, cfg.FRONTEND_PORT)
     os.execv(cmd[0], cmd)
     return 0
@@ -204,6 +212,7 @@ def main_frontend(argv: Optional[Sequence[str]] = None) -> int:
 def _main_frozen_frontend() -> int:
     """Run Streamlit CLI inside the dedicated frozen child process."""
     cfg = _config()
+    os.environ.setdefault("MODELA_API_URL", cfg.API_PUBLIC_URL)
     app_path = frontend_app_path()
     sys.argv = frontend_command(app_path, cfg.FRONTEND_HOST, cfg.FRONTEND_PORT)
     # ``frontend_command`` intentionally points back to this executable when
@@ -320,7 +329,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if hasattr(signal, "SIGBREAK"):
         signal.signal(signal.SIGBREAK, handle_signal)
 
-    env = os.environ.copy()
+    env = service_environment(cfg)
     backend = subprocess.Popen(backend_cmd, env=env)
     procs.append(backend)
     frontend = subprocess.Popen(frontend_cmd, env=env)
