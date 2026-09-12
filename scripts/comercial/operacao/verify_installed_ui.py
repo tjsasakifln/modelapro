@@ -129,7 +129,9 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
             if uploader.count() != 1:
                 raise BrowserVerificationError("installed UI market-data uploader is absent or duplicated")
             uploader.set_input_files(str(input_path))
-            page.locator("input[placeholder='ex.: 73,5']").first.wait_for(timeout=90000)
+            # The first packaged preview intentionally triggers the deferred
+            # scientific/document import closure on a clean Windows profile.
+            page.locator("input[placeholder='ex.: 73,5']").first.wait_for(timeout=180000)
             body = page.inner_text("body")
             lowered = body.lower()
             forbidden = [badge for badge in FORBIDDEN_BADGES if badge in lowered]
