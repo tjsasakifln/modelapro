@@ -47,7 +47,8 @@ def main() -> int:
         args.output.mkdir(parents=True, exist_ok=True)
     else:
         data = json.loads(target.read_text(encoding="utf-8"))
-        data["tracked_source_dirty_after"] = bool(git("diff", "HEAD", "--name-only"))
+        data["tracked_source_changes"] = git("diff", "HEAD", "--name-only").splitlines()
+        data["tracked_source_dirty_after"] = bool(data["tracked_source_changes"])
         output_relative = args.output.resolve().relative_to(Path.cwd().resolve()).as_posix()
         untracked = git("ls-files", "--others", "--exclude-standard").splitlines()
         data["unexpected_untracked_source"] = [
