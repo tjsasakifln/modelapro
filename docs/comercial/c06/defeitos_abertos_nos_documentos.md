@@ -251,6 +251,41 @@ Registro para C02 com a evidência dos dois runs:
 Não é conserto meu (arquivo de P02/C02), e **não** deve ser fechado como
 "passou na segunda vez".
 
+## A catraca do piso: conferida, e com granularidade fraca
+
+Eu havia fixado o piso em 800 a partir de 808 casos medidos em `be464a2` — e
+depois commitei `bb0bd2d`, que passou a rastrear `test_metamorphic_reference.py`
+e `test_mutations_commercial.py`, arquivos **ausentes** do checkout quando os
+808 foram medidos. Ou seja: eu declarei a catraca aplicada sobre um número que
+já não valia, e nunca li o número novo. O run passou sem violar o piso, o que
+não é o mesmo que o piso estar certo.
+
+Medido agora, no artefato do run **34669632998** (`cdb55ca`):
+
+```
+wide suite: 894 testcases, 2 failed, 1 skipped
+regra (contagem arredondada para baixo na centena) prescreve: 800
+piso no workflow: 800
+```
+
+O piso **está** no valor que a regra manda. A catraca não estava defasada — mas
+eu não sabia disso, e afirmar que estava aplicada sem ler a contagem era a mesma
+falha que este documento inteiro registra: concluir sobre um artefato sem abrir
+o artefato.
+
+**Fraqueza real da regra, que a medição expôs.** Arredondar para a centena
+deixa o piso atrasar a cobertura em até 99 testes. Com 894 casos e piso 800,
+perder **94 testes** não dispara nada — e pegar truncamento é exatamente a razão
+de existir do número. A granularidade foi escolhida por conveniência, não
+derivada de nada.
+
+Não mudei agora, e o motivo importa: apertar a granularidade **depois** de ver
+894 é a forma do movimento que o contrato proíbe, mesmo sendo na direção
+estrita. A decisão certa é escolher a granularidade por um critério declarado
+(por exemplo: piso = contagem menos uma folga fixa justificada pela variação
+legítima entre runs, medida em alguns runs verdes) e aplicá-la a partir daí.
+Fica registrado como decisão pendente, não como conserto silencioso.
+
 ## Achado sobre o próprio portão: a evidência é cancelável
 
 `c15-ci.yml` tem `concurrency` com `cancel-in-progress: true`. Perdi **dois**
