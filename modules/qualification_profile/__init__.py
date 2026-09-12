@@ -19,6 +19,14 @@ from .catalog import (
     resolve_profile,
     source_set_sha256,
 )
+from .output_conformance import (
+    BASELINE_STATES,
+    NON_CONFORMING_BASELINE,
+    OUTPUT_KINDS,
+    OutputRequirementError,
+    assess_output_conformance,
+    product_conformance_baseline,
+)
 from .claims import (
     CLAIM_CALCULATION_VERIFIED,
     CLAIM_IMPLEMENTS_REQUIREMENTS,
@@ -48,6 +56,12 @@ from .schema import (
 
 __all__ = [
     "SCHEMA_VERSION",
+    "assess_output_conformance",
+    "product_conformance_baseline",
+    "OutputRequirementError",
+    "OUTPUT_KINDS",
+    "BASELINE_STATES",
+    "NON_CONFORMING_BASELINE",
     "assess_qualification",
     "result_fingerprint",
     "load_catalog",

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from .. import normative_rules as rules
 from . import claims as claims_mod
 from .catalog import ProfileError, resolve_profile
+from .output_conformance import assess_output_conformance, product_conformance_baseline
 from .schema import (
     APPLICABLE,
     CALC_ABSENT,
@@ -299,6 +300,14 @@ def _decide_release(
             ),
         })
 
+    for ob in profile.get("_output_blocking") or []:
+        blockers.append({
+            "code": ob["code"],
+            "rule_id": ob.get("requirement_id"),
+            "detail": ob["detail"],
+            "owner": ob.get("owner"),
+        })
+
     for prohibited in profile.get("_model_use_prohibited") or []:
         blockers.append({
             "code": "model_use_prohibited",
@@ -525,8 +534,15 @@ def assess_qualification(
         "result_snapshot_id": ctx.get("result_snapshot_id"),
     })
 
+    # Conformidade da SAÍDA contra o padrão documental do destinatário. Um laudo
+    # normativamente correto ainda volta com ressalva se faltar anexo que o
+    # manual do destinatário exige, então isto bloqueia a liberação.
+    output = assess_output_conformance(resolved, ctx.get("output_manifest"))
+    rule_results.extend(output["rule_results"])
+
     review_events = list(ctx.get("review_events") or [])
     release_profile = dict(resolved)
+    release_profile["_output_blocking"] = output["blocking"]
     release_profile["_model_use_prohibited"] = assessment.get("model_use_prohibited") or []
     release = _decide_release(
         profile=release_profile,
@@ -575,6 +591,8 @@ def assess_qualification(
         "grade_requirement_status": grade_status,
         "requested_minimum_grade": requested,
         "achieved_fundamentacao_grade": achieved,
+        "output_conformance": output,
+        "product_conformance_baseline": product_conformance_baseline(resolved),
         "case_release_status": release["case_release_status"],
         "release_blockers": release["blockers"],
         "pending_manual_rules": release["pending_manual_rules"],

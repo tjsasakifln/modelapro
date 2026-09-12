@@ -7,6 +7,24 @@ Estados usados, conforme o contrato comum — e distintos do estado do **PRODUTO
 `IMPLEMENTED_VERIFIED`, `IMPLEMENTED_PARTIAL`, `WAITING_FOR_COMPONENTS`,
 `BLOCKED_EXTERNAL_EVIDENCE`.
 
+## Objetivo reenquadrado (2026-09-12)
+
+O objetivo contratado **não** é ser homologado por instituições, e sim **produzir análises
+que seriam aceitas sem ressalvas pelos padrões que elas estabeleceram** — ver
+[`objetivo.md`](objetivo.md). Os oito aceites abaixo tratam de *ter a regra e o perfil
+verificados*; a pergunta do objetivo é distinta e está respondida em
+[`conformance.md`](conformance.md):
+
+> **A análise que o produto emite hoje seria aceita sem ressalvas pelo padrão do Banco do
+> Brasil? Não.** Dos 40 requisitos de saída conferidos, o produto entrega 12: 15 parciais,
+> 11 ausentes, 2 dependentes do profissional (com porta de entrada existente).
+
+Isso **não** reprova os aceites: levantar a regra corretamente e atendê-la são coisas
+diferentes, e a segunda depende de arquivos que C05 não possui. Mas é o número que decide o
+objetivo, e por isso vem antes da tabela. As lacunas estão distribuídas em C02 (11,
+sobretudo fiação do que já é calculado), C03 (8, apresentação), C01 (5, cálculo inexistente)
+e C04 (2, empacotamento).
+
 ## Resumo
 
 | # | aceite | estado |
@@ -231,6 +249,7 @@ Esta frente não pode declarar, e não declara:
 
 | estado de entrega | situação |
 |---|---|
+| **conformidade da saída ao padrão do destinatário** | **não atendida — 12 de 40 requisitos emitidos** ([`conformance.md`](conformance.md)) |
 | `NORMATIVE_SCOPE_VERIFICATION` | atendido para o recorte anunciado (imóvel urbano, valor de mercado, comparativo com regressão), com a vigência das edições bloqueada |
 | `INSTITUTION_PROFILE_VERIFICATION` | atendido para **um** destinatário (BB), em força moderada; CAIXA em `discovery`; securitário bloqueado |
 | `INSTITUTION_ACCEPTANCE` | **inexistente** para todo destinatário |
@@ -239,6 +258,16 @@ Esta frente não pode declarar, e não declara:
 | `COMMERCIAL_RELEASE_READY` | **não** declarável a partir daqui |
 
 O objetivo institucional contratado — trabalhos destinados a **bancos e seguradoras** —
-**não** está integralmente alcançado: o perfil bancário está verificado em força moderada,
-mas o securitário está bloqueado e nenhuma instituição aceitou nada. A alegação permitida
-é mais restrita do que o objetivo contratado, e isso está registrado em vez de arredondado.
+**não** está alcançado, e agora por um motivo medido em vez de genérico:
+
+1. **Padrão bancário levantado, não atendido.** O perfil do BB está verificado em fonte
+   primária, mas a saída do produto cumpre 12 dos 40 requisitos desse padrão. Enquanto
+   `product_can_meet_standard` for `False`, a alegação "compatível com o perfil documental
+   P" está **bloqueada por construção** — o registro de alegações não a emite.
+2. **Padrão securitário nem levantado por inteiro.** A base de valor não foi estabelecida
+   (o ato regulatório é silente) e nenhuma condição contratual foi obtida.
+
+A diferença em relação à redação anterior é de natureza: "nenhuma instituição homologa
+software" era beco sem saída; "faltam 28 requisitos, com dono e descrição em cada um" é
+plano de trabalho. A alegação permitida continua mais restrita do que o objetivo
+contratado, e isso está registrado em vez de arredondado.

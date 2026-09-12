@@ -1,6 +1,6 @@
 {
   "id": "bb-meci-avaliacao-imovel-pf",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "kind": "institution",
   "state": "verified",
   "label": "Banco do Brasil — laudo de avaliação de imóvel urbano (pessoa física), conforme MECI",
@@ -147,5 +147,530 @@
     "Toda afirmação deste perfil é tensada 'conforme publicado em MECI-202400940-VER01, cuja vigência não foi estabelecida' — nunca 'o MECI vigente' nem 'o BB exige hoje'.",
     "A regra de uma linha de crédito, tipologia ou região não se estende às demais."
   ],
-  "source_set_sha256": "5c556e7bc10a10dcf94f39b5b73c0a0e8e42735e1dd11cf8bac9cf4fb8626afc"
+  "source_set_sha256": "5c556e7bc10a10dcf94f39b5b73c0a0e8e42735e1dd11cf8bac9cf4fb8626afc",
+  "output_requirements": [
+    {
+      "id": "meci.3.3.1.a",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Equação utilizada com a variável dependente apresentada no laudo na forma NÃO TRANSFORMADA",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real de produção (compose_valuation_job → build_report_view → _attach_charts → compose_report_html): VIEW KEYS impressas não contêm nenhuma chave de equação destransformada; com y=identity a view traz fitting_scale='original' e formula_display='preco = -9.5052712239293158e-10 + 10000.000000000009*area'. Código: modules/report_presenter/formula.py:80-86 e 145-150 (texto 'não imprime exp(ajuste) como média sem o método de retransformação informado'); modules/report_presenter/formula.py:190-200 (dict de retorno, sem forma destransformada).",
+      "gap": "Sustentado. O laudo imprime a equação apenas na escala de ajuste. modules/report_presenter/formula.py:80-86 (_lhs) devolve 'ln(col)' quando o alvo é log e 'transform(col)' para qualquer outra transformação; formula.py:145-150 declara por escrito que 'esta minuta não imprime exp(ajuste) como média sem o método de retransformação informado'. Não existe chave de equação destransformada: as chaves de fórmula na view real de produção são formula, formula_display, formula_storage, formula_log_scale, formula_notes, formula_present, formula_source, fitting_scale — nenhuma 'formula_untransformed'. Falta compor e imprimir a equação na escala original do alvo com o método de retransformação declarado.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "meci.3.3.1.b",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Coeficientes atingidos: correlação (R), determinação (R²) e determinação ajustado (R² ajustado)",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real: view['metrics'] = {'present': True, 'source': 'validation.statistical', 'r2': '1.0000', 'r2_adjusted': '1.0000', 'f_statistic': '—', 'f_pvalue': '0.0000', 'durbin_watson': '—'} — R² e R² ajustado presentes. Ausência de R comprovada no HTML renderizado de produção: `grep -io '[a-zç]*correla[a-zçõã]*' prod.html` → apenas 'autocorrelacao' (1) e 'autocorrelação' (2), nenhuma ocorrência de coeficiente de correlação. modules/results_generator.py:367,379-380.",
+      "gap": "Sustentado. R² e R² ajustado saem no laudo de produção; o coeficiente de correlação R não existe em camada alguma. modules/results.py:47 tem r2_adjusted e não há campo de correlação em ModelMetrics; _metrics_block (modules/results_generator.py:362-397) só lê r2, r2_adjusted, f_statistic, f_pvalue, durbin_watson; a tabela do laudo (modules/templates/report.html linhas da seção 'Ajustamento (R²)') tem apenas essas linhas. Falta calcular R e acrescentar a linha correspondente em _metrics_block e no template.",
+      "owner": "C01",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C01 (cálculo do R) + C03 (linha no laudo)"
+    },
+    {
+      "id": "meci.3.3.1.c",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Significâncias do modelo e das variáveis independentes",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real de produção: COEF_ROWS = [{'variable': 'const', 'coefficient': '-0.000000', 'pvalue': '—', 'vif': '—'}, {'variable': 'area', 'coefficient': '10000.000000', 'pvalue': '—', 'vif': '—'}]. MODEL KEYS do snapshot congelado = ['candidate_id','coefficients','delivered','delivered_matches_used','diagnostics','encoder_state_present','feature_schema_version','formula','model_sha256','transformations','used','used_row_ids','y_transformation'] — sem 'pvalues'/'vif'. Texto do laudo linha 161: 'Pior p-valor entre regressores: 0.0000. (evidência: calculated)'; linha 165: 'F-prob (p-valor do teste F): 0.0000.'. Código: backend/worker.py:757-769 (retorno de _model_identity), backend/worker.py:1",
+      "gap": "REBAIXADO de EMITTED. A significância do MODELO sai (p-valor do teste F). A significância DAS VARIÁVEIS INDEPENDENTES não sai no laudo de produção: a coluna p-valor da tabela de coeficientes imprime '—' para toda variável. Causa verificada: _coef_rows (modules/results_generator.py:603,613) lê model['pvalues'], mas o bloco 'model' do snapshot de produção é _model_identity (backend/worker.py:720-769) + 'formula' + 'diagnostics' (backend/worker.py:1335,1338) e NÃO contém 'pvalues' nem 'vif'. Os p-valores por variável são calculados e usados apenas para classificação normativa (backend/worker.py:1044 'pvalues': _pvalues_from_fit(winner_fit) alimenta o contexto de assess_normative, não o snapshot",
+      "owner": "C02",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C02 (fluxo: levar pvalues ao snapshot.model) + C03 (laudo)"
+    },
+    {
+      "id": "meci.3.3.1.d",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Número de dados utilizados",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Confirmado na execução real de produção. Texto do laudo, linhas 41-45: 'Amostra — n recebido, observado, preparado e efetivo são distintos / n recebido (snapshot.sample.received) 24 / n com alvo observado (observed_target) 24 / n preparado (prepared) 24 / n efetivo / usado (used) 24'. Snapshot real: sample keys = ['excluded','excluded_row_ids','observed_target','prepared','received','used','used_row_ids']. Caminho de produção: backend/worker.py:1361 'sample': _sample_from_prepared(bundle, prepared, used_row_ids, excluded_row_ids); template modules/templates/report.html (seção 'Amostra')."
+    },
+    {
+      "id": "meci.3.3.1.e",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Atributos do imóvel avaliando (valores)",
+      "kind": "calculated",
+      "product_baseline": "missing",
+      "verified_layer": "calculated_only",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real: HAS_SUBJECT False, SUBJ [] (view['subject_items'] vazio); `grep -n 'Imóvel avaliando' prod.html` → nenhuma linha. RC KEYS reais (listadas acima) não contêm 'subject'. O valor existe apenas no dump: prod.html:1265 (frozen-box) contém \"'workflow_context': {... 'subject_raw': {'bairro': 'Centro', 'area': 73.5} ...}\". Código: backend/worker.py:470-500 (dict de retorno de build_report_context, sem 'subject'); backend/worker.py:1410 render(snapshot, report_context).",
+      "gap": "REBAIXADO de PARTIAL. Na execução real de produção a tabela 'Imóvel avaliando' não aparece no laudo — nem o cabeçalho da seção existe no HTML (`grep -n 'Imóvel avaliando' prod.html` → vazio). A seção depende de has_subject/subject_items alimentados por ctx['subject'] (modules/results_generator.py), mas build_report_context (backend/worker.py:439-500) não define 'subject': as chaves reais do report_context de produção são applicant, attachments, excluded_row_ids, excluded_rows, fitted_values, inspection_date, observed_values, purpose, reference_date, residuals, row_ledger, sample_ledger, schema_version, series_*, sources, target_col, target_unit, used_row_ids, used_rows. Os valores do avalian",
+      "owner": "C02",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C02 (fluxo) + C03 (laudo)"
+    },
+    {
+      "id": "meci.3.3.1.f",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Resultado da avaliação e intervalos atingidos (IC 80% E campo de arbítrio)",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real de produção: snapshot['value'] = {'point': 734999.9999999998, 'mean_ci80': {...level 0.8, kind mean}, 'prediction_interval': {...}, 'arbitration_interval': null, 'admissible_interval': null}; `grep -o '\"arbitration_interval\": [^,}]*' snap.json | uniq -c` → 6 × null. view: ARB '—' ADM '—'. Texto do laudo linhas 29-38: 'Estimativa pontual ... 735000 / IC da média (80%) ... 735.000,00 a 735.000,00 / Intervalo preditivo ... / Campo de arbítrio (intervalo de arbitragem) / — / Intervalo de valores admissíveis / —'. VALIDATION KEYS reais = documentary, fundamentacao, issuance, model_eligibility, normative_edition, normative_verification_status, precisao, statistical — sem 'intervals'.",
+      "gap": "REBAIXADO de EMITTED — e é exatamente a confusão que se pedia evitar (IC no lugar de campo de arbítrio). Saem no laudo de produção: estimativa pontual, IC 80% da média e intervalo preditivo. NÃO sai o campo de arbítrio: o laudo imprime o rótulo e um travessão. Causa verificada: modules/model_builder.py:330-337 (_empty_value) cria as chaves arbitration_interval e admissible_interval e NENHUM ponto do fluxo de produção as atribui (as atribuições em model_builder são só a point/mean_ci80/prediction_interval, linhas 1493-1541); o campo de arbítrio é de fato calculado em modules/normative_rules.py:713-830 (interval_roles, chaves 'arbitration_interval'/'admissible_interval'), chamado por modules/n",
+      "owner": "C02",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C02 (fluxo: levar arbitration/admissible ao value) + C03"
+    },
+    {
+      "id": "meci.3.3.1.g",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Gráfico de resíduos",
+      "kind": "chart",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Confirmado na execução real de produção, com bytes de imagem no laudo. Geração: modules/results_generator.py:1190-1200 (scatter, axhline y=0, título 'Resíduos versus valores ajustados') → charts['residuals_vs_fitted']. Execução: CHARTS = {'residuals_vs_fitted': 26600, 'residuals_hist': 31472, 'observed_vs_estimated': 49824} (bytes base64 não vazios) e `grep -c 'data:image/png;base64' prod.html` → 3; `grep -o 'Gráfico: [^<]*' prod.html` → 'Gráfico: Resíduos versus valores ajustados'. Séries alimentadas em produção por backend/worker.py:492-495 ('fitted_values','residuals','observed_values' de aligned_fit_series)."
+    },
+    {
+      "id": "meci.3.3.1.h",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Gráfico de aderência (observados versus estimados)",
+      "kind": "chart",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Confirmado na execução real de produção. modules/results_generator.py:1210-1220: scatter observado × ajustado com bissetriz plt.plot([min,max],[min,max], label='Bissetriz (y = x)'), título 'Observado versus estimado' → charts['observed_vs_estimated'] (49824 bytes na execução). No HTML de produção: 'Gráfico: Observado versus estimado' e uma das 3 imagens base64 inline. Rótulo é 'Observado versus estimado', não 'aderência', mas é o mesmo gráfico que o MECI pede."
+    },
+    {
+      "id": "meci.3.3.1.i",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Demonstrativo da pontuação atingida (tabela de fundamentação e precisão)",
+      "kind": "table",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Confirmado na execução real de produção, com os 6 itens e a pontuação impressos. Cálculo: modules/nbr14653_validation.py:596-606 (ItemScore itens 1..6) e nbr14653_validation.py:309-314 (fundamentacao com 'items', 'points', 'pending_items'). Snapshot real: validation.fundamentacao = {'grade': null, 'points': 12, 'detail': 'Itens [1, 3] pendentes; enquadramento Tabela 2 não é aprovado por ausência (pontos conhecidos=12).', 'pending_items': [1,3]}. Texto do laudo: linha 51 '— pontos: 12'; linhas 161,165 com os itens 5 e 6 ('Pior p-valor entre regressores: 0.0000', 'F-prob (p-valor do teste F): 0.0000'); item_scores da view traz os 6 itens com grau_label e evidence_status ('tabela1.item1' Penden"
+    },
+    {
+      "id": "meci.3.3.1.j",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Histograma dos resíduos amostrais PADRONIZADOS",
+      "kind": "chart",
+      "product_baseline": "partial",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real de produção: charts['residuals_hist'] = 31472 bytes e 'Gráfico: Histograma dos resíduos' no HTML; nenhuma menção a resíduo padronizado (`grep -i 'padroniz' prod.html` sem ocorrência no laudo). Código verificado linha a linha: modules/results_generator.py:1202-1208 (sns.histplot(resid_arr, kde=True); plt.xlabel(axis_resid); plt.title('Histograma dos resíduos')); backend/worker.py:494 'residuals': series.get('residuals').",
+      "gap": "Sustentado. O histograma emitido é de resíduos BRUTOS. modules/results_generator.py:1202-1208: sns.histplot(resid_arr, kde=True) com xlabel = axis_resid ('Resíduos') e título 'Histograma dos resíduos'; resid_arr vem de report_context['residuals'] (backend/worker.py:494), a série de resíduos na escala de ajuste, sem padronização. Os resíduos studentizados já são calculados em modules/model_builder.py (_influence_diagnostics, influence.resid_studentized_internal → 'studentized_residuals') e não são usados no histograma nem passados ao contexto do laudo. Falta padronizar e rotular o eixo como resíduos padronizados.",
+      "owner": "C01",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C03 (laudo) + C01 (ligar a série já calculada)"
+    },
+    {
+      "id": "meci.3.3.1.k",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Probabilidades da distribuição normal padrão nos intervalos [-1;+1], [-1,64;+1,64] e [-1,96;+1,96] (68%, 90%, 95%) cotejadas com as frequências observadas",
+      "kind": "calculated",
+      "product_baseline": "missing",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Laudo real de produção: `grep -c '1,96\\|1.96' prod.html` → 0; a lista de VIEW KEYS da execução real não contém nenhuma chave de frequências/normalidade; validation.statistical real = ['estimand','f_pvalue','influence','intercept','interval_method_validated','k','mean_ci_computed','n','parameters_free','prediction_interval_computed','r2','r2_adjusted','r2_naive_comparison_blocked','rank','scenario','significance_invalid'] — sem normalidade e sem frequências. Única ocorrência de 1,64/1,96 no código: modules/normative_rules.py:2209 (string de especificação).",
+      "gap": "Sustentado, com prova de execução. O produto não calcula nem apresenta o cotejo de frequências. A única aferição de normalidade é um p-valor (Shapiro-Wilk em modules/model_builder.py, → ModelMetrics.normality_pvalue), e p-valor de teste não é o cotejo de frequências — a distinção que se pedia checar. O próprio repositório registra a lacuna: modules/normative_rules.py:2208-2213 descreve 'frequências relativas observadas nos intervalos [-1;+1] ~68%, [-1,64;+1,64] ~90%, [-1,96;+1,96] ~95%' como método que 'o produto deve reportar', sem implementação. Onde deveria entrar: calcular as 3 frequências sobre os resíduos padronizados no ajuste, levar a validation.statistical, expor em _metrics_block (",
+      "owner": "C01",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C01 (cálculo) + C03 (laudo)"
+    },
+    {
+      "id": "meci.3.3.1.l",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Matriz de correlações das variáveis independentes e dependente",
+      "kind": "calculated",
+      "product_baseline": "missing",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Laudo real de produção: `grep -io '[a-zç]*correla[a-zçõã]*' prod.html` → apenas 'autocorrelacao'/'autocorrelação' (3 ocorrências, todas sobre o pressuposto A.2 e)); nenhuma matriz. VIEW KEYS reais não contêm matriz de correlações. COEF_ROWS reais mostram vif '—' para 'area'. MODEL KEYS do snapshot real sem 'vif'. Código: modules/variable_schema.py:951-968; modules/normative_rules.py:2258.",
+      "gap": "Sustentado. Não existe matriz de correlações disponível para apresentar. O único corr() é intermediário e descartado: modules/variable_schema.py:951 'corr = sub.corr().abs()' — valor absoluto, só colunas numéricas de treino, usado apenas para sinalizar pares quase colineares; não é guardado, não tem sinal, não inclui a dependente e não vai ao snapshot. E o VIF, que era o substituto plausível no laudo, também não sai em produção (coluna vif = '—', pelo mesmo motivo do item c: snapshot.model sem 'vif'). modules/normative_rules.py:2258 cita 'A.2.1.5.2 (matriz de correlações, atenção a resultados > 0,80)' como texto de regra, sem implementação. Onde deveria entrar: calcular a matriz completa (X ",
+      "owner": "C01",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C01 (cálculo) + C03 (laudo)"
+    },
+    {
+      "id": "meci.3.3.1.m1",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Valor do teste F de Snedecor (F calculado)",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "calculated_only",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real de produção: view['metrics']['f_statistic'] = '—' e ['f_pvalue'] = '0.0000'; texto do laudo linha 225: 'Estatística F (p-valor) — (0.0000)' e linha 226 'Durbin-Watson —'. Valor calculado e descartado: snapshot['model']['diagnostics']['f_statistic'] = 4.7562050962023097e+30 (diag keys incluem f_statistic, f_pvalue; durbin_watson = None). Código: modules/model_builder.py:1171 diagnostics['f_statistic'] = _finite(getattr(model,'fvalue',None)); modules/model_builder.py:1818-1835 (statistical sem f_statistic); modules/results_generator.py:367,381.",
+      "gap": "REBAIXADO de EMITTED. O F calculado existe em memória mas NÃO chega ao laudo: o laudo de produção imprime 'Estatística F (p-valor) — (0.0000)', isto é, o p-valor sai e o VALOR de F sai como travessão. Causa verificada: _metrics_block (modules/results_generator.py:362-397) lê model['metrics'] e, na ausência dele, faz fallback para validation.statistical — e o statistical de produção (modules/model_builder.py:1818-1835) copia r2, r2_adjusted e f_pvalue, mas NÃO f_statistic nem durbin_watson; o f_statistic existe em snapshot.model.diagnostics (backend/worker.py:1338, valor real 4.7562050962023097e+30) e _metrics_block não lê diagnostics. Falta copiar f_statistic (e durbin_watson) para statistic",
+      "owner": "C02",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C02 (fluxo: propagar f_statistic) + C03 (laudo)"
+    },
+    {
+      "id": "meci.3.3.1.m2",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Quantidade de outliers do modelo",
+      "kind": "calculated",
+      "product_baseline": "missing",
+      "verified_layer": "calculated_only",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real de produção: VIEW KEYS (lista completa impressa) sem nenhuma chave de outliers; `grep -n 'outlier' prod.html` sem linha de contagem; o único vestígio é o texto de influência — prod.txt linha 99 'IDs afetados: anexoA.2.i.pontos_influenciantes'. validation.statistical real contém 'influence' (dict), não uma contagem de outliers. Código: modules/results.py:66; modules/results_generator.py (nenhuma ocorrência de 'outlier').",
+      "gap": "Sustentado. A detecção existe (modules/model_builder.py, detect_outliers por Cook/resíduos studentizados; ModelResult.outliers_removed em modules/results.py:66) mas a contagem nunca chega ao laudo: 'outlier' não ocorre em modules/results_generator.py nem em modules/templates/report.html, e a view real de produção não tem nenhuma chave de outliers. Como a política vigente é 'report_only' (modules/model_builder.py, outlier_policy mode report_only; confirmado no spec de produção), o laudo precisaria distinguir DETECTADOS de EXCLUÍDOS — nenhum dos dois números é impresso. O que sai em produção é apenas influência como pressuposto pendente (validation.statistical.influence e um issue 'anexoA.2.i.",
+      "owner": "C02",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C03 (laudo) + C02 (fluxo)"
+    },
+    {
+      "id": "meci.3.3.1.n",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Intervalos de valores admissíveis, quando for o caso, informados no campo \"Observações\" do laudo",
+      "kind": "calculated",
+      "product_baseline": "missing",
+      "verified_layer": "calculated_only",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Execução real de produção: view ADM '—'; snapshot['value']['admissible_interval'] = null; texto do laudo linhas 37-38: 'Intervalo de valores admissíveis / —'; `grep -n 'Observaç' prod.html` → nenhuma linha; VIEW KEYS reais sem observations/observacoes/remarks; RC KEYS reais (report_context de produção) sem qualquer campo de observações. Cálculo descartado: modules/normative_rules.py:817-822; modules/nbr14653_validation.py:332 (normative['intervals']); backend/worker.py:1642-1651 (_map_validation não copia 'intervals').",
+      "gap": "REBAIXADO de PARTIAL. Nem o conteúdo nem o campo existem no laudo de produção. (1) O intervalo de valores admissíveis é calculado em modules/normative_rules.py:817-822 (interseção do intervalo estatístico com o campo de arbítrio) mas é descartado antes do snapshot (value.admissible_interval = null; validation sem 'intervals'), então a linha dedicada do laudo imprime '—'. (2) Não existe campo \"Observações\": nenhuma ocorrência de 'Observaç' no HTML renderizado de produção, e a view real não tem chave observations/observacoes/remarks — logo não há porta de entrada para o profissional declarar o 'quando for o caso' (não classifico como HUMAN justamente por isso: sem porta de entrada é MISSING). ",
+      "owner": "C02",
+      "co_owners": [
+        "C03"
+      ],
+      "owner_detail": "C02 (fluxo) + C03 (laudo)"
+    },
+    {
+      "id": "meci.2.3.3.2.pdf",
+      "clause": "MECI-202400940-VER01, itens 2.3.3.2 e 3.1.7.2 II",
+      "requirement": "Relatório completo da inferência estatística em formato PDF, com gráficos (não só texto)",
+      "kind": "attachment",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO após verificação direta. modules/results_generator.py:1328-1362 `_write_pdf` — linha 1338 `weasyprint.HTML(string=html_content, encoding='utf-8').write_pdf()`, com as guardas C08_PDF_ENGINE_UNAVAILABLE/C08_PDF_ENGINE_FAILED/C08_PDF_EMPTY/C08_PDF_INVALID (esta exige prefixo b'%PDF'); entrada pública `render_report` em :1364-1377 (chama build_report_view -> _attach_charts -> compose_report_html -> _write_pdf). Gráficos reais: `_charts_from_series` em modules/results_generator.py:1174-1221 produz as 3 chaves 'residuals_vs_fitted' (scatter resíduos x ajustados + axhline 0), 'residuals_hist' (histplot com kde) e 'observed_vs_estimated' (scatter + bissetriz y=x), embutidas como <img src",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "meci.2.3.3.2.excel",
+      "clause": "MECI-202400940-VER01, itens 2.3.3.2 e 3.1.7.2 II",
+      "requirement": "A amostra exportada em arquivo formato Excel (.xlsx/.xls)",
+      "kind": "attachment",
+      "product_baseline": "partial",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Escrita CSV (o que existe): modules/evidence_bundle.py:252-259 `_write_table_pair(..., rel='data/used_sample.csv', viz_rel='data/visualization/used_sample.safe.csv')`; implementação em :1075 `write_csv_table` e :1108-1132 `_write_table_pair`, constantes CSV_DELIMITER/CSV_ENCODING em :57-60. Ocorrências de escrita Excel existem SOMENTE em testes, e lá o Excel é fixture de ENTRADA: tests/c01_input/test_ingest_market.py:35, tests/c17_integration/helpers.py:140, tests/fixtures/pro_workflow/corpus.py:181, tests/c15_packaging/test_format_engines.py:28, tests/pro_workflow/p02/test_a01_playwright.py:58.",
+      "gap": "CORREÇÃO DE CAMADA (o levantamento anterior marcou layer='present_in_report'): não existe NADA em Excel em camada alguma — nem calculado, nem apresentado. Portanto layer='absent'. O status PARTIAL se sustenta apenas porque a amostra é de fato exportada, em CSV. Grep repo-wide confirmado por mim agora: `to_excel|ExcelWriter|xlsxwriter|openpyxl.Workbook|Workbook(` em modules/, backend/, frontend/ e scripts/ retorna ZERO ocorrências. Excel no produto existe só como ENTRADA (modules/import_formats.py:21-22 EXCEL_EXTENSIONS, :262-283 `_read_excel` com xlrd para .xls e openpyxl para .xlsx). Falta (a) um escritor .xlsx da amostra utilizada e (b) um ponto de download dedicado — hoje a amostra só che",
+      "owner": "C04",
+      "owner_detail": "C04"
+    },
+    {
+      "id": "meci.2.3.3.2.projecoes",
+      "clause": "MECI-202400940-VER01, itens 2.3.3.2 e 3.1.7.2 II",
+      "requirement": "O PDF contém \"projeções\" e \"informações auxiliares\" exigidas pela norma de avaliações",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO (com valor real no PDF de produção): 'Estimativa pontual' e 'Identificação do resultado' com point_display='735000' (report.html:263-300); 'IC da média (80%) — não é intervalo preditivo nem mediana' = '735.000,00 a 735.000,00'; 'Intervalo preditivo — distinto do IC da média' = '735.000,00 a 735.000,00' (snapshot.value.prediction_interval kind='observation', level=0.8 — de fato distinto do IC, não é o mesmo campo reaproveitado); saneamento amostral com MP1_N_RECEIVED=210 / N_OBSERVED=209 / N_PREPARED=209 / N_USED=209 / N_EXCLUDED=0 (report.html:300-305, results_generator.py:951-956); 'Especificação estatística do modelo' com formula_present=True e caixa de fórmula NA ESCALA DE AJUS",
+      "gap": "REBAIXADO DE EMITTED PARA PARTIAL. O levantamento anterior provou PRESENÇA DE RÓTULO, não presença de VALOR, e provou-a contra uma FIXTURE DE TESTE, não contra o pipeline de produção. O texto citado ('Estimativa pontual: R$ 350.000,00') vem de tests/c08_report/fixtures.py:9 `KNOWN_POINT = 350000.0`, que alimenta à mão justamente os campos que o produto não produz: `arbitration_interval` (:77), `pvalues` (:131), `durbin_watson` (:138) e `market_descriptive` (:219). Os rótulos são texto estático do template e sempre renderizam; o que falta é o número ao lado.\n\nNO PDF DO PIPELINE REAL (texto extraído com pypdf do PDF produzido por compose_valuation_job, corpus S08), estes campos saem com traves",
+      "owner": "C02",
+      "owner_detail": "C02"
+    },
+    {
+      "id": "meci.3.1.7.2.anexo",
+      "clause": "MECI-202400940-VER01, item 3.1.7.2",
+      "requirement": "Memória de cálculo entregue como anexo do laudo — arquivo separado ou seção identificada, entregável em conjunto",
+      "kind": "attachment",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO, e checado contra o pipeline real (não contra fixture). SEÇÃO IDENTIFICADA COM CONTEÚDO REAL: modules/templates/report.html:16 `@page annex`, :198 `.annex { page: annex; page-break-before: always; }` e :734-746 `<div class=\"annex\"><h2>Anexo integral — identificadores usados e excluídos</h2>`, com 'Identificadores usados (n={{ used_ids|length }})' e o parágrafo id='used-ids-integral' alimentado por `used_ids_joined`. Na execução real do pipeline a view trouxe used_ids n=209 e excluded_ids n=0 (identificadores verdadeiros da amostra, não recorte: o próprio template afirma em :737-740 que a lista é completa), e o texto extraído do PDF de produção contém 'Anexo integral — identificado",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "bb.guiar.assinatura_icp",
+      "clause": "GUIAR 2024/00940(7421), item 3.4.7",
+      "requirement": "Via de assinatura digital do PDF por certificado ICP-Brasil",
+      "kind": "attachment",
+      "product_baseline": "missing",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "O que existe é assinatura LÓGICA de sign-off, não criptográfica: modules/qualification_profile/schema.py:75 `CASE_SIGNED_INTEGRITY_VERIFIED = 'signed_integrity_verified'` e modules/qualification_profile/assessment.py:405-428, que apenas COMPARAM um dict `signature` de entrada (`signature.get('integrity_verified')`, `signature.get('fingerprint') == fingerprint`) contra `result_fingerprint`, marcando 'signature_stale' quando o resultado mudou — nada de certificado, cadeia, carimbo de tempo ou PAdES. modules/qualification_profile/output_conformance.py:8 documenta a intenção: 'o PROFISSIONAL revisou e assinou? -> review_events / signature'. Via existente, externa ao produto: report.pdf é baixáve",
+      "gap": "SUSTENTADO COMO MISSING, e reconfirmei as duas camadas com grep próprio. (1) NENHUMA integração criptográfica: grep case-insensitive por pyhanko|endesive|pades|pkcs11|asn1crypto|cryptography em requirements.txt, requirements-dev.txt, pyproject.toml e constraints/linux-py3.txt retorna ZERO ocorrências; nenhum módulo assina, carimba ou valida assinatura de PDF. (2) NENHUM bloco de assinatura no laudo para a assinatura atestar: grep por respons|crea|cau|art|assinatur em modules/templates/report.html retorna uma única linha, :802, e é prosa de ressalva ('não dispensa a responsabilidade'), não campo. Não há identificação de responsável técnico, número de registro/ART/RRT, nem página ou área de as",
+      "owner": "C04",
+      "owner_detail": "C04"
+    },
+    {
+      "id": "10.1.a",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "identificação do solicitante",
+      "kind": "human",
+      "product_baseline": "human_input",
+      "verified_layer": "human_input",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO. Porta verificada: frontend/components/forms.py:1493 `applicant = st.text_input(\"Solicitante\", ...)` → forms.py:404 `\"applicant\": applicant or \"\"` → API aceita via request_spec validado (backend/api.py:1022 `spec_payload = body.get(\"request_spec\")`, :367 `validate_request_spec`); há também a porta legada backend/api.py:1148 `solicitante: str = Form(\"\")` → :492. Chega ao laudo: backend/worker.py:479 `\"applicant\": request_spec.get(\"applicant\")` → modules/templates/report.html:235 `<b>Solicitante:</b> {{ applicant }}`. PROVA EMPÍRICA (execução real, não fixture): rodei backend.worker.compose_valuation_job com resolve_peers() reais, CSV de 30 registros, os 4 artefatos saíram \"ready\"; "
+    },
+    {
+      "id": "10.1.b",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "finalidade do laudo, quando informada pelo solicitante",
+      "kind": "human",
+      "product_baseline": "human_input",
+      "verified_layer": "human_input",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO. frontend/components/forms.py:1495 `purpose = st.text_input(\"Finalidade da avaliação\", ...)` → forms.py:405 → backend/worker.py:480 `\"purpose\": request_spec.get(\"purpose\")` → modules/templates/report.html:236 `<b>Objeto / finalidade:</b> {{ purpose }}`. Porta legada também existe (backend/api.py:1149 `finalidade: str = Form(\"\")` → :493). EXECUÇÃO REAL: `purpose = garantia`, impresso \"Objeto / finalidade: garantia\"."
+    },
+    {
+      "id": "10.1.c",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "objetivo da avaliação",
+      "kind": "human",
+      "product_baseline": "partial",
+      "verified_layer": "present_in_report",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO (corroborado pela execução real). Não existe campo \"objetivo\": o único é forms.py:1495 \"Finalidade da avaliação\", impresso como rótulo conjunto em templates/report.html:236 (\"Objeto / finalidade: garantia\" no render real). As taxonomias da norma são constantes mortas: modules/normative_rules.py:2716 `FINALIDADES` e :2721 `OBJETIVOS`; `grep -rn \"OBJETIVOS\\|FINALIDADES\" --include=*.py .` só retorna as linhas de definição, sem consumidor.",
+      "gap": "Falta campo próprio de objetivo (valor de mercado de compra e venda, valor de locação, valor patrimonial etc.) distinto da finalidade, e a seção correspondente. Deveria entrar em forms.py:1491-1495, propagado em backend/worker.py:473-499 e impresso em templates/report.html:232-260, com opções vindas de `OBJETIVOS`.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.d",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "pressupostos, ressalvas e fatores limitantes (7.2 da Parte 1)",
+      "kind": "human",
+      "product_baseline": "partial",
+      "verified_layer": "present_in_report",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO. O laudo real emite ressalvas DE MÁQUINA em volume: no HTML da execução real aparecem as seções \"Enquadramento e limitações prioritárias\" (report.html:314-329), \"Avisos e limitações (todos os issues do snapshot)\" (:331-351) com issues normativos textuais (ex.: \"pressuposto_pendente — Anexo A.2 f): exige exame e registro do engenheiro de avaliações. Sem registro, permanece pendente de decisão profissional — ausência não é conformidade\") e \"Limitações de inferência\" (:441-450). Fonte: modules/normative_rules.py:2184 `PRESSUPOSTOS` consumido em modules/nbr14653_validation.py:164-218. Já as ressalvas DECLARADAS pelo profissional não têm porta: `grep -rn \"text_area\" frontend/ --include",
+      "gap": "Falta porta de entrada e seção para os pressupostos/ressalvas/fatores limitantes do avaliador (situação-paradigma sem vistoria, documentação não exibida, restrição de escopo). Deveria entrar como texto livre em forms.py:1462-1495, propagado em worker.py:473-499 e impresso em seção nova rotulada como declaração do profissional, separada dos issues da máquina.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.e",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "identificação e caracterização do imóvel avaliando (7.3 da Parte 1, no que couber)",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "calculated_only",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO E REFORÇADO por execução real. Entrada existe (backend/api.py:1144 `avaliando_json`) e o avaliando É consumido no cálculo: passei `subject_raw={\"area\":120,\"quartos\":3,\"padrao\":\"medio\"}` e o snapshot real traz `target.estimand = subject_prediction` e ponto R$ 367.371,01; os eixos são montados em backend/worker.py:865-961 `_axes_from_fit` e empacotados em modules/evidence_bundle.py:433-437 (`model/subject_design.json`). Mas o laudo real NÃO o apresenta: build_report_context (backend/worker.py:439-500, único caminho — worker.py:1305/1410) nunca define a chave `subject` que results_generator.py:906-907/1143 lê. No HTML da execução real: `has_subject = False`, `subject_items = []`, pro",
+      "gap": "A seção report.html:616-626 é código morto no fluxo real. Falta (1) `\"subject\"` em build_report_context (worker.py:473-499); (2) identificação registral/endereço/descrição física do avaliando (não existe campo de matrícula ou logradouro); (3) impressão da tabela de eixos (valor do avaliando vs. faixa amostral) já calculada.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.f",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "diagnóstico do mercado (7.7.2 da Parte 1)",
+      "kind": "human",
+      "product_baseline": "missing",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO E AGRAVADO pela execução real. O template só oferece estatística descritiva e se recusa a chamá-la de diagnóstico (templates/report.html:628-633: \"<b>Não é diagnóstico substantivo completo do mercado</b>\"), e mesmo essa tabela NÃO sai no fluxo real: no HTML da execução real `market_summary_rows = []` e o probe do texto \"Descritiva amostral\" → False, porque results_generator.py:875 lê `ctx[\"market_descriptive\"]`/`ctx[\"market_summary\"]`, chaves que build_report_context não produz. Nenhuma variável de liquidez/absorção/segmentação existe no código. Sem porta de entrada de texto livre (única ocorrência de text_area é layout.py:884).",
+      "gap": "Nem calculado nem declarável. Deveria entrar como (a) texto livre em forms.py:1462-1495 e (b) seção própria em templates/report.html antes de :628; adicionalmente `market_summary` teria de ser preenchido em worker.py:473-499 para a descritiva sequer aparecer como insumo.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.g",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "indicação do(s) método(s) e procedimento(s) utilizado(s) (Seção 8 da Parte 1)",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "present_in_report",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO por execução real. O texto sai em toda emissão (templates/report.html:216-217; no HTML real: \"Método Comparativo Direto de Dados de Mercado — tratamento científico por regressão\"). O procedimento é detalhado e verificado no render real: seção \"Especificação estatística do modelo\" com a equação (\"valor = 53594.217573888352 - 58900.410317785565*padrao_baixo - 28883.214920662638*padrao_medio + 2522.7534682214468*area + 13309.863691150835*quartos\"), a escala declarada (\"Equação na escala de ajuste (original)\" / \"A equação descreve o ajuste na escala original do alvo\"), transformações (report.html:506-516, `transform_rows = [{'variable':'padrao','transform':'encoded'}]`), coeficientes/",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.h",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "especificação da avaliação: grau de fundamentação e de precisão atingidos; demonstrativo da pontuação quando solicitado pelo contratante",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO após ataque específico. Execução real imprimiu: \"Grau de fundamentação informado: Não classificado — pontos: 12\" (report.html:314-322 e :364-367) e \"Precisão: Precisão classificada / Grau III\" com a seção dedicada :353-362 (\"Amplitude percentual informada no snapshot: 1.9404638708685393\"). Demonstrativo da pontuação: a tabela :368-383 saiu com uma linha por item e o cálculo de cada um — tabela1.item1 Pendente; item2 \"Grau III — n=30, k=4. Mínimos: I=15, II=20, III=30 (evidência: calculated)\"; item3 Pendente; item4 \"Grau III — Nenhuma extrapolação\"; item5 \"Grau III — Pior p-valor entre regressores: 0.0000\"; item6 \"Grau III — F-prob: 0.0000\". A pontuação por item É o grau do item (m",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.i",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "planilha dos dados utilizados",
+      "kind": "table",
+      "product_baseline": "partial",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "REBAIXADO de EMITTED para PARTIAL. O que É emitido, comprovado na execução real: \"Registros efetivamente usados (integral)\" com os 30 de 30 identificadores, uma coluna por variável e os valores do arquivo do usuário (`used_value_columns = ['id','area','quartos','padrao','valor']`; linha 1 = R000000 / E1 / 50 / 1 / baixo / 134697.08), declaração antitruncamento (\"Não há truncamento às primeiras 200 linhas\"), seção \"Registros excluídos (integral)\" (\"Nenhum excluded_row_id no snapshot\") e o anexo integral com os 30 ids; mais o cotejo n recebido/observado/preparado/efetivo/excluído (report.html:300-312). O que NÃO é emitido: as colunas Fonte e Justificativa por elemento saíram, em todas as 30 li",
+      "gap": "A planilha entrega os DADOS integralmente, mas nunca a procedência por elemento: as colunas Fonte e Justificativa são estruturalmente mortas no fluxo real (nenhum produtor escreve as chaves que o laudo lê). É o mesmo defeito de camada do campo de arbítrio, e é o que mantém o item 3 da Tabela 1 (\"Identificação dos dados de mercado\") em \"Pendente\", além de bloquear 9.2.1.1.c (endereços e fontes dos dados para Grau III). Deveria ser corrigido em backend/worker.py:337-359 `_rows_for_ids` (propagar fonte/justificativa por linha) com porta de entrada correspondente na importação. Mérito preservado: a ausência é impressa como pendência explícita, sem fabricar procedência.",
+      "owner": "C02",
+      "owner_detail": "C02"
+    },
+    {
+      "id": "10.1.j",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "método comparativo: descrição das variáveis do modelo, com o critério de enquadramento de cada característica dos elementos amostrais e a escala das diferenças qualitativas",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "present_in_report",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO e confirmado empiricamente. A tabela \"Significado das variáveis na especificação\" (report.html:491-505) saiu no render real, mas com texto genérico de template de string: para 'const' → \"Termo constante da especificação ajustada\"; para 'padrao_baixo', 'padrao_medio', 'area', 'quartos' → \"Coeficiente da variável 'X' na especificação ajustada. Não é interpretação causal nem elasticidade além do que o snapshot declara\" (gerado em modules/report_presenter/formula.py:169-190). \"Transformações das variáveis explicativas\" saiu com `[{'variable':'padrao','transform':'encoded'}]` — diz QUE foi codificada, não COMO. Probe do texto \"enquadramento\" no laudo real → False. A taxonomia existe no",
+      "gap": "Faltam as duas metades específicas: (1) o critério de enquadramento de cada característica dos elementos amostrais (como 'padrao' baixo/medio/alto foi classificado e codificado) e (2) a escala das diferenças qualitativas (os `scale_values` dos códigos alocados/ajustados e as categorias observadas). backend/worker.py:923-955 só infere `kind` como \"categorical\" ou \"quantitative\", nunca allocated_code/adjusted_code, e não há porta para declarar a escala construída. Deveria entrar como enriquecimento de formula.py:169-190 (lendo kind/categories/scale_values dos eixos) e nova tabela após report.html:505.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.k",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "tratamento dos dados e identificação do resultado: cálculos efetuados, campo de arbítrio se for o caso, justificativas do resultado adotado e o gráfico de preços observados versus valores estimados",
+      "kind": "calculated",
+      "product_baseline": "partial",
+      "verified_layer": "calculated_only",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "PARTIAL MANTIDO, MAS COM GAP PIOR E DONO DIFERENTE — a alegação anterior de que o CAMPO DE ARBÍTRIO era EMITTED estava baseada na fixture de teste, não no produto. Na execução real do pipeline o laudo imprime \"Campo de arbítrio (intervalo de arbitragem): —\" (real2.html linha 285-286), porque `snapshot.value.arbitration_interval` é null (verificado no snapshot real: point 367371.0099, mean_ci80 e prediction_interval preenchidos, `arbitration_interval: null`, `admissible_interval: null`). O valor É CALCULADO e depois DESCARTADO: chamando modules/nbr14653_validation.py:107 `assess_normative` com o mesmo central_estimate deste run, `intervals.arbitration_interval = {lower: 312265.3584262641, upp",
+      "gap": "Três faltas distintas: (1) CAMPO DE ARBÍTRIO calculado e nunca apresentado — corrigir em backend/worker.py:1589-1652 `_map_validation` / worker.py:633-665, propagando `intervals.arbitration_interval` para `snapshot.value` (dono C02, não C03; o laudo já tem a linha pronta em report.html:288). NÃO confundir com `admissible_interval`, que fica pendente por motivo declarado e honesto (\"adopted_estimator não declarado\", normative_rules.py:781-800) — isso é recusa correta, não defeito. (2) Falta a justificativa do resultado adotado pelo profissional (por que este ponto, por que dentro/fora do campo de arbítrio, por que este modelo entre as alternativas de report.html:573-583) — texto livre em form",
+      "owner": "C02",
+      "owner_detail": "C02"
+    },
+    {
+      "id": "10.1.l",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "resultado da avaliação e sua data de referência",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO por execução real. Resultado: report.html:263-266 imprimiu \"Estimativa pontual: R$ 367.371,01 (armazenado: 367371.009913252; arredondamento de resumo com 2 casas)\" mais a tabela :272-297. Data de referência: porta em frontend/components/forms.py:1462-1474 (checkbox + `st.date_input(\"Data da avaliação (data-base)\")`) → forms.py:401 → aceita no request_spec validado de POST /jobs (backend/api.py:1022/:367) → backend/worker.py:475 → report.html:237-241; no render real saiu \"Data-base (referência): 2026-03-15\", com \"Data de emissão desta minuta: 2026-09-12T03:38:36+00:00\" e \"Data de vistoria (informada no pedido, sem comprovar realização): 2026-03-10\" como campos distintos. Quando aus"
+    },
+    {
+      "id": "10.1.m",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "qualificação legal completa e assinatura do(s) profissional(is) responsável(is)",
+      "kind": "human",
+      "product_baseline": "missing",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO e confirmado no laudo real. Probes de texto no HTML da execução real: \"qualifica\" → False, \"assinatura\" → False. Nenhum campo de nome, CREA/CAU, ART/RRT ou bloco de assinatura: `grep -rni \"crea|\\bcau\\b|responsavel_tecnico|signer|assinatura|qualificacao_legal|art_numero\" --include=*.py modules/ frontend/ backend/` só acha modules/qualification_profile/claims.py:131-136, onde \"art\", \"rrt\", \"crea\", \"cau\", \"assinatura digital\" figuram como `_SUBSTITUTE_KEYWORDS`, isto é, substitutos PROIBIDOS de ato institucional — o oposto de um campo de qualificação. O documento real se identifica como \"CONFENGE MODELA PRO — Minuta técnica para revisão profissional\" com o banner \"Este documento não ",
+      "gap": "Sem porta de entrada — por isso MISSING e não HUMAN. Deveriam entrar nome, registro profissional (CREA/CAU), número de ART/RRT e bloco de assinatura em frontend/components/forms.py:1462-1495, propagados em worker.py:473-499 e impressos em seção final de templates/report.html antes do rodapé :798-801, com a ressalva de projeto de que declaração do profissional não pode ser reciclada como evidência de aceitação institucional (vedação de claims.py:131-136).",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "meci.3.4.1.grau_ii",
+      "clause": "MECI-202400940-VER01, item 3.4.1",
+      "requirement": "Permitir DEFINIR o Grau de Fundamentação II como alvo e REPORTAR o grau atingido no laudo (MECI 3.4.1).",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "SUSTENTADO apos checagem adicional que o levantamento anterior NAO fez: verifiquei se o alvo e apenas escrito ou realmente CONSUMIDO. Ele e consumido: modules/optimal_combination.py:611-624 le evaluation_policy.minimum_fundamentacao_grade (fallbacks min_fundamentacao_grade/target_degree) em classify_admissibility e zera framing_ok com reason 'min_fundamentacao_grade_not_met' quando grau_fundamentacao < alvo (chamado em :1692,:1705,:1726,:1732,:1785,:1875); modules/optimal_combination.py:1761-1768 usa o mesmo alvo como degree do build_model; modules/nbr14653_validation.py:791-797 define validation_result.is_valid = grau_fundamentacao >= target_degree. A ponte que garante que o alvo escrito em",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "meci.3.4.1.justificativa_grau_i",
+      "clause": "MECI-202400940-VER01, item 3.4.1",
+      "requirement": "Havendo Grau I, existir campo para a JUSTIFICATIVA exigida pelo MECI 3.4.1 ('Grau I admitido somente com justificativa').",
+      "kind": "calculated",
+      "product_baseline": "missing",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "MISSING RE-VERIFICADO com grep insensivel a acento (o levantamento anterior errou um grep por acento em outro item, por isso refiz todos). grep -rniE 'justificativ|justification' em modules/, backend/ e frontend/ devolve apenas tres classes de acerto, nenhuma sobre grau: (i) justificativa POR LINHA da amostra — modules/results_generator.py:648,655,675,682-693,778,783,1502 e modules/templates/report.html:675,688 (coluna 'Justificativa' da tabela de comparaveis), que e justificativa de inclusao/exclusao de comparavel; (ii) modules/variable_schema.py:310 — que EU ABRI para nao deixar candidato sem checar: e policy.get('justification') dentro de _grouping_for(spec, column), isto e justificativa ",
+      "gap": "Nao existe porta de entrada para a justificativa de adocao do Grau I e nada disso chega ao laudo. Onde deveria entrar: na RequestSpec ao lado de search_policy.minimum_fundamentacao_grade (frontend/components/forms.py:334, backend/api.py:481), propagada por modules/pro_workflow/workflow_context.py:105-114 e renderizada na secao 'Fundamentação' de modules/templates/report.html:364.",
+      "owner": "C02",
+      "owner_detail": "C02"
+    },
+    {
+      "id": "meci.3.2.2.mcddm",
+      "clause": "MECI-202400940-VER01, item 3.2.2",
+      "requirement": "O método padrão do produto é o comparativo direto de dados de mercado com tratamento por regressão linear (MECI 3.2.2).",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "EMITTED mantido e a RESSALVA DO LEVANTAMENTO ANTERIOR REFUTADA: ele afirmou que 'o laudo nunca NOMEIA a metodologia'. Isso e falso — modules/templates/report.html:217, no subtitulo do documento, diz literalmente 'Método Comparativo Direto de Dados de Mercado — tratamento científico por regressão.'. O grep anterior ('metodo|method') falhou por acento; grep -ni 'metodolog|comparativo direto|method' em report.html acha :217 e :567. Execucao propria: compose_report_html(known_snapshot, known_context) -> html.count('Método Comparativo Direto')==1. Motor: modules/model_builder.py:1101 'ols = sm.OLS(y_used, X_design, hasconst=has_intercept)' e grep -rn 'sm.OLS|RLM|WLS|GLM|QuantReg' em modules/*.py ",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "normas.12.1.16.tabela_anexa",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), item 12.1.16.1",
+      "requirement": "Apresentar em TABELA ANEXA o demonstrativo da pontuação atingida para enquadramento nos graus de fundamentação e precisão (Normas para elaboração de laudos, 12.1.16.1).",
+      "kind": "table",
+      "product_baseline": "partial",
+      "verified_layer": "calculated_only",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "PARTIAL CONFIRMADO por inspecao propria das duas camadas. CALCULADO: modules/nbr14653_validation.py:372-383 (_item_payload) monta cada item com a chave 'points' (com fallback points=grade quando ausente) e :309-314 devolve fundamentacao.grade/points/items. APRESENTADO perde a chave — execucao propria com as fixtures reais: build_report_view(known_snapshot, known_context) devolveu item_scores[0] == {'item': 1, 'description': 'Caracterização do imóvel avaliando', 'grau_label': 'Grau II', 'detail': 'declarado pelo solicitante', 'evidence_status': 'declared'}, sem nenhuma chave de pontos, embora o item do snapshot traga grade=2. Cabecalho real da tabela, lido em modules/templates/report.html:371",
+      "gap": "(a) A pontuacao POR ITEM e calculada e nao e apresentada: so o total chega ao laudo. Ponto exato da queda: modules/results_generator.py:992-1006, que monta cada entrada de item_scores com item/description/grau_label/detail/evidence_status e nunca copia item.get('points'). (b) A tabela nao e ANEXA: fica no corpo, na secao 'Fundamentação' (modules/templates/report.html:364-386); o unico <div class=\"annex\"> e report.html:735 (lista de identificadores usados/excluidos). Correcao: incluir 'points' no dict de results_generator.py:992-1006, acrescentar a coluna no cabecalho de report.html:371 e mover o bloco para dentro de um <div class=\"annex\">.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "normas.12.1.15.graficos",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), item 12.1.15",
+      "requirement": "Gráfico de resíduos E gráfico de preços observados versus estimados chegarem ao laudo (Normas para elaboração de laudos, 12.1.15).",
+      "kind": "chart",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "EMITTED mantido, mas UMA DAS PROVAS DO LEVANTAMENTO ANTERIOR ESTA REFUTADA e substituida pela minha. REFUTACAO: ele citou 'pytest tests/c08_report/test_a04_layout.py -q -> 1 passed (PDF real)' como prova de que os graficos chegam ao laudo. Os asserts desse teste (tests/c08_report/test_a04_layout.py:22-24: 'Resíduos versus valores ajustados', 'Histograma dos resíduos', 'Observado versus estimado' in html) sao satisfeitos por TEXTO ESTATICO do template — modules/templates/report.html:582-584, o paragrafo 'Legendas em português (quando renderizados): ...' — e passariam com zero imagens. Confirmei: compose_report_html(known_snapshot, known_context) sozinho produz html.count('class=\"chart-img\"')=",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "normas.12.1.8.geolocalizacao",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), itens 12.1.8 e 12.1.9",
+      "requirement": "Registrar geolocalização do avaliando e de TODOS os elementos amostrais em graus decimais, com endereço completo e fonte por dado (itens 12.1.8/12.1.9).",
+      "kind": "calculated",
+      "product_baseline": "missing",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "MISSING RE-VERIFICADO por mim com grep insensivel a acento e mais amplo que o do levantamento anterior: grep -rniE 'latitud|longitud|lat_?long|coorden|geoloc|graus decimais|utm|easting' em modules/, backend/, frontend/ e profiles/ (--include=*.py --include=*.html --include=*.json, sem __pycache__) devolve UMA unica linha, e ela e texto documental: profiles/institutions/bb-meci-avaliacao-imovel-pf.json:105 'Geolocalização do avaliando e de TODOS os elementos amostrais em graus decimais; planilha de amostra com dados numerados, endereço completo, coordenadas, fonte e as variáveis utilizadas ou dispensadas.' — requisito bb.dados_estruturados com verification='documental', portanto fora de qualq",
+      "gap": "O produto nao tem conceito de geolocalizacao: nenhum campo de coordenada, nenhuma validacao de par lat/long, nenhuma normalizacao para graus decimais, nenhuma coordenada do avaliando. O unico transporte e generico e nao satisfaz o requisito (modules/results_generator.py:643-665 _index_rows e :688-698 _ledger_rows repassam colunas arbitrarias da planilha para report.html:672-700 e para o anexo :735 — colunas 'lat'/'long' sairiam como celulas quaisquer, sem reconhecimento nem verificacao). Onde deveria entrar: modules/variable_schema.py e modules/data_loader.py como campos obrigatorios de coordenada e endereco por elemento amostral; no subject/avaliando da RequestSpec (backend/worker.py, conte",
+      "owner": "C02",
+      "owner_detail": "C02"
+    },
+    {
+      "id": "abnt.9.2.1.1.elasticidades",
+      "clause": "ABNT NBR 14653-2:2011, item 9.2.1.1 b)",
+      "requirement": "Para o Grau III, analisar as ELASTICIDADES em torno do ponto de estimação (NBR 14653-2, 9.2.1.1).",
+      "kind": "calculated",
+      "product_baseline": "missing",
+      "verified_layer": "absent",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "MISSING RE-VERIFICADO com grep insensivel a acento: grep -rniE 'elasticid|elastici' em modules/, backend/ e frontend/ (.py e .html, sem __pycache__) devolve exatamente cinco linhas, em duas classes. (i) TEXTO da exigencia, em modulo de regras, nao em modulo de calculo: modules/normative_rules.py:1535,:1537,:2668,:2671. (ii) NEGACAO explicita no apresentador: modules/report_presenter/formula.py:187 — 'Não é interpretação causal nem elasticidade além do que o snapshot declara.' ZERO ocorrencias em modules/model_builder.py, modules/model_evaluation.py, modules/results_generator.py e modules/templates/report.html. Execucao propria: no HTML renderizado html.count('elastic')==2, ambas a frase de n",
+      "gap": "Nada e calculado nem apresentado, e o laudo declara expressamente que NAO faz essa analise. NAO e HUMAN: profiles/normative/abnt-14653-2-regressao-mercado.json e modules/normative_rules.py:2671 registram que 'As elasticidades sao calculaveis; a COERENCIA com o mercado e juizo profissional' — so a coerencia e humana, o numero e obrigacao do software, e nao existe porta de entrada para ele tampouco. Onde deveria entrar: calculo em modules/model_evaluation.py (elasticidade no ponto de estimacao, d ln y / d ln x, a partir dos coeficientes e do design do avaliando ja disponiveis em modules/model_builder.py:1101) e apresentacao em modules/templates/report.html junto a tabela de coeficientes (regia",
+      "owner": "C01",
+      "owner_detail": "C01"
+    }
+  ],
+  "output_conformance_note": "Linha de base apurada em 2026-09-12 por verificação no código E execução do pipeline REAL de produção (backend.worker.compose_valuation_job), não por inferência e não por render de fixture de teste. Essa distinção derrubou vários itens: o template do laudo renderiza seções que o construtor de contexto de produção (build_report_context) não alimenta, de modo que existem trechos do laudo que são código morto em produção embora passem nos testes."
 }
