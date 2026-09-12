@@ -1,0 +1,92 @@
+{
+  "id": "abnt-14653-2-custo-reedicao",
+  "version": "0.1.0",
+  "kind": "normative",
+  "state": "blocked_external_evidence",
+  "label": "Custo de reedição de benfeitoria por método da quantificação de custo",
+  "purpose": "seguro",
+  "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
+  "value_basis": "custo_de_reedicao",
+  "method": "metodo_quantificacao_de_custo",
+  "asset_scope": "benfeitoria_imovel_urbano",
+  "primary_edition": "ABNT NBR 14653-2:2011",
+  "implemented_requirements_label": "Tabela 6 e Tabela 7 (enquadramento); rota de cálculo pendente",
+  "minimum_fundamentacao_grade": null,
+  "sources": [
+    {
+      "id": "abnt-nbr-14653-2-2011",
+      "kind": "norma_tecnica",
+      "title": "ABNT NBR 14653-2:2011 — Imóveis urbanos",
+      "edition_or_version": "2011 (1ª edição)",
+      "sha256": "8fed8e7cf52187f7a46cada34685b70c517f32a2333d498295ea4f09e2668896",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "access": "exemplar licenciado disponibilizado localmente pelo responsável do projeto",
+      "redistribution": "proibida — apenas âncoras de cláusula e critérios parafraseados",
+      "currency_status": "edition_on_hand_verified_currency_unconfirmed"
+    },
+    {
+      "id": "abnt-nbr-14653-1-2019",
+      "kind": "norma_tecnica",
+      "title": "ABNT NBR 14653-1:2019 — Procedimentos gerais",
+      "edition_or_version": "2019 (2ª edição)",
+      "sha256": "125eeed437c28a07691bfef72eaf4a3c9e1a3a1720e6a5e2cce1e548a02fcc92",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "access": "exemplar licenciado disponibilizado localmente pelo responsável do projeto",
+      "redistribution": "proibida — apenas âncoras de cláusula e critérios parafraseados",
+      "currency_status": "edition_on_hand_verified_currency_unconfirmed"
+    }
+  ],
+  "act_type_established": "nenhum_ato_identificado",
+  "notes": [
+    "A REGRA de enquadramento (Tabelas 6 e 7) está implementada em classify_custo_fundamentacao.",
+    "A ROTA DE CÁLCULO do custo não está implementada: depende de insumos de custo (CUB por região/padrão, projeto padrão da ABNT NBR 12721) que NÃO foram obtidos nesta campanha.",
+    "É vedado converter preço de mercado em custo por coeficiente: valor de mercado (3.1.47) e custo de reedição (3.1.11.3) são grandezas distintas. O guard value_basis_guard recusa essa conversão.",
+    "Enquanto o estado for blocked_external_evidence, este perfil NÃO habilita emissão qualificada."
+  ],
+  "decisive_rules": [
+    "tabela6_7.custo.enquadramento",
+    "parte1.bases_de_valor",
+    "metodos.custo.calculo"
+  ],
+  "requirements": [
+    {
+      "id": "tabela6.item1",
+      "clause": "Tabela 6 item 1",
+      "requirement": "Estimativa do custo direto: orçamento no mínimo sintético (III); CUB para projeto semelhante ao padrão (II); CUB para projeto diferente do padrão, com ajustes (I).",
+      "verification": "documental",
+      "state": "blocked_external_evidence"
+    },
+    {
+      "id": "tabela6.item2",
+      "clause": "Tabela 6 item 2",
+      "requirement": "BDI: calculado (III); justificado (II); arbitrado (I).",
+      "verification": "documental",
+      "state": "blocked_external_evidence"
+    },
+    {
+      "id": "tabela6.item3",
+      "clause": "Tabela 6 item 3",
+      "requirement": "Depreciação física: por levantamento do custo de recuperação ou bem novo (III); por métodos técnicos consagrados considerando idade, vida útil e estado de conservação (II); arbitrada (I).",
+      "verification": "documental",
+      "state": "blocked_external_evidence"
+    },
+    {
+      "id": "9.3.1.laudo_completo",
+      "clause": "9.3.1",
+      "requirement": "Para o Grau III é obrigatória a apresentação do laudo na modalidade completa.",
+      "verification": "professional_evidenced",
+      "applies_when": "targets_grau_iii"
+    },
+    {
+      "id": "metodos.custo.calculo",
+      "clause": "9.3",
+      "requirement": "Memória de cálculo do custo com os insumos identificados (série CUB vigente por região e padrão, ou orçamento sintético), BDI e depreciação.",
+      "verification": "calculated",
+      "state": "blocked_external_evidence",
+      "criterion_ref": "handoff C05→C01: rota de cálculo de custo"
+    }
+  ],
+  "source_set_sha256": "48b82b024c2e7da2137978d521442ef4091f61c8031d1825858af30c367c4209"
+}

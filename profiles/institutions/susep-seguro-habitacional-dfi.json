@@ -1,0 +1,166 @@
+{
+  "id": "susep-seguro-habitacional-dfi",
+  "version": "0.2.0",
+  "kind": "institution",
+  "state": "pending",
+  "label": "Seguro habitacional — cobertura DFI (danos físicos ao imóvel), conforme Res. CNSP 447/2022",
+  "recipient_id": "seguradora-do-ramo-habitacional",
+  "regulator": "SUSEP / CNSP",
+  "purpose": "seguro",
+  "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
+  "value_basis": "limite_maximo_de_garantia",
+  "value_basis_state": "blocked_external_evidence",
+  "method": "definicao_contratual_apolice",
+  "asset_scope": "imovel_urbano_residencial_financiado",
+  "act_type_established": "regra_contratual_ou_regulatoria",
+  "sources": [
+    {
+      "id": "resolucao-cnsp-447-2022",
+      "kind": "ato_regulatorio",
+      "title": "Resolução CNSP nº 447, de 10 de outubro de 2022",
+      "edition_or_version": "447/2022, publicada no DOU de 14/10/2022, Edição 196, Seção 1, p. 82",
+      "url": "https://www.gov.br/susep/pt-br/arquivos/arquivos-dos-documentos-e-publicacoes/arquivos-normas-em-consulta-publica/normas-publicadas/resolucaocnsp447.pdf",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "Arts. 8º §2º, 17, 18, 19 e §§1º-2º, 22, 30, 39, 41, 42 e 43",
+      "provenance_note": "PDF de 8 páginas, 186.092 bytes, baixado do próprio servidor gov.br/susep e conferido verbatim em revisão independente",
+      "currency_status": "conferido_como_publicado_no_DOU_14_10_2022_texto_consolidado_nao_obtido"
+    },
+    {
+      "id": "abnt-nbr-14653-1-2019",
+      "kind": "norma_tecnica",
+      "title": "ABNT NBR 14653-1:2019 — Procedimentos gerais",
+      "edition_or_version": "2019 (2ª edição)",
+      "sha256": "125eeed437c28a07691bfef72eaf4a3c9e1a3a1720e6a5e2cce1e548a02fcc92",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "3.1.47 valor de mercado; 3.1.51 valor em risco; 3.1.11.3/3.1.11.5/3.1.11.6 custos; Seção 6 a) b)"
+    }
+  ],
+  "minimum_fundamentacao_grade": null,
+  "decisive_rules": [
+    "parte1.bases_de_valor",
+    "dfi.base_de_valor",
+    "dfi.condicoes_contratuais"
+  ],
+  "verified_rules": [
+    {
+      "clause": "Art. 17",
+      "what": "O LMG é o valor máximo que a seguradora suportará em um eventual sinistro, para as coberturas contratadas."
+    },
+    {
+      "clause": "Art. 18",
+      "what": "LMG da cobertura MIP = valor do saldo devedor do financiamento, a cada mês. Não envolve avaliação de imóvel."
+    },
+    {
+      "clause": "Art. 19",
+      "what": "LMG da cobertura DFI = valor da avaliação INICIAL do imóvel, aquela que serviu de base para a operação de financiamento, atualizado por índice convencionado no contrato de seguro. A norma NÃO manda refazer a avaliação: ancora o teto na avaliação original do crédito e apenas a indexa."
+    },
+    {
+      "clause": "Art. 19, §1º",
+      "what": "O índice convencionado deve ser igual ao do contrato de financiamento, caso este tenha cláusula de atualização. Nenhum índice é nomeado (não TR, INCC, IPCA ou IGP-M)."
+    },
+    {
+      "clause": "Art. 19, §2º",
+      "what": "Sem cláusula de atualização no financiamento, índice E periodicidade vêm do contrato de seguro. A Resolução não fixa periodicidade alguma."
+    },
+    {
+      "clause": "Art. 22",
+      "what": "As taxas do prêmio de DFI incidem sobre o LMG do art. 19 — o valor de avaliação atualizado determina também a precificação, não só a indenização."
+    },
+    {
+      "clause": "Art. 30",
+      "what": "Base indenizatória do DFI: valor necessário à REPOSIÇÃO do imóvel ao estado equivalente ao que se encontrava imediatamente antes do sinistro, respeitado o LMG vigente na data do sinistro."
+    },
+    {
+      "clause": "Art. 8º, §2º",
+      "what": "Inabitabilidade por sinistro coberto em DFI gera indenização correspondente aos encargos mensais do financiamento, respeitado o LMG do art. 19."
+    },
+    {
+      "clause": "Art. 42",
+      "what": "Revoga expressamente as Resoluções CNSP nº 205/2009 e nº 212/2010."
+    },
+    {
+      "clause": "Art. 43",
+      "what": "Entra em vigor em 1º de novembro de 2022; planos anteriores tinham 180 dias para adaptação (Art. 39)."
+    },
+    {
+      "clause": "Art. 41",
+      "what": "Autoriza a SUSEP a baixar normas complementares e resolver casos omissos."
+    }
+  ],
+  "negative_finding": "Varredura de termos no texto integral: o ato NÃO contém nenhuma ocorrência de homolog*, software, sistema de avaliação, ABNT, NBR, engenheiro, arquiteto, CREA, CAU, credenciamento ou vistoria. As ocorrências de 'laudo' e 'perícia' referem-se a junta MÉDICA (Arts. 29-30, cobertura MIP), não a laudo de avaliação de imóvel. Portanto o ato não institui requisito algum sobre quem avalia, como avalia ou com que software — e não homologa nada.",
+  "value_basis_finding": {
+    "status": "NOT_ESTABLISHED",
+    "detail": "A Resolução é EXPRESSAMENTE SILENTE quanto à base de valor. O que existe são duas pontas sem a ponte entre elas: (a) um TETO procedimental (Art. 19) — o LMG é o valor da avaliação inicial do crédito, indexado; e (b) uma MEDIDA INDENIZATÓRIA de sabor reconstrutivo (Art. 30) — o valor necessário à reposição do imóvel ao estado imediatamente anterior ao sinistro. O ato não diz qual base de valor a avaliação inicial deve ter, nem como a reposição se relaciona com ela.",
+    "why_this_matters": "É precisamente a conflação que o critério A06 existe para impedir. NÃO se pode afirmar que a base de valor securitária ficou estabelecida: não ficou, em nenhum grau de confiança.",
+    "distinct_quantities": "Continuam distintas e não substituíveis: valor de mercado (ABNT NBR 14653-1:2019, 3.1.47), custo de reprodução (3.1.11.5), custo de reedição (3.1.11.3), valor em risco (3.1.51), limite máximo de garantia (cláusula contratual) e saldo devedor (grandeza financeira). Quando a finalidade exigir custo, a base é de CUSTO, pelo método da quantificação de custo (14653-2, 9.3) — nunca preço de mercado convertido por coeficiente."
+  },
+  "scope_limits": [
+    "DFI não é universalmente obrigatória: o Art. 6º, §1º, I e §2º condicionam sua exigência, de modo que nenhuma afirmação se generaliza a 'seguro habitacional' como um todo.",
+    "O regime lido é o das apólices de mercado SH/AM. O SH/SFH é universo legado, restrito a financiamentos concedidos até 31/12/2009 (Lei nº 12.409/2011).",
+    "Não se generaliza a todo seguro residencial ou patrimonial: em seguros, o tipo de valor depende do produto e do contrato."
+  ],
+  "requirements": [
+    {
+      "id": "dfi.lmg.base",
+      "clause": "Res. CNSP 447/2022, Art. 19",
+      "requirement": "Identificar o valor da avaliação inicial do imóvel que serve de base ao LMG da cobertura DFI, com data de referência explícita.",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "dfi.lmg.atualizacao",
+      "clause": "Res. CNSP 447/2022, Art. 19, §§1º e 2º",
+      "requirement": "Identificar o índice e a periodicidade de atualização convencionados, que devem acompanhar o contrato de financiamento quando este tiver cláusula de atualização.",
+      "verification": "documental",
+      "state": "pending",
+      "criterion_ref": "o índice e a periodicidade concretos vêm do contrato, que não foi obtido"
+    },
+    {
+      "id": "dfi.base_de_valor",
+      "clause": "Res. CNSP 447/2022 (silente) + ABNT NBR 14653-1:2019, Seção 6 a) b)",
+      "requirement": "Declarar a base de valor exigida pelo contrato e a finalidade (seguro), e demonstrar que o método empregado produz essa base.",
+      "verification": "documental",
+      "state": "blocked_external_evidence",
+      "criterion_ref": "o ato regulatório não define a base; ela vem das condições contratuais, não obtidas"
+    },
+    {
+      "id": "dfi.condicoes_contratuais",
+      "clause": "condições gerais da apólice",
+      "requirement": "Versão das condições contratuais, componentes incluídos e excluídos, data e índice, documentação exigida e forma de conclusão do trabalho.",
+      "verification": "documental",
+      "state": "blocked_external_evidence"
+    },
+    {
+      "id": "dfi.custo_quando_exigido",
+      "clause": "ABNT NBR 14653-2:2011, 9.3 / Tabelas 6 e 7",
+      "requirement": "Quando o contrato exigir base de custo, apresentar a memória de cálculo do custo (custo direto, BDI e depreciação física).",
+      "verification": "calculated",
+      "state": "blocked_external_evidence",
+      "criterion_ref": "rota de cálculo de custo é handoff a C01; insumo CUB/NBR 12721 não obtido"
+    }
+  ],
+  "what_this_profile_is_not": [
+    "Não é homologação de software por seguradora ou pela SUSEP.",
+    "Não é aceitação de laudo por seguradora alguma. Nenhuma seguradora avaliou este produto."
+  ],
+  "blocked_external_evidence": {
+    "exact_material": [
+      "Condições gerais, nota técnica ou apólice de um produto de seguro habitacional efetivamente comercializado — define a base de valor, componentes incluídos/excluídos, índice e documentação. É o item que bloqueia A06.",
+      "Circular SUSEP nº 677/2022 — instrumento editado sob o Art. 41 e locus plausível do detalhe operacional; nunca recuperada nesta campanha.",
+      "Texto CONSOLIDADO da Res. CNSP 447/2022 com os campos 'Alterada por' / 'Revogada por', para certificar ausência de alteração entre 01/11/2022 e 2026-09-11 (a base normativa da SUSEP respondeu HTTP 503)."
+    ],
+    "responsible": "titular do projeto, por via autorizada. Nenhuma compra, contato institucional ou envio de dados foi realizado nesta campanha.",
+    "wording_rule": "Toda afirmação deste perfil é tensada 'conforme publicado no DOU de 14/10/2022'. NUNCA 'vigente': o texto consolidado e os campos de alteração não foram obtidos."
+  },
+  "acceptance_criterion_status": {
+    "criterion": "C05-A06",
+    "verdict": "NOT_MET — BLOCKED_EXTERNAL_EVIDENCE",
+    "reasoning": "A regra do LMG está conferida em fonte primária e a moldura regulatória está identificada, mas A06 exige base de valor CORRETA com regra/memória E contrato conferidos. A base de valor não foi estabelecida (o ato é silente) e nenhuma condição contratual de produto comercializado foi obtida. A alegação de perfil securitário fica bloqueada."
+  },
+  "notes": [
+    "state='pending' impede ready_for_professional_signoff para este perfil, por construção.",
+    "Ausência de aceite de seguradora não é aprovação implícita nem proibição de vender com alegação mais restrita: é a alegação 'aceito pela instituição' que fica bloqueada."
+  ],
+  "source_set_sha256": "22c6b591e6f4effaae3ed1de76c0fec4eb77b63ea1638ab408210fce613bc894"
+}

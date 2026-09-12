@@ -1,0 +1,116 @@
+{
+  "id": "abnt-14653-2-regressao-mercado",
+  "version": "1.0.0",
+  "kind": "normative",
+  "state": "verified",
+  "label": "Valor de mercado de imóvel urbano por método comparativo direto com regressão",
+  "purpose": "garantia",
+  "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
+  "value_basis": "valor_de_mercado",
+  "method": "metodo_comparativo_direto_regressao",
+  "asset_scope": "imovel_urbano",
+  "primary_edition": "ABNT NBR 14653-2:2011",
+  "implemented_requirements_label": "Tabela 1 (itens 1–6), Tabela 2, Tabela 5, 8.2.1.5 e Anexo A.2/A.3.1",
+  "minimum_fundamentacao_grade": null,
+  "sources": [
+    {
+      "id": "abnt-nbr-14653-2-2011",
+      "kind": "norma_tecnica",
+      "title": "ABNT NBR 14653-2:2011 — Imóveis urbanos",
+      "edition_or_version": "2011 (1ª edição)",
+      "sha256": "8fed8e7cf52187f7a46cada34685b70c517f32a2333d498295ea4f09e2668896",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "access": "exemplar licenciado disponibilizado localmente pelo responsável do projeto",
+      "redistribution": "proibida — apenas âncoras de cláusula e critérios parafraseados",
+      "currency_status": "edition_on_hand_verified_currency_unconfirmed"
+    },
+    {
+      "id": "abnt-nbr-14653-1-2019",
+      "kind": "norma_tecnica",
+      "title": "ABNT NBR 14653-1:2019 — Procedimentos gerais",
+      "edition_or_version": "2019 (2ª edição)",
+      "sha256": "125eeed437c28a07691bfef72eaf4a3c9e1a3a1720e6a5e2cce1e548a02fcc92",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "access": "exemplar licenciado disponibilizado localmente pelo responsável do projeto",
+      "redistribution": "proibida — apenas âncoras de cláusula e critérios parafraseados",
+      "currency_status": "edition_on_hand_verified_currency_unconfirmed"
+    }
+  ],
+  "act_type_established": "nenhum_ato_identificado",
+  "notes": [
+    "Este perfil é NORMATIVO: descreve o que a ABNT exige. Não é aceitação por instituição alguma.",
+    "O recorte anunciado é imóvel urbano, valor de mercado, método comparativo com regressão.",
+    "Tratamento por fatores (Tabelas 3–4) e os métodos involutivo/evolutivo estão fora da oferta V1.",
+    "Os pressupostos do Anexo A.2 c)–i) e A.8 NÃO são repetidos aqui: são emitidos uma única vez por assess_normative (modules.normative_rules.PRESSUPOSTOS). Deve haver um só classificador normativo em produção."
+  ],
+  "decisive_rules": [
+    "tabela1.item2",
+    "tabela1.item4",
+    "tabela1.item5",
+    "tabela1.item6",
+    "anexoA.2.micronumerosidade",
+    "parte1.bases_de_valor"
+  ],
+  "requirements": [
+    {
+      "id": "9.2.1.1.a",
+      "clause": "9.2.1.1 a)",
+      "requirement": "Apresentação do laudo na modalidade completa (obrigatório para o Grau III).",
+      "verification": "professional_evidenced",
+      "applies_when": "targets_grau_iii"
+    },
+    {
+      "id": "9.2.1.1.b",
+      "clause": "9.2.1.1 b)",
+      "requirement": "Análise do modelo no laudo, com verificação da coerência do comportamento das variáveis em relação ao mercado e exame das elasticidades em torno do ponto de estimação.",
+      "verification": "professional_evidenced",
+      "applies_when": "targets_grau_iii",
+      "note": "As elasticidades são calculáveis; a COERÊNCIA com o mercado é juízo profissional e não é decidida por p-valor."
+    },
+    {
+      "id": "9.2.1.1.c",
+      "clause": "9.2.1.1 c)",
+      "requirement": "Identificação completa dos endereços dos dados de mercado usados no modelo e das fontes de informação.",
+      "verification": "professional_evidenced",
+      "applies_when": "targets_grau_iii"
+    },
+    {
+      "id": "9.2.1.1.d",
+      "clause": "9.2.1.1 d)",
+      "requirement": "Adoção da estimativa de tendência central.",
+      "verification": "calculated",
+      "applies_when": "targets_grau_iii"
+    },
+    {
+      "id": "parte1.6.3.vistoria",
+      "clause": "ABNT NBR 14653-1:2019 6.3.1–6.3.3",
+      "requirement": "Vistoria do imóvel avaliando; em caso excepcional, situação-paradigma acordada entre as partes e explicitada no laudo.",
+      "verification": "professional_evidenced",
+      "note": "Tabela 1 item 1 Grau I corresponde exatamente à adoção de situação-paradigma."
+    },
+    {
+      "id": "8.2.1.5.2.campo_suficiente",
+      "clause": "8.2.1.5.2 / 8.2.1.5.3",
+      "requirement": "Suficiência do campo de arbítrio (±15%) para absorver variáveis relevantes não contempladas. Sendo insuficiente, o modelo NÃO atinge o grau mínimo e o fato deve ser consignado no laudo.",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "10.1.laudo_completo",
+      "clause": "10.1 a)–m)",
+      "requirement": "Conteúdo mínimo do laudo completo: 13 itens, de identificação do solicitante a qualificação legal e assinatura do responsável.",
+      "verification": "professional_evidenced",
+      "criterion_ref": "modules.normative_rules.LAUDO_COMPLETO_ITEMS"
+    },
+    {
+      "id": "9.1.2.justificar_nao_atendidos",
+      "clause": "9.1.2",
+      "requirement": "Não atingido o Grau I, indicar e justificar os itens não atendidos e os procedimentos e cálculos utilizados.",
+      "verification": "professional_evidenced",
+      "applies_when": "grade_not_classified"
+    }
+  ],
+  "source_set_sha256": "48b82b024c2e7da2137978d521442ef4091f61c8031d1825858af30c367c4209",
+  "decisive_rules_note": "Os ids referem-se aos rule_results emitidos por assess_qualification. O item 4 é emitido como um resultado único (tabela1.item4) porque a Tabela 1 pontua o item uma vez, embora exija as duas pernas (a) medida e (b) valor — ambas conferidas por classify_item4_extrapolacao."
+}

@@ -134,6 +134,89 @@ def assess_normative(context: Mapping[str, Any]) -> Dict[str, Any]:
                 )
             )
 
+    # MP-COM/C05: Anexo A.2 a) micronumerosidade and Anexo A.2 c)-i)/A.3.1
+    # pressupostos. Neither awards points nor raises a grade; both can only
+    # expose a violation or stay pending. Absence is never conformity.
+    micro = rules.classify_micronumerosidade(
+        n, k, ctx.get("category_counts") if isinstance(ctx.get("category_counts"), Mapping) else None
+    )
+    if micro["status"] == rules.MICRO_VIOLATED:
+        for v in micro["violations"]:
+            issues.append(
+                rules.make_issue(
+                    "micronumerosidade",
+                    v["detail"],
+                    severity="error",
+                    affected_ids=["anexoA.2.micronumerosidade"],
+                )
+            )
+    elif micro["status"] == rules.MICRO_PENDING:
+        issues.append(
+            rules.make_issue(
+                "micronumerosidade_pending",
+                micro["detail"],
+                affected_ids=["anexoA.2.micronumerosidade"],
+            )
+        )
+
+    diagnostics = ctx.get("diagnostics") if isinstance(ctx.get("diagnostics"), Mapping) else {}
+    findings = ctx.get("professional_findings") if isinstance(ctx.get("professional_findings"), Mapping) else {}
+    pressupostos: List[Dict[str, Any]] = []
+    for spec in rules.PRESSUPOSTOS:
+        pid = spec["id"]
+        block = diagnostics.get(pid) if isinstance(diagnostics.get(pid), Mapping) else {}
+        pressupostos.append(
+            rules.evaluate_pressuposto(
+                pid,
+                p_value=block.get("p_value"),
+                alpha=block.get("alpha"),
+                ordering_declared=block.get("ordering_declared"),
+                professional_finding=findings.get(pid),
+            )
+        )
+    model_use_prohibited: List[Dict[str, Any]] = []
+    for pr in pressupostos:
+        if pr["status"] == rules.PRESSUPOSTO_VIOLATED:
+            spec = rules.PRESSUPOSTOS_BY_ID.get(pr["id"]) or {}
+            if spec.get("blocks_use_when_incoherent"):
+                # Anexo A.2 g) is the only clause in this block that VEDA the
+                # use of the model. It must not be reported with the same code
+                # as an ordinary violated assumption, or nothing can act on it.
+                model_use_prohibited.append({
+                    "rule_id": pr["id"],
+                    "clause": pr["clause"],
+                    "prohibition": spec.get("prohibition"),
+                    "detail": pr["detail"],
+                })
+                issues.append(
+                    rules.make_issue(
+                        "model_use_prohibited",
+                        (
+                            f"{pr['clause']}: {spec.get('prohibition')}. "
+                            f"{pr['detail']}"
+                        ),
+                        severity="error",
+                        affected_ids=[pr["id"]],
+                    )
+                )
+                continue
+            issues.append(
+                rules.make_issue(
+                    "pressuposto_violado",
+                    pr["detail"],
+                    severity="error",
+                    affected_ids=[pr["id"]],
+                )
+            )
+        elif pr["status"] in (rules.PRESSUPOSTO_PENDING, rules.PRESSUPOSTO_PROFESSIONAL):
+            issues.append(
+                rules.make_issue(
+                    "pressuposto_pendente",
+                    pr["detail"],
+                    affected_ids=[pr["id"]],
+                )
+            )
+
     stat_warns = rules.statistical_warnings(
         ctx.get("statistical"),
         significance_aux=float(getattr(config, "SIGNIFICANCE_LEVEL_AUX", 0.10)),
@@ -207,6 +290,7 @@ def assess_normative(context: Mapping[str, Any]) -> Dict[str, Any]:
             "item": r.get("item"),
             "clause": r["clause"],
             "status": r["verification_status"],
+            "destination": r.get("destination", "automatic"),
         }
         for r in rules.RULE_MATRIX
     ]
@@ -216,6 +300,7 @@ def assess_normative(context: Mapping[str, Any]) -> Dict[str, Any]:
             "edition": rules.EDITION_PART2,
             "clause": r["clause"],
             "status": "unverified",
+            "destination": r.get("destination"),
             "reason": r["reason"],
         }
         for r in rules.UNVERIFIED_RULES
@@ -249,6 +334,14 @@ def assess_normative(context: Mapping[str, Any]) -> Dict[str, Any]:
             "ready_for_professional_review não é inferido do grau. "
             "C03 não emite laudo."
         ),
+        "micronumerosidade": micro,
+        "pressupostos": pressupostos,
+        # Non-empty only when a clause that forbids using the model is
+        # violated (Anexo A.2 g). Consumers must refuse release, not warn.
+        "model_use_prohibited": model_use_prohibited,
+        "source_documents": rules.SOURCE_DOCUMENTS,
+        "cross_edition_notes": rules.CROSS_EDITION_NOTES,
+        "rule_inventory": rules.inventory_audit(),
         "unverified_rules": [r["id"] for r in rules.UNVERIFIED_RULES],
         "issues": issues,
         "n": n,
@@ -293,6 +386,9 @@ def _item_payload(item: int, description: str, result: Mapping[str, Any]) -> Dic
         "source": result.get("source"),
         "reasons": result.get("reasons") or result.get("limitations") or [],
         "provenance": result.get("provenance"),
+        # Set only by classify_documentary_item (items 1 and 3). For the
+        # calculated items it is None, which consumers must not read as False.
+        "provenance_verified": result.get("provenance_verified"),
     }
 
 
@@ -407,8 +503,10 @@ class NBRValidator:
         X: pd.DataFrame,
         y: pd.Series,
         degree: int = 1,
-        grau_item1: int = 1,
-        grau_item3: int = 1,
+        grau_item1: Optional[int] = None,
+        grau_item3: Optional[int] = None,
+        item1_provenance: Any = None,
+        item3_provenance: Any = None,
         n: Optional[int] = None,
         k: Optional[int] = None,
         intercept: Optional[bool] = None,
@@ -423,8 +521,15 @@ class NBRValidator:
         grau_precisao.
 
         n/k: if omitted, resolved without assuming intercept via shape[1]-1.
-        Legacy default of grau_item1/grau_item3 = 1 is preserved on this
-        adapter only; assess_normative does not default documentary grades.
+
+        MP-COM/C05: the documentary items 1 and 3 no longer default to Grau I.
+        Undeclared documentary items are PENDING and score 0 points, exactly
+        like assess_normative. A silent default of 1 point per undeclared
+        documentary item was enough, combined with items 2/4/5/6 at Grau III,
+        to reach 16 points and be enquadrado as Grau III without a single
+        documentary declaration or any provenance — declaração ≠ verificação
+        (Tabela 1 itens 1 e 3). Callers that really have a declared grade must
+        now pass it explicitly, together with its provenance.
         """
         messages: List[str] = []
         warnings: List[str] = []
@@ -440,21 +545,37 @@ class NBRValidator:
         n_eff, k_eff = nk["n"], nk["k"]
         warnings.extend(i["message"] for i in nk["issues"])
 
-        item1_grau = grau_item1
-        item1_detail = (
-            "Grau informado externamente (documentação/laudo), não calculável a partir da "
-            "planilha de dados. Declaração ≠ verificação (proveniência requerida)."
+        item1 = rules.classify_documentary_item(
+            1,
+            grau_item1,
+            item1_provenance,
+            description="Caracterização do imóvel avaliando",
         )
+        item1_grau = 0 if item1.get("grade") is None else int(item1["grade"])
+        item1_detail = item1.get("detail") or ""
+        if item1.get("grade") is None:
+            warnings.append(
+                "Item 1 (documental) não declarado: 0 ponto (pendente). "
+                "Ausência de declaração não vale Grau I."
+            )
 
         item2 = rules.classify_item2_quantidade_dados(n_eff, k_eff)
         item2_grau = 0 if item2["grade"] is None else int(item2["grade"])
         item2_detail = item2["detail"]
 
-        item3_grau = grau_item3
-        item3_detail = (
-            "Grau informado externamente (documentação/laudo), não calculável a partir da "
-            "planilha de dados. Declaração ≠ verificação (proveniência requerida)."
+        item3 = rules.classify_documentary_item(
+            3,
+            grau_item3,
+            item3_provenance,
+            description="Identificação dos dados de mercado",
         )
+        item3_grau = 0 if item3.get("grade") is None else int(item3["grade"])
+        item3_detail = item3.get("detail") or ""
+        if item3.get("grade") is None:
+            warnings.append(
+                "Item 3 (documental) não declarado: 0 ponto (pendente). "
+                "Ausência de declaração não vale Grau I."
+            )
 
         item4_grau = 0
         item4_detail = (

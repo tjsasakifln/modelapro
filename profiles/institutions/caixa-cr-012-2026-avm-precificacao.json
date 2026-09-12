@@ -1,0 +1,111 @@
+{
+  "id": "caixa-cr-012-2026-avm-precificacao",
+  "version": "0.1.0",
+  "kind": "institution",
+  "state": "discovery",
+  "label": "CAIXA — Relatórios de Precificação de Imóveis por AVM (credenciamento CR 012/2026)",
+  "recipient_id": "caixa-economica-federal",
+  "purpose": "garantia",
+  "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
+  "value_basis": "valor_de_mercado",
+  "method": "modelo_avaliacao_automatizada_avm",
+  "asset_scope": "imovel_urbano",
+  "act_type_established": "contratacao_de_empresa",
+  "sources": [
+    {
+      "id": "caixa-edital-cr-012-2026",
+      "kind": "edital_de_credenciamento",
+      "title": "Edital de Credenciamento CR nº 012/2026 (CECOT 12/2026) e Anexo I — Termo de Referência",
+      "edition_or_version": "CR 012/2026, sequencialDocumento 2, republicado, com AVISO A de 30/01/2026",
+      "url": "https://pncp.gov.br/api/pncp/v1/orgaos/00360305000104/compras/2026/46/arquivos/2",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "itens 1.1/1.2 objeto; 4.5.5.1-4.5.5.3 responsáveis técnicos; Anexo I 2.2/2.3 requisitos e formato; 17.x entrega; 19.9-19.11 relatório do modelo e fluxo pareado; 20.6-20.14 erro, suspensão e versionamento; contrato XLIV/LIV",
+      "provenance_note": "publicado pela própria CAIXA no PNCP (fonte primária); 94 páginas, rebaixado e verificado byte a byte"
+    },
+    {
+      "id": "pncp-registro-00360305000104-1-000046-2026",
+      "kind": "registro_oficial",
+      "title": "PNCP — registro oficial da contratação 00360305000104-1-000046/2026",
+      "edition_or_version": "consultado em 2026-09-11",
+      "url": "https://pncp.gov.br/api/consulta/v1/orgaos/00360305000104/compras/2026/46",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "modalidadeId 12 'Credenciamento'; amparo legal inexigibilidade; existeResultado=false"
+    }
+  ],
+  "minimum_fundamentacao_grade": null,
+  "decisive_rules": [
+    "caixa.escopo_nao_e_laudo"
+  ],
+  "scope_warning": "ESCOPO QUE DEVE VIAJAR COM TODA CITAÇÃO: este edital governa RELATÓRIOS DE PRECIFICAÇÃO por AVM (Modelo de Avaliação Automatizada), não laudos de avaliação. No texto lido, 'laudo' ocorre ZERO vezes e 'ABNT' ocorre ZERO vezes. Ele portanto NÃO estabelece nada sobre como a CAIXA especifica, verifica ou aceita um laudo de avaliação — que é exatamente o que o produto produz.",
+  "what_this_profile_is_not": [
+    "Não é homologação de software de avaliação pela CAIXA.",
+    "Não é credenciamento de profissional pessoa física: credencia EMPRESAS.",
+    "Não é um modelo de laudo nem um requisito de laudo.",
+    "A vedação contratual (inciso LIV) ao uso de 'sistemas não homologados pela CAIXA' como INTERMEDIÁRIOS no envio de dados é controle de segurança da informação imposto à contratada — não institui programa de homologação de software de avaliação.",
+    "A 'homologação' do MODELO AVM por cidade após 30 dias de fluxo pareado (Anexo I 19.10) é porta de aceitação do modelo de um fornecedor contratado, não certificação de produto de mercado."
+  ],
+  "requirements": [
+    {
+      "id": "caixa.escopo_nao_e_laudo",
+      "clause": "Edital CR 012/2026, item 1.1 e Anexo I item 1.2",
+      "requirement": "O objeto é o fornecimento, por empresa credenciada, de Relatórios de Precificação de Imóveis baseados em AVM para lastrear garantias imobiliárias, sob as Resoluções BACEN 4.676/2018 e 4.754/2019.",
+      "verification": "documental",
+      "criterion_ref": "Perfil de precificação AVM; não é o perfil de laudo do produto."
+    },
+    {
+      "id": "caixa.formato_de_intercambio",
+      "clause": "Anexo I — Termo de Referência, item 2.3",
+      "requirement": "Exportação obrigatória em .pdf e .csv, com entrega por API ou outra integração imediata definida pela CAIXA. É o único requisito de formato explícito: não há schema, layout de campos nem XML especificado.",
+      "verification": "documental"
+    },
+    {
+      "id": "caixa.relatorio_do_modelo",
+      "clause": "Anexo I, itens 19.9.1 e 19.9.1.1",
+      "requirement": "Relatório do modelo por cidade/região metropolitana divulgando construção do modelo, algoritmo, bibliotecas, hiperparâmetros e análise exploratória dos dados, renovado a cada atualização do modelo.",
+      "verification": "documental"
+    },
+    {
+      "id": "caixa.versionamento",
+      "clause": "Anexo I, item 20.14",
+      "requirement": "Controle de versão e de vigência dos modelos, disponíveis pelo prazo do contrato.",
+      "verification": "documental",
+      "criterion_ref": "É o único requisito de VERSIONAMENTO obtido como regra enunciada em fonte primária nesta campanha."
+    },
+    {
+      "id": "caixa.responsabilidade_tecnica",
+      "clause": "Edital, itens 4.5.5.1 a 4.5.5.3 e 4.5.1.1/4.5.2.x",
+      "requirement": "Três responsáveis técnicos nominais: pós-graduado em Ciência de Dados (mín. 360h) pelo modelo AVM; Engenheiro Civil ou Arquiteto com pós-graduação em Avaliações de Imóveis (mín. 360h) pela análise das precificações; e graduado em Engenharia Civil ou Arquitetura pela inserção de dados e emissão do relatório. Habilitação exige certidão de pessoa jurídica no CREA/CAU.",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "caixa.art_rrt_contratual",
+      "clause": "Contrato anexo, obrigações da CONTRATADA inciso XLIV e cláusula de pagamento §5º II",
+      "requirement": "Emissão de ART (CREA) ou RRT (CAU) da totalidade dos serviços mensais, apresentada junto à nota fiscal como condição de pagamento.",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "caixa.laudo_requisitos",
+      "clause": "— não estabelecido por esta fonte —",
+      "requirement": "Requisitos da CAIXA para LAUDO de avaliação (não relatório de precificação AVM): especificação, formato, verificação e aceite.",
+      "verification": "documental",
+      "state": "blocked_external_evidence",
+      "criterion_ref": "lacuna real de escopo: o edital obtido não trata de laudo"
+    }
+  ],
+  "third_party_position_not_a_caixa_rule": "Registrado apenas para contraditório técnico, NÃO como requisito da CAIXA: o CAU/BR impugnou o Edital CR 012/2026 em 06/02/2026 sustentando que precificação por AVM não substitui avaliação conforme a NBR 14653 e que a dispensa de vistoria presencial exigiria análise de risco justificada. É posição de conselho profissional, fonte secundária quanto às regras da CAIXA.",
+  "blocked_external_evidence": {
+    "exact_material": [
+      "Documento vigente da CAIXA que estabeleça requisitos de LAUDO de avaliação (manual, caderno de encargos ou modelo de laudo), e não relatório de precificação AVM.",
+      "Portal Licitações CAIXA (SICVE, https://licitacoes.caixa.gov.br), pesquisa de certame na modalidade Credenciamento/Pré-qualificação em situação vigente — bloqueado por interstício anti-bot.",
+      "Resultado de habilitação/contratação do CR 012/2026 (PNCP registra existeResultado=false em 11/09/2026)."
+    ],
+    "responsible": "titular do projeto, por via autorizada (navegador no portal da CAIXA). Nenhum contato institucional, envio de dados ou inscrição foi realizado nesta campanha."
+  },
+  "notes": [
+    "state='discovery': a CAIXA é alvo de descoberta, não instituição homologadora deste software.",
+    "Ter provenance forte (autopublicado no PNCP) não amplia o escopo: o documento é de precificação AVM."
+  ],
+  "source_set_sha256": "4cd22454fdba794411b5fef83b384b9b426e15164392b83e5c57ad1c41bd754d"
+}

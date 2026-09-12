@@ -13,6 +13,7 @@ Measure-only admission is not a pass.
 
 from __future__ import annotations
 
+import copy
 import math
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -699,6 +700,10 @@ def classify_documentary_item(
         "grade": grade,
         "points": grade,
         "evidence_status": status,
+        # MP-COM/C05: a declared grade WITHOUT provenance still scores points for
+        # the analysis path, but it is not evidence. The qualification layer
+        # refuses ready_for_professional_signoff while this is False.
+        "provenance_verified": bool(has_prov),
         "provenance": provenance if has_prov else None,
         "detail": detail,
         "source": source,
@@ -1326,10 +1331,19 @@ def classify_item4_extrapolacao(
 def statistical_warnings(
     statistical: Optional[Mapping[str, Any]],
     *,
-    significance_aux: float = 0.10,
+    significance_aux: Optional[float] = None,
     vif_convention: float = 10.0,
 ) -> List[str]:
-    """Anexo A diagnostics as warnings only — never a Tabela 1/2 cutoff."""
+    """Anexo A diagnostics as warnings only — never a Tabela 1/2 cutoff.
+
+    ``significance_aux`` defaults to the Anexo A.3.1 ceiling read from the
+    provenance registry rather than to a second hardcoded copy of 10%: a
+    duplicated threshold can drift away from its recorded source.
+    ``vif_convention`` is deliberately NOT in that registry — the standard
+    defines no VIF cutoff, so it has no normative provenance to record.
+    """
+    if significance_aux is None:
+        significance_aux = max_auxiliary_alpha()
     warnings: List[str] = []
     if not statistical:
         return warnings
@@ -1502,53 +1516,314 @@ RULE_MATRIX: List[Dict[str, Any]] = [
 ]
 
 
+#: Rules that remain WITHOUT automatic verification. Every entry must carry a
+#: ``destination``: how the requirement is discharged in the announced offer.
+#:   automatic              -> calculated by this module (then it belongs in RULE_MATRIX)
+#:   professional_evidenced -> a human act with identified professional, motive,
+#:                             version and evidence; a checkbox is not enough
+#:   out_of_announced_offer -> the method/asset type is not offered in V1; the
+#:                             reason must be tied to the offer, not to convenience
+#:   external_blocked       -> needs a source that was not legitimately obtainable
+#:
+#: ``unverified`` never counts as ``passed``. Nothing here may raise a grade.
 UNVERIFIED_RULES: List[Dict[str, str]] = [
     {
         "id": "9.2.1.1.extras",
-        "clause": "9.2.1.1 a–d",
-        "reason": "laudo completo, análise de elasticidades, endereços das fontes e adoção da tendência central não são auto-aprovados por cálculo",
+        "clause": "9.2.1.1 a)-d)",
+        "destination": "professional_evidenced",
+        "reason": (
+            "laudo na modalidade completa, análise de elasticidades e coerência de "
+            "mercado, endereços/fontes dos dados e adoção da tendência central: a "
+            "elasticidade e a tendência central são calculáveis, mas a COERÊNCIA com o "
+            "mercado e a completude documental são atos do profissional"
+        ),
+        "requires": "GRAU_III_ADDITIONAL_REQUIREMENTS com evidência por item",
+        "blocks": "Grau III",
     },
     {
         "id": "9.2.1.6.1.homogeneous",
         "clause": "9.2.1.6.1",
-        "reason": "atalho de amostra homogênea (itens 3–4 só no Grau III; 5–6 Grau III por modelo nulo) não implementado",
+        "destination": "out_of_announced_offer",
+        "reason": (
+            "atalho de amostra homogênea (itens 3 e 4 apenas no Grau III; itens 5 e 6 no "
+            "Grau III por ser nulo o modelo de regressão) não implementado: a oferta V1 "
+            "anuncia modelo de regressão com regressores, não amostra homogênea"
+        ),
+        "requires": "declarar a amostra como homogênea e classificar por via própria",
+        "blocks": "nada na oferta anunciada; usar a via de regressão",
     },
     {
-        "id": "anexoA.2.micronumerosidade",
-        "clause": "Anexo A.2 a) n_i",
-        "reason": "mínimos n_i por característica em dummies/códigos não são calculados automaticamente",
+        "id": "anexoA.2.f.variaveis_relevantes",
+        "clause": "Anexo A.2 f)",
+        "destination": "professional_evidenced",
+        "reason": (
+            "inclusão das variáveis importantes (inclusive interações) e exclusão das "
+            "irrelevantes é juízo do engenheiro de avaliações; busca automática por "
+            "p-valor não decide relevância econômica"
+        ),
+        "requires": "registro da decisão com justificativa (PRESSUPOSTOS)",
+        "blocks": "emissão qualificada sem registro",
     },
     {
-        "id": "tabelas3_4.fatores",
-        "clause": "Tabelas 3–4 / 9.2.2",
-        "reason": "tratamento por fatores fora do escopo desta campanha",
+        "id": "anexoA.2.g.multicolinearidade",
+        "clause": "Anexo A.2 g) / A.2.1.5",
+        "destination": "professional_evidenced",
+        "reason": (
+            "a norma VEDA o uso do modelo em caso de incoerência entre as características "
+            "do avaliando e a estrutura de multicolinearidade inferida; a incoerência é "
+            "juízo técnico, e correlação > 0,80 é gatilho de exame, não a vedação"
+        ),
+        "requires": "exame registrado; VIF não é limiar normativo",
+        "blocks": "uso do modelo quando declarada a incoerência",
     },
     {
-        "id": "metodos.custo_involutivo_evolutivo",
-        "clause": "Tabelas 6–11 / 9.3–9.5",
-        "reason": "quantificação de custo, involutivo e evolutivo não classificados aqui",
+        "id": "anexoA.2.h.residuos_vs_independentes",
+        "clause": "Anexo A.2 h)",
+        "destination": "professional_evidenced",
+        "reason": "exame do gráfico de resíduos contra cada variável independente é visual e não é decidido por p-valor",
+        "requires": "registro do exame",
+        "blocks": "emissão qualificada sem registro",
+    },
+    {
+        "id": "anexoA.2.1.outliers_justificativa",
+        "clause": "Anexo A.2 i) / A.2.1.6",
+        "destination": "professional_evidenced",
+        "reason": (
+            "a investigação de pontos influenciantes é obrigatória e a RETIRADA fica "
+            "condicionada à apresentação de justificativas; corte silencioso para "
+            "melhorar R2 ou grau viola a cláusula"
+        ),
+        "requires": "justificativa por exclusão, com efeito registrado",
+        "blocks": "emissão qualificada quando houve exclusão sem justificativa",
     },
     {
         "id": "anexoA.8.agrupamentos",
         "clause": "Anexo A.8",
-        "reason": "independência entre agrupamentos / interações não verificada automaticamente",
+        "destination": "professional_evidenced",
+        "reason": (
+            "independência entre agrupamentos (tipologia, mercados, localização, usos) e "
+            "interações: a norma recomenda verificar; aplica-se quando há agrupamentos"
+        ),
+        "requires": "registro do exame quando o modelo usa agrupamentos",
+        "blocks": "nada automaticamente; ausência de exame é limitação declarada",
+    },
+    {
+        "id": "8.2.1.5.2.campo_insuficiente",
+        "clause": "8.2.1.5.2 / 8.2.1.5.3",
+        "destination": "professional_evidenced",
+        "reason": (
+            "a suficiencia do campo de arbitrio (+/-15%) para absorver variaveis "
+            "relevantes nao contempladas e juizo profissional; 8.2.1.5.3 determina que, "
+            "sendo insuficiente, o modelo NAO atinge o grau minimo de fundamentacao e o "
+            "fato deve ser consignado no laudo"
+        ),
+        "requires": "declaracao do profissional; consequencia normativa explicita",
+        "blocks": "grau minimo de fundamentacao quando declarada a insuficiencia",
     },
     {
         "id": "anexoA.10.1.2.arbitrado",
         "clause": "Anexo A.10.1.2",
-        "reason": "valores admissíveis com valor arbitrado exigem amplitude do IC/PI deslocada; não auto-calculado",
+        "destination": "professional_evidenced",
+        "reason": (
+            "valores admissiveis em torno do VALOR ARBITRADO exigem intervalo de mesma "
+            "amplitude do IC/PI deslocado para o valor arbitrado, limitado pelo campo de "
+            "arbitrio em torno da tendencia central; adotar valor arbitrado e ato do "
+            "profissional e A.10.2 veda calcular probabilidade associada"
+        ),
+        "requires": "valor arbitrado declarado e justificado",
+        "blocks": "calculo automatico de probabilidade sobre valor arbitrado",
     },
     {
-        "id": "anexoA.2.1.outliers_justificativa",
-        "clause": "Anexo A.2.1.6 / A.2 i",
-        "reason": "retirada de influenciantes depende de justificativa profissional, não de corte silencioso",
+        "id": "tabelas3_4.fatores",
+        "clause": "Tabelas 3-4 / 9.2.2",
+        "destination": "out_of_announced_offer",
+        "reason": (
+            "tratamento por fatores nao integra a oferta V1, que anuncia o metodo "
+            "comparativo direto com REGRESSAO; nao e omissao de requisito aplicavel e sim "
+            "recorte declarado da oferta"
+        ),
+        "requires": "se a oferta passar a incluir fatores, implementar Tabelas 3 e 4",
+        "blocks": "qualquer alegacao de suporte a tratamento por fatores",
     },
     {
-        "id": "8.2.1.5.2.campo_insuficiente",
-        "clause": "8.2.1.5.2–8.2.1.5.3",
-        "reason": "suficiência do campo de arbítrio para variáveis omitidas é julgamento profissional",
+        "id": "metodos.involutivo_evolutivo",
+        "clause": "Tabelas 8-11 / 9.4-9.5",
+        "destination": "out_of_announced_offer",
+        "reason": (
+            "metodos involutivo e evolutivo nao integram a oferta V1; a Tabela 6/7 do "
+            "metodo da quantificacao de custo, ao contrario, passou a ser especificada "
+            "porque o perfil securitario exige base de CUSTO"
+        ),
+        "requires": "implementar Tabelas 8-11 caso a oferta passe a anuncia-los",
+        "blocks": "qualquer alegacao de suporte a involutivo/evolutivo",
+    },
+    {
+        "id": "metodos.custo.calculo",
+        "clause": "9.3 / Tabela 6 / Tabela 7",
+        "destination": "external_blocked",
+        "reason": (
+            "a REGRA de enquadramento do metodo da quantificacao de custo esta "
+            "implementada (classify_custo_fundamentacao) e a base de valor esta "
+            "especificada (VALUE_BASES), mas a ROTA DE CALCULO do custo - orcamento "
+            "sintetico ou CUB, BDI e depreciacao fisica - depende de insumos de custo "
+            "(CUB/SINDUSCON, projeto padrao NBR 12721) que nao foram obtidos nesta "
+            "campanha e cuja implementacao cabe a C01"
+        ),
+        "requires": "serie CUB vigente por regiao/padrao e memoria de calculo; handoff C01",
+        "blocks": "emissao qualificada para perfil securitario que exija custo",
+    },
+    {
+        "id": "abnt.vigencia_das_edicoes",
+        "clause": "catalogo ABNT",
+        "destination": "external_blocked",
+        "reason": (
+            "os limiares foram conferidos contra as edicoes efetivamente em maos "
+            "(14653-2:2011 e 14653-1:2019), mas a VIGENCIA dessas edicoes nao foi "
+            "confirmada em fonte oficial: o catalogo ABNT e uma aplicacao JavaScript que "
+            "nao entrega o registro da norma por requisicao estatica"
+        ),
+        "requires": "registro do catalogo ABNT para 14653-1 e 14653-2 (edicao, status, emendas)",
+        "blocks": "alegacao de conformidade com a edicao VIGENTE (a conformidade com a edicao conferida permanece)",
     },
 ]
+
+
+#: Rules implemented by this campaign and therefore no longer unverified.
+RULE_MATRIX.extend([
+    {
+        "id": "anexoA.2.micronumerosidade",
+        "edition": EDITION_PART2,
+        "item": None,
+        "clause": "Anexo A.2 a)",
+        "data_needed": "n efetivo, k efetivo e contagem n_i por caracteristica dicotomica/codigo",
+        "calculation": "n >= 3(k+1); n_i >= 3 (n<=30), >= 10% n (30<n<=100), >= 10 (n>100)",
+        "verification_status": "verified",
+        "destination": "automatic",
+        "test_ids": ["C05-A04", "TestMicronumerosidade"],
+    },
+    {
+        "id": "anexoA.3.1.significancia_auxiliar",
+        "edition": EDITION_PART2,
+        "item": None,
+        "clause": "Anexo A.3.1",
+        "data_needed": "alpha adotado nos testes nao citados na Tabela 1",
+        "calculation": "alpha <= 10%; alpha acima do teto e recusado, nao afrouxado",
+        "verification_status": "verified",
+        "destination": "automatic",
+        "test_ids": ["C05-A04", "TestPressupostos"],
+    },
+    {
+        "id": "anexoA.2.cde.pressupostos",
+        "edition": EDITION_PART2,
+        "item": None,
+        "clause": "Anexo A.2 c), d), e) / A.2.1.2-A.2.1.4",
+        "data_needed": "p-valores dos testes de homocedasticidade, normalidade e autocorrelacao; ordenamento declarado",
+        "calculation": "p <= alpha rejeita H0 e VIOLA o pressuposto; ausencia e pending",
+        "verification_status": "verified",
+        "destination": "automatic",
+        "test_ids": ["C05-A04", "TestPressupostos"],
+    },
+    {
+        "id": "tabela6_7.custo.enquadramento",
+        "edition": EDITION_PART2,
+        "item": None,
+        "clause": "9.3 / Tabela 6 / Tabela 7",
+        "data_needed": "graus documentais dos itens 1 (custo direto), 2 (BDI) e 3 (depreciacao fisica)",
+        "calculation": "pontos 7/5/3 com obrigatorios; item pendente nao aprova",
+        "verification_status": "verified",
+        "destination": "automatic",
+        "test_ids": ["C05-A06", "TestCustoFundamentacao"],
+    },
+    {
+        "id": "parte1.bases_de_valor",
+        "edition": EDITION_PART1_2019,
+        "item": None,
+        "clause": "3.1.47, 3.1.51, 3.1.11.3, 3.1.11.5, 3.1.11.6 / Secao 6 a) b)",
+        "data_needed": "base de valor declarada e metodo declarado",
+        "calculation": "value_basis_guard recusa base que o metodo declarado nao produz",
+        "verification_status": "verified",
+        "destination": "automatic",
+        "test_ids": ["C05-A06", "TestValueBasisGuard"],
+    },
+    {
+        "id": "9.1.2.nao_classificado",
+        "edition": EDITION_PART2,
+        "item": None,
+        "clause": "9.1.2",
+        "data_needed": "itens nao atendidos",
+        "calculation": "nao atingir o Grau I exige indicar e justificar os itens nao atendidos",
+        "verification_status": "verified",
+        "destination": "professional_evidenced",
+        "test_ids": ["C05-A02"],
+    },
+    {
+        "id": "10.1.laudo_completo",
+        "edition": EDITION_PART2,
+        "item": None,
+        "clause": "10.1 a)-m)",
+        "data_needed": "presenca de cada item do laudo completo",
+        "calculation": "inventario de 13 itens; ausencia bloqueia modalidade completa e, por 9.2.1.1 a), o Grau III",
+        "verification_status": "verified",
+        "destination": "professional_evidenced",
+        "test_ids": ["C05-A02"],
+    },
+    {
+        "id": "parte1.6.3.vistoria",
+        "edition": EDITION_PART1_2019,
+        "item": None,
+        "clause": "6.3.1-6.3.3",
+        "data_needed": "registro da vistoria ou da situacao-paradigma acordada",
+        "calculation": "vistoria e essencial; situacao-paradigma e excecional, acordada e explicitada",
+        "verification_status": "verified",
+        "destination": "professional_evidenced",
+        "test_ids": ["C05-A02", "C05-A07"],
+    },
+])
+
+
+DESTINATIONS = (
+    "automatic",
+    "professional_evidenced",
+    "out_of_announced_offer",
+    "external_blocked",
+)
+
+
+def rules_by_destination(destination: str) -> List[Dict[str, Any]]:
+    """Every rule routed to one destination, from both registries."""
+    if destination not in DESTINATIONS:
+        raise ValueError(f"destino desconhecido: {destination!r}")
+    out: List[Dict[str, Any]] = []
+    for r in RULE_MATRIX:
+        if r.get("destination", "automatic") == destination:
+            out.append(dict(r))
+    for r in UNVERIFIED_RULES:
+        if r.get("destination") == destination:
+            out.append(dict(r))
+    return out
+
+
+def inventory_audit() -> Dict[str, Any]:
+    """A02 guard: every registered rule must carry an explicit destination.
+
+    Returns the counts per destination plus any rule missing a destination.
+    A rule without a destination is a coverage hole, not a pass.
+    """
+    missing: List[str] = []
+    for r in UNVERIFIED_RULES:
+        if r.get("destination") not in DESTINATIONS:
+            missing.append(r["id"])
+    for r in RULE_MATRIX:
+        d = r.get("destination", "automatic")
+        if d not in DESTINATIONS:
+            missing.append(r["id"])
+    counts = {d: len(rules_by_destination(d)) for d in DESTINATIONS}
+    return {
+        "counts": counts,
+        "total": len(RULE_MATRIX) + len(UNVERIFIED_RULES),
+        "missing_destination": missing,
+        "complete": not missing,
+    }
 
 
 def verified_rule_ids() -> List[str]:
@@ -1557,3 +1832,898 @@ def verified_rule_ids() -> List[str]:
 
 def unverified_rule_ids() -> List[str]:
     return [r["id"] for r in UNVERIFIED_RULES]
+
+
+# ---------------------------------------------------------------------------
+# MP-COM-20260912/C05 — source provenance, micronumerosidade, pressupostos,
+# método da quantificação de custo e conteúdo do laudo.
+#
+# Every threshold below was read against the edition text itself (see
+# SOURCE_DOCUMENTS); no value here comes from a README, a secondary source or
+# model memory. The protected text is NOT reproduced: only clause anchors,
+# paraphrased criteria and the numbers that the rule turns on.
+# ---------------------------------------------------------------------------
+
+CONSULTATION_DATE = "2026-09-11"
+
+#: Documents whose integral text was consulted. ``sha256`` identifies the exact
+#: file that was read; the files themselves are copyright-protected and are NOT
+#: redistributed (``docs/normas/`` is git-ignored at the repository root).
+SOURCE_DOCUMENTS: Dict[str, Dict[str, Any]] = {
+    EDITION_PART2: {
+        "id": "abnt-nbr-14653-2-2011",
+        "title": "ABNT NBR 14653-2:2011 — Avaliação de bens — Parte 2: Imóveis urbanos",
+        "edition_or_version": "2011 (1ª edição)",
+        "sha256": "8fed8e7cf52187f7a46cada34685b70c517f32a2333d498295ea4f09e2668896",
+        "consulted_on": CONSULTATION_DATE,
+        "access": "exemplar licenciado disponibilizado localmente pelo responsável do projeto",
+        "redistribution": "proibida; apenas metadados, âncoras de cláusula e critérios parafraseados",
+        "currency_status": "edition_on_hand_verified_currency_unconfirmed",
+    },
+    EDITION_PART1_2019: {
+        "id": "abnt-nbr-14653-1-2019",
+        "title": "ABNT NBR 14653-1:2019 — Avaliação de bens — Parte 1: Procedimentos gerais",
+        "edition_or_version": "2019 (2ª edição)",
+        "sha256": "125eeed437c28a07691bfef72eaf4a3c9e1a3a1720e6a5e2cce1e548a02fcc92",
+        "consulted_on": CONSULTATION_DATE,
+        "access": "exemplar licenciado disponibilizado localmente pelo responsável do projeto",
+        "redistribution": "proibida; apenas metadados, âncoras de cláusula e critérios parafraseados",
+        "currency_status": "edition_on_hand_verified_currency_unconfirmed",
+    },
+}
+
+#: Known dangling cross-reference: Parte 2:2011 cites Parte 1:**2001**, an
+#: edition superseded by Parte 1:2019. Where the two differ, the quantified
+#: rule that governs the urban-property regression scope is Parte 2's own.
+CROSS_EDITION_NOTES: List[Dict[str, str]] = [
+    {
+        "id": "campo_arbitrio.cross_edition",
+        "detail": (
+            "8.2.1.5.1 da Parte 2:2011 quantifica o campo de arbítrio em ±15% e "
+            "remete a '3.8 da ABNT NBR 14653-1:2001'. Na Parte 1:2019 a definição "
+            "foi renumerada para 3.1.9 e NÃO repete a amplitude de 15%. A "
+            "quantificação de ±15% aplicada pelo produto é a da Parte 2:2011, "
+            "não uma leitura da Parte 1:2019."
+        ),
+        "clauses": "Parte 2:2011 8.2.1.5.1; Parte 1:2019 3.1.9",
+    },
+    {
+        "id": "laudo_completo.cross_edition",
+        "detail": (
+            "10.1 da Parte 2:2011 remete diversos itens a 7.2/7.3/7.7.2 e Seção 8 "
+            "da Parte 1:**2001**. A Parte 1:2019 reorganizou essa numeração; a "
+            "correspondência item a item exige conferência e não é presumida aqui."
+        ),
+        "clauses": "Parte 2:2011 10.1; Parte 1:2019 (renumerada)",
+    },
+]
+
+#: Provenance for every numeric threshold this module applies.
+#: ``page`` is the page of the consulted PDF; ``literal`` records whether the
+#: number is stated as such in the text or is an interpretation of it.
+THRESHOLD_PROVENANCE: Dict[str, Dict[str, Any]] = {
+    "ITEM2_FACTORS": {
+        "values": {"grau_iii": 6, "grau_ii": 4, "grau_i": 3},
+        "edition": EDITION_PART2, "clause": "Tabela 1 item 2", "page": 30,
+        "literal": True,
+        "detail": "n ≥ 6(k+1) / 4(k+1) / 3(k+1), k = nº de variáveis independentes.",
+    },
+    "MEASURE_LOWER_FACTOR": {
+        "values": {"factor": 0.5},
+        "edition": EDITION_PART2, "clause": "Tabela 1 item 4 (a)", "page": 30,
+        "literal": True,
+        "detail": "medidas não inferiores à metade do limite amostral inferior.",
+    },
+    "MEASURE_UPPER_FACTOR": {
+        "values": {"factor": 2.0},
+        "edition": EDITION_PART2, "clause": "Tabela 1 item 4 (a)", "page": 30,
+        "literal": False,
+        "detail": (
+            "O texto diz 'não sejam superiores a 100 % do limite amostral superior'. "
+            "Adotada a leitura 'até 100% ACIMA do limite superior' (fator 2,0), e não "
+            "'até 100% DO limite superior' (fator 1,0). Justificativa: (i) o fator 1,0 "
+            "tornaria o item 4 autocontraditório, pois nenhuma extrapolação seria "
+            "admissível e os Graus II/I do item 4 ficariam vazios, contra a própria "
+            "estrutura da Tabela 1; (ii) a condição inferior é expressa como 'metade do "
+            "limite inferior' (0,5×), de modo que a leitura simétrica do par é 0,5× no "
+            "piso e 2,0× no teto. A fronteira permanece explícita e testável; ver "
+            "MEASURE_UPPER_FACTOR_ALTERNATIVE para a leitura concorrente."
+        ),
+        "interpretation_id": "item4a.upper_factor",
+        "alternative_reading": {"factor": 1.0, "effect": "extrapolação nunca admitida"},
+    },
+    "VALUE_LIMITS": {
+        "values": {"grau_ii": 0.15, "grau_i": 0.20},
+        "edition": EDITION_PART2, "clause": "Tabela 1 item 4 (b)", "page": 31,
+        "literal": True,
+        "detail": (
+            "Grau II: valor estimado não ultrapassa 15% do valor calculado no limite da "
+            "fronteira amostral, para UMA variável, em módulo. Grau I: 20%, para as "
+            "variáveis referidas, de per si E simultaneamente, em módulo."
+        ),
+    },
+    "ITEM5_LIMITS": {
+        "values": {"grau_iii": 0.10, "grau_ii": 0.20, "grau_i": 0.30},
+        "edition": EDITION_PART2, "clause": "Tabela 1 item 5", "page": 31,
+        "literal": True,
+        "detail": "Nível de significância (somatório das duas caudas) por regressor, teste bicaudal.",
+    },
+    "ITEM6_LIMITS": {
+        "values": {"grau_iii": 0.01, "grau_ii": 0.02, "grau_i": 0.05},
+        "edition": EDITION_PART2, "clause": "Tabela 1 item 6", "page": 31,
+        "literal": True,
+        "detail": "Nível de significância máximo para rejeição da hipótese nula do modelo (teste F).",
+    },
+    "TABELA2_PONTOS": {
+        "values": {"grau_iii": 16, "grau_ii": 10, "grau_i": 6},
+        "edition": EDITION_PART2, "clause": "Tabela 2 / 9.2.1.6", "page": 32,
+        "literal": True,
+        "detail": (
+            "Pontos mínimos 16/10/6. Itens obrigatórios: Grau III → 2,4,5,6 no Grau III e "
+            "os demais no mínimo no Grau II; Grau II → 2,4,5,6 no mínimo no Grau II e os "
+            "demais no mínimo no Grau I; Grau I → todos no mínimo no Grau I. "
+            "Pontuação: Grau I = 1 ponto, Grau II = 2, Grau III = 3 (9.2.1.6 b)."
+        ),
+    },
+    "PRECISAO_LIMITS": {
+        "values": {"grau_iii": 30.0, "grau_ii": 40.0, "grau_i": 50.0},
+        "edition": EDITION_PART2, "clause": "Tabela 5 / 9.2.3", "page": 34,
+        "literal": True,
+        "detail": (
+            "Amplitude do IC de 80% em torno da estimativa de tendência central: "
+            "≤30% / ≤40% / ≤50%. NOTA: acima de 50% não há classificação quanto à "
+            "precisão e é necessária justificativa com base no diagnóstico do mercado."
+        ),
+    },
+    "CAMPO_ARBITRIO": {
+        "values": {"amplitude": 0.15},
+        "edition": EDITION_PART2, "clause": "8.2.1.5.1", "page": 24,
+        "literal": True,
+        "detail": (
+            "Intervalo com amplitude de 15% para mais e para menos em torno da "
+            "estimativa de tendência central. 8.2.1.5.4: não se confunde com o IC de 80%."
+        ),
+    },
+    "MICRONUMEROSIDADE": {
+        "values": {"n_min_factor": 3, "ni_small": 3, "ni_mid_fraction": 0.10, "ni_large": 10,
+                   "n_small_max": 30, "n_mid_max": 100},
+        "edition": EDITION_PART2, "clause": "Anexo A.2 a)", "page": 42,
+        "literal": True,
+        "detail": (
+            "n ≥ 3(k+1); para n ≤ 30, n_i ≥ 3; para 30 < n ≤ 100, n_i ≥ 10% n; para "
+            "n > 100, n_i ≥ 10 — onde n_i é o número de dados de mesma característica, "
+            "no caso de variáveis dicotômicas e qualitativas por códigos alocados ou ajustados."
+        ),
+    },
+    "SIGNIFICANCE_AUX": {
+        "values": {"max_alpha": 0.10},
+        "edition": EDITION_PART2, "clause": "Anexo A.3.1", "page": 45,
+        "literal": True,
+        "detail": (
+            "O nível de significância máximo admitido nos demais testes estatísticos "
+            "(os não citados na Tabela 1) não deve ser superior a 10%. É teto normativo "
+            "do α desses testes — não é um piso de qualidade nem corte da Tabela 1/2."
+        ),
+    },
+    "CORRELATION_ATTENTION": {
+        "values": {"threshold": 0.80},
+        "edition": EDITION_PART2, "clause": "Anexo A.2.1.5.2", "page": 44,
+        "literal": True,
+        "detail": (
+            "Analisar a matriz das correlações com atenção especial para resultados "
+            "superiores a 0,80. NÃO é reprovação automática e a norma NÃO define corte "
+            "de VIF; qualquer limiar de VIF é convenção de mercado, não normativo."
+        ),
+    },
+    "TABELA7_PONTOS_CUSTO": {
+        "values": {"grau_iii": 7, "grau_ii": 5, "grau_i": 3},
+        "edition": EDITION_PART2, "clause": "Tabela 7 / 9.3", "page": 35,
+        "literal": True,
+        "detail": (
+            "Método da quantificação de custo: pontos mínimos 7/5/3. Itens obrigatórios: "
+            "Grau III → item 1 no Grau III e os demais no mínimo no Grau II; Grau II → "
+            "itens 1 e 2 no mínimo no Grau II; Grau I → todos no mínimo no Grau I. "
+            "9.3.1: para o Grau III é obrigatória a apresentação do laudo na modalidade completa."
+        ),
+    },
+}
+
+MEASURE_UPPER_FACTOR_ALTERNATIVE = 1.0
+
+
+def threshold_provenance(key: str) -> Dict[str, Any]:
+    """Provenance record for a threshold family. Raises on unknown key.
+
+    Returns a DEEP copy: a shallow one leaves the nested ``values`` mapping
+    shared, so a caller mutating it would silently rewrite the normative
+    registry for the rest of the process.
+    """
+    if key not in THRESHOLD_PROVENANCE:
+        raise KeyError(f"sem proveniência registrada para o limiar {key!r}")
+    return copy.deepcopy(THRESHOLD_PROVENANCE[key])
+
+
+# --- Anexo A.2 a): micronumerosidade -----------------------------------------
+
+MICRO_OK = "ok"
+MICRO_VIOLATED = "violated"
+MICRO_PENDING = "pending"
+
+
+def minimum_ni(n: Any) -> Optional[int]:
+    """Anexo A.2 a): minimum n_i per characteristic, as a function of n.
+
+    n ≤ 30 → 3; 30 < n ≤ 100 → 10% of n; n > 100 → 10.
+    The 10% branch is a minimum, so it is rounded UP (a fractional datum
+    cannot satisfy a count). Returns None when n is not a usable count.
+    """
+    n_f = as_float(n)
+    if n_f is None or n_f < 0:
+        return None
+    n_i = int(n_f)
+    if n_i <= 30:
+        return 3
+    if n_i <= 100:
+        return int(math.ceil(0.10 * n_i))
+    return 10
+
+
+def classify_micronumerosidade(
+    n: Any,
+    k: Any,
+    category_counts: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Anexo A.2 a): global n ≥ 3(k+1) AND per-characteristic n_i minimums.
+
+    ``category_counts`` maps the name of each dichotomous / allocated-code /
+    adjusted-code characteristic actually used in the model to the number of
+    sample data carrying it. Absence of that mapping is NOT compliance: the
+    per-characteristic leg stays pending.
+
+    This is a *pressuposto* of Anexo A.2, not a Tabela 1 item: it never awards
+    points and never raises a grade. It can only expose a violation.
+    """
+    source = {
+        "edition": EDITION_PART2,
+        "clause": "Anexo A.2 a)",
+        "page": 42,
+        "status": "verified",
+    }
+    n_f, k_f = as_float(n), as_float(k)
+    if n_f is None or k_f is None or n_f < 0 or k_f < 0:
+        return {
+            "status": MICRO_PENDING,
+            "n": n, "k": k,
+            "n_minimum": None, "ni_minimum": None,
+            "violations": [], "checked_characteristics": [],
+            "detail": "n ou k efetivo ausente; micronumerosidade não avaliada (ausência não é conformidade).",
+            "source": source,
+        }
+    n_i, k_i = int(n_f), int(k_f)
+    n_min = 3 * (k_i + 1)
+    ni_min = minimum_ni(n_i)
+
+    violations: List[Dict[str, Any]] = []
+    if n_i < n_min:
+        violations.append({
+            "kind": "global_n",
+            "observed": n_i,
+            "criterion": f"n >= 3(k+1) = {n_min}",
+            "detail": f"n={n_i} < {n_min}: micronumerosidade global (Anexo A.2 a).",
+        })
+
+    checked: List[str] = []
+    pending_leg = category_counts is None
+    if category_counts is not None:
+        for name in sorted(category_counts):
+            raw = category_counts[name]
+            count = as_float(raw)
+            if count is None or count < 0:
+                violations.append({
+                    "kind": "characteristic_count_invalid",
+                    "characteristic": name,
+                    "observed": raw,
+                    "criterion": f"n_i >= {ni_min}",
+                    "detail": f"contagem inválida para a característica {name!r}.",
+                })
+                continue
+            checked.append(name)
+            if ni_min is not None and int(count) < ni_min:
+                violations.append({
+                    "kind": "characteristic_ni",
+                    "characteristic": name,
+                    "observed": int(count),
+                    "criterion": f"n_i >= {ni_min}",
+                    "detail": (
+                        f"característica {name!r} com n_i={int(count)} < {ni_min} "
+                        f"(regra para n={n_i}, Anexo A.2 a)."
+                    ),
+                })
+
+    if violations:
+        status = MICRO_VIOLATED
+        detail = f"{len(violations)} violação(ões) de micronumerosidade (Anexo A.2 a)."
+    elif pending_leg:
+        status = MICRO_PENDING
+        detail = (
+            f"n={n_i} >= {n_min} atendido, mas as contagens por característica "
+            "(dicotômicas / códigos alocados / ajustados) não foram informadas: "
+            "a perna n_i permanece pendente, não aprovada."
+        )
+    else:
+        status = MICRO_OK
+        detail = (
+            f"n={n_i} >= {n_min} e todas as {len(checked)} características verificadas "
+            f"com n_i >= {ni_min}."
+        )
+
+    return {
+        "status": status,
+        "n": n_i, "k": k_i,
+        "n_minimum": n_min,
+        "ni_minimum": ni_min,
+        "violations": violations,
+        "checked_characteristics": checked,
+        "per_characteristic_evaluated": not pending_leg,
+        "detail": detail,
+        "source": source,
+    }
+
+
+# --- Anexo A.2 c)–i) + A.3.1: pressupostos do modelo -------------------------
+
+PRESSUPOSTO_SATISFIED = "satisfied"
+PRESSUPOSTO_VIOLATED = "violated"
+PRESSUPOSTO_PENDING = "pending"
+PRESSUPOSTO_PROFESSIONAL = "professional_decision_required"
+
+#: Each assumption carries hypothesis, method, direction of the test, the
+#: condition under which it applies and the prescribed reaction. A p-value
+#: alone is never the finding — Anexo A.2 states the requirement, A.3.1 caps
+#: the significance level of these (non-Tabela-1) tests at 10%.
+PRESSUPOSTOS: List[Dict[str, Any]] = [
+    {
+        "id": "anexoA.2.c.homocedasticidade",
+        "clause": "Anexo A.2 c) / A.2.1.3",
+        "page": 42,
+        "requirement": "os erros são variáveis aleatórias com variância constante (homocedásticos)",
+        "hypothesis_null": "variância dos erros constante",
+        "direction": "rejeitar H0 (p <= alpha) indica heterocedasticidade, isto é, VIOLAÇÃO",
+        "methods_cited": ["análise gráfica resíduos vs valores ajustados", "teste de Park", "teste de White"],
+        "method_note": (
+            "A.2.1.3 cita Park e White. Breusch-Pagan não é citado pela norma; se usado, "
+            "é substituto metodológico e deve ser declarado como tal."
+        ),
+        "reaction": "modelo heterocedástico não satisfaz A.2 c); exige correção ou justificativa técnica no laudo",
+        "automatable": True,
+    },
+    {
+        "id": "anexoA.2.d.normalidade",
+        "clause": "Anexo A.2 d) / A.2.1.2",
+        "page": 42,
+        "requirement": "os erros são variáveis aleatórias com distribuição normal",
+        "hypothesis_null": "erros normalmente distribuídos",
+        "direction": "rejeitar H0 (p <= alpha) indica não normalidade, isto é, VIOLAÇÃO",
+        "methods_cited": [
+            "histograma de resíduos padronizados",
+            "frequências relativas observadas nos intervalos [-1;+1] ~68%, [-1,64;+1,64] ~90%, [-1,96;+1,96] ~95%",
+            "testes não paramétricos",
+        ],
+        "method_note": (
+            "A.2.1.2 admite aferição por frequências relativas; o produto deve reportar "
+            "esse cotejo além de qualquer teste, pois é o método que a norma descreve."
+        ),
+        "reaction": "não normalidade compromete os testes t/F dos itens 5 e 6 e exige tratamento declarado",
+        "automatable": True,
+    },
+    {
+        "id": "anexoA.2.e.autocorrelacao",
+        "clause": "Anexo A.2 e) / A.2.1.4",
+        "page": 42,
+        "requirement": "os erros são não autocorrelacionados (independentes sob normalidade)",
+        "hypothesis_null": "erros não autocorrelacionados",
+        "direction": "rejeitar H0 (p <= alpha) indica autocorrelação, isto é, VIOLAÇÃO",
+        "methods_cited": ["gráfico de resíduos cotejados com valores ajustados, após pré-ordenamento"],
+        "method_note": (
+            "A.2.1.4 EXIGE pré-ordenamento dos elementos amostrais (pelos valores ajustados "
+            "e, se for o caso, pelas variáveis suspeitas) ANTES do exame. Um teste de "
+            "autocorrelação aplicado na ordem original do arquivo não cumpre a cláusula."
+        ),
+        "reaction": "autocorrelação exige reordenamento declarado e tratamento; não se ignora por p favorável em outra ordem",
+        "automatable": True,
+        "requires_declared_ordering": True,
+    },
+    {
+        "id": "anexoA.2.f.variaveis_relevantes",
+        "clause": "Anexo A.2 f)",
+        "page": 42,
+        "requirement": (
+            "variáveis importantes incorporadas ao modelo — inclusive as decorrentes de "
+            "interação — e variáveis irrelevantes ausentes"
+        ),
+        "reaction": "decisão do engenheiro de avaliações; não é decidível por busca automática de p-valor",
+        "automatable": False,
+        "professional_decision": True,
+    },
+    {
+        "id": "anexoA.2.g.multicolinearidade",
+        "clause": "Anexo A.2 g) / A.2.1.5",
+        "page": 42,
+        "requirement": (
+            "havendo multicolinearidade, examinar a coerência das características do imóvel "
+            "avaliando com a estrutura de multicolinearidade inferida"
+        ),
+        "prohibition": "vedada a utilização do modelo em caso de incoerência",
+        "attention_threshold": THRESHOLD_PROVENANCE["CORRELATION_ATTENTION"]["values"]["threshold"],
+        "attention_clause": "A.2.1.5.2 (matriz de correlações, atenção a resultados > 0,80)",
+        "reaction": (
+            "É a única cláusula deste bloco que VEDA o uso do modelo. A vedação depende de "
+            "um juízo de coerência sobre o avaliando; correlação > 0,80 é gatilho de exame, "
+            "não a vedação em si. VIF não é limiar normativo."
+        ),
+        "automatable": False,
+        "professional_decision": True,
+        "blocks_use_when_incoherent": True,
+    },
+    {
+        "id": "anexoA.2.h.residuos_vs_independentes",
+        "clause": "Anexo A.2 h)",
+        "page": 42,
+        "requirement": (
+            "o gráfico de resíduos não pode sugerir regularidade estatística com respeito "
+            "às variáveis independentes"
+        ),
+        "reaction": "exame gráfico com registro; ausência de gráfico examinado não é conformidade",
+        "automatable": False,
+        "professional_decision": True,
+    },
+    {
+        "id": "anexoA.2.i.pontos_influenciantes",
+        "clause": "Anexo A.2 i) / A.2.1.6",
+        "page": 42,
+        "requirement": (
+            "pontos influenciantes, ou aglomerados deles, devem ser investigados e sua "
+            "retirada fica condicionada à apresentação de justificativas"
+        ),
+        "methods_cited": ["resíduos vs cada variável independente", "resíduos vs valores ajustados",
+                          "estatística de Cook", "distância de Mahalanobis"],
+        "reaction": (
+            "Investigação é obrigatória; a RETIRADA é condicionada a justificativa "
+            "apresentada. Exclusão automática para melhorar R²/grau viola a cláusula."
+        ),
+        "automatable": False,
+        "professional_decision": True,
+        "removal_requires_justification": True,
+    },
+    {
+        "id": "anexoA.8.agrupamentos",
+        "clause": "Anexo A.8",
+        "page": 46,
+        "requirement": (
+            "usando diferentes agrupamentos (tipologia, mercados, localização, usos), "
+            "verificar a independência entre os agrupamentos, entre as variáveis e "
+            "possíveis interações"
+        ),
+        "reaction": "recomendação da norma; aplica-se quando há agrupamentos, e o exame deve ser registrado",
+        "automatable": False,
+        "professional_decision": True,
+        "normative_strength": "recomenda-se",
+    },
+]
+
+PRESSUPOSTOS_BY_ID = {p["id"]: p for p in PRESSUPOSTOS}
+
+
+def max_auxiliary_alpha() -> float:
+    """Anexo A.3.1 ceiling for the significance level of non-Tabela-1 tests."""
+    return float(THRESHOLD_PROVENANCE["SIGNIFICANCE_AUX"]["values"]["max_alpha"])
+
+
+def evaluate_pressuposto(
+    pressuposto_id: str,
+    *,
+    p_value: Any = None,
+    alpha: Any = None,
+    professional_finding: Any = None,
+    ordering_declared: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Evaluate one Anexo A.2 assumption with its hypothesis and reaction.
+
+    For automatable assumptions the verdict follows the stated direction:
+    p <= alpha rejects H0 and therefore VIOLATES the requirement. ``alpha``
+    defaults to the A.3.1 ceiling of 10% and is refused above it.
+    """
+    spec = PRESSUPOSTOS_BY_ID.get(pressuposto_id)
+    if spec is None:
+        raise KeyError(f"pressuposto desconhecido: {pressuposto_id!r}")
+    ceiling = max_auxiliary_alpha()
+    source = {"edition": EDITION_PART2, "clause": spec["clause"], "page": spec.get("page"),
+              "status": "verified"}
+    out: Dict[str, Any] = {
+        "id": pressuposto_id,
+        "requirement": spec["requirement"],
+        "clause": spec["clause"],
+        "source": source,
+        "observed": None,
+        "criterion": None,
+    }
+
+    if not spec.get("automatable"):
+        finding = professional_finding
+        if finding is None:
+            out.update({
+                "status": PRESSUPOSTO_PROFESSIONAL,
+                "detail": (
+                    f"{spec['clause']}: exige exame e registro do engenheiro de avaliações. "
+                    "Sem registro, permanece pendente de decisão profissional — ausência "
+                    "não é conformidade."
+                ),
+                "reaction": spec.get("reaction"),
+            })
+            return out
+        satisfied = bool(finding.get("satisfied")) if isinstance(finding, Mapping) else bool(finding)
+        justification = finding.get("justification") if isinstance(finding, Mapping) else None
+        if not justification:
+            out.update({
+                "status": PRESSUPOSTO_PROFESSIONAL,
+                "detail": (
+                    f"{spec['clause']}: decisão profissional informada sem justificativa "
+                    "registrada; a norma condiciona o ato à justificativa apresentada."
+                ),
+                "reaction": spec.get("reaction"),
+            })
+            return out
+        out.update({
+            "status": PRESSUPOSTO_SATISFIED if satisfied else PRESSUPOSTO_VIOLATED,
+            "observed": justification,
+            "detail": (
+                f"{spec['clause']}: decisão profissional registrada "
+                f"({'satisfeito' if satisfied else 'violado'}) com justificativa."
+            ),
+            "reaction": spec.get("reaction"),
+        })
+        return out
+
+    a = as_float(alpha)
+    if a is None:
+        a = ceiling
+    if a > ceiling:
+        out.update({
+            "status": PRESSUPOSTO_PENDING,
+            "detail": (
+                f"alpha={a:.4f} excede o teto de {ceiling:.0%} do Anexo A.3.1 para testes "
+                "não citados na Tabela 1; avaliação recusada em vez de afrouxada."
+            ),
+            "alpha": a, "alpha_ceiling": ceiling,
+        })
+        return out
+    if spec.get("requires_declared_ordering") and not ordering_declared:
+        out.update({
+            "status": PRESSUPOSTO_PENDING,
+            "alpha": a, "alpha_ceiling": ceiling,
+            "detail": (
+                f"{spec['clause']} exige pré-ordenamento declarado dos elementos amostrais "
+                "antes do exame de autocorrelação; sem ele o resultado não é conclusivo."
+            ),
+            "reaction": spec.get("reaction"),
+        })
+        return out
+    p = as_float(p_value)
+    if p is None:
+        out.update({
+            "status": PRESSUPOSTO_PENDING,
+            "alpha": a, "alpha_ceiling": ceiling,
+            "detail": f"{spec['clause']}: p-valor ausente ou não finito; pressuposto não avaliado.",
+            "reaction": spec.get("reaction"),
+        })
+        return out
+    violated = p <= a
+    out.update({
+        "status": PRESSUPOSTO_VIOLATED if violated else PRESSUPOSTO_SATISFIED,
+        "alpha": a,
+        "alpha_ceiling": ceiling,
+        "observed": p,
+        "criterion": f"p > {a:.4f} para não rejeitar H0 ({spec['hypothesis_null']})",
+        "hypothesis_null": spec["hypothesis_null"],
+        "direction": spec["direction"],
+        "detail": (
+            f"{spec['clause']}: p={p:.4f} {'<=' if violated else '>'} alpha={a:.4f} — "
+            f"{'H0 rejeitada: pressuposto VIOLADO' if violated else 'H0 não rejeitada'}. "
+            f"{spec.get('method_note', '')}"
+        ).strip(),
+        "reaction": spec.get("reaction"),
+    })
+    return out
+
+
+# --- 9.3 / Tabelas 6 e 7: método da quantificação de custo -------------------
+#
+# Needed by the securitário profile: when the base of value is a
+# reconstruction/replacement cost, the value CANNOT be obtained by applying a
+# coefficient to a market price. Parte 1:2019 defines the bases:
+#   3.1.11.5 custo de reprodução  — reproduzir bem idêntico, SEM depreciação
+#   3.1.11.3 custo de reedição    — custo de reprodução MENOS a depreciação
+#   3.1.11.6 custo de substituição— custo de reedição de bem de mesma utilidade
+#   3.1.51   valor em risco       — parcela do bem que se deseja segurar,
+#                                   podendo corresponder ao valor máximo segurável
+# A regressão do método comparativo estima valor de mercado (3.1.47) e não
+# produz nenhuma dessas bases.
+
+TABELA6_ITEMS: List[Dict[str, Any]] = [
+    {
+        "item": 1,
+        "id": "tabela6.item1",
+        "description": "Estimativa do custo direto",
+        "criteria": {
+            3: "elaboração de orçamento, no mínimo sintético",
+            2: "custo unitário básico para projeto semelhante ao projeto padrão",
+            1: "custo unitário básico para projeto diferente do projeto padrão, com os devidos ajustes",
+        },
+        "evidence_kind": "documental",
+    },
+    {
+        "item": 2,
+        "id": "tabela6.item2",
+        "description": "BDI",
+        "criteria": {3: "calculado", 2: "justificado", 1: "arbitrado"},
+        "evidence_kind": "documental",
+    },
+    {
+        "item": 3,
+        "id": "tabela6.item3",
+        "description": "Depreciação física",
+        "criteria": {
+            3: ("calculada por levantamento do custo de recuperação do bem para deixá-lo no "
+                "estado de novo, ou casos de bens novos / projetos hipotéticos"),
+            2: ("calculada por métodos técnicos consagrados, considerando idade, vida útil e "
+                "estado de conservação"),
+            1: "arbitrada",
+        },
+        "evidence_kind": "documental",
+    },
+]
+
+TABELA7_PONTOS_III = 7
+TABELA7_PONTOS_II = 5
+TABELA7_PONTOS_I = 3
+
+
+def classify_custo_fundamentacao(item_scores: Mapping[int, Any]) -> Dict[str, Any]:
+    """Tabela 7: enquadramento do método da quantificação de custo.
+
+    Pontos mínimos 7/5/3. Obrigatórios: Grau III → item 1 no Grau III e os
+    demais no mínimo no Grau II; Grau II → itens 1 e 2 no mínimo no Grau II;
+    Grau I → todos no mínimo no Grau I.
+
+    Every item here is documentary: none is computed from the market sample.
+    A pending item blocks the enquadramento — absence is never approval.
+    """
+    source = {"edition": EDITION_PART2, "clause": "Tabela 7 / 9.3", "page": 35,
+              "status": "verified"}
+    pending_items = [i for i in (1, 2, 3) if item_scores.get(i) is None]
+    numeric = {i: int(item_scores.get(i) or 0) for i in (1, 2, 3)}
+    pontos = sum(numeric.values())
+
+    if pending_items:
+        return {
+            "grade": None, "points": pontos, "pending_items": pending_items,
+            "detail": (
+                f"Itens {pending_items} da Tabela 6 pendentes; enquadramento da Tabela 7 "
+                f"não é aprovado por ausência (pontos conhecidos={pontos})."
+            ),
+            "source": source, "evidence_status": EVIDENCE_PENDING,
+        }
+
+    if pontos >= TABELA7_PONTOS_III and numeric[1] >= 3 and numeric[2] >= 2 and numeric[3] >= 2:
+        grade, detail = 3, f"Tabela 7: Grau III (pontos={pontos}). 9.3.1 exige laudo na modalidade completa."
+    elif pontos >= TABELA7_PONTOS_II and numeric[1] >= 2 and numeric[2] >= 2:
+        grade, detail = 2, f"Tabela 7: Grau II (pontos={pontos})."
+    elif pontos >= TABELA7_PONTOS_I and all(v >= 1 for v in numeric.values()):
+        grade, detail = 1, f"Tabela 7: Grau I (pontos={pontos})."
+    else:
+        grade, detail = None, f"Tabela 7: não classificado (pontos={pontos})."
+
+    return {
+        "grade": grade, "points": pontos, "pending_items": [],
+        "detail": detail, "source": source, "evidence_status": EVIDENCE_CALCULATED,
+    }
+
+
+#: Bases of value, with the method that legitimately produces each one.
+#: ``derivable_from_market_regression`` is the guard that A06 turns on.
+VALUE_BASES: Dict[str, Dict[str, Any]] = {
+    "valor_de_mercado": {
+        "label": "Valor de mercado",
+        "definition_clause": "ABNT NBR 14653-1:2019, 3.1.47",
+        "definition": ("quantia mais provável pela qual se negociaria voluntária e "
+                       "conscientemente um bem, em uma data de referência, dentro das "
+                       "condições do mercado vigente"),
+        "produced_by": ["metodo_comparativo_direto_regressao"],
+        "derivable_from_market_regression": True,
+    },
+    "custo_de_reproducao": {
+        "label": "Custo de reprodução",
+        "definition_clause": "ABNT NBR 14653-1:2019, 3.1.11.5",
+        "definition": ("custo necessário para reproduzir um bem idêntico, com a consideração "
+                       "dos seus insumos pertinentes, sem considerar eventual depreciação"),
+        "produced_by": ["metodo_quantificacao_de_custo"],
+        "derivable_from_market_regression": False,
+        "required_memory": ["custo_direto", "bdi"],
+    },
+    "custo_de_reedicao": {
+        "label": "Custo de reedição",
+        "definition_clause": "ABNT NBR 14653-1:2019, 3.1.11.3",
+        "definition": "custo de reprodução, descontada a depreciação do bem, tendo em vista o estado em que se encontra",
+        "produced_by": ["metodo_quantificacao_de_custo"],
+        "derivable_from_market_regression": False,
+        "required_memory": ["custo_direto", "bdi", "depreciacao_fisica"],
+    },
+    "custo_de_substituicao": {
+        "label": "Custo de substituição",
+        "definition_clause": "ABNT NBR 14653-1:2019, 3.1.11.6",
+        "definition": "custo de reedição de um bem, com a mesma utilidade e características assemelhadas ao avaliando",
+        "produced_by": ["metodo_quantificacao_de_custo"],
+        "derivable_from_market_regression": False,
+        "required_memory": ["custo_direto", "bdi", "depreciacao_fisica"],
+    },
+    "valor_em_risco": {
+        "label": "Valor em risco",
+        "definition_clause": "ABNT NBR 14653-1:2019, 3.1.51",
+        "definition": ("valor representativo da parcela do bem que se deseja segurar e que "
+                       "pode corresponder ao valor máximo segurável"),
+        "produced_by": ["definicao_contratual_apolice"],
+        "derivable_from_market_regression": False,
+        "note": (
+            "Parte 1:2019 (0.3) coloca o valor em risco ora na abordagem pelo valor de "
+            "mercado (quando o bem é segurado pelo valor de mercado), ora entre os valores "
+            "específicos (quando os critérios da apólice diferem do valor de mercado). "
+            "Qual dos dois se aplica é definido PELA APÓLICE, não pelo avaliador."
+        ),
+    },
+    "limite_maximo_de_garantia": {
+        "label": "Limite máximo de garantia (LMG)",
+        "definition_clause": "ato regulatório/contratual do produto securitário",
+        "definition": "montante máximo indenizável definido pelas condições contratuais",
+        "produced_by": ["definicao_contratual_apolice"],
+        "derivable_from_market_regression": False,
+        "note": "Não é um tipo de valor da ABNT NBR 14653-1; é cláusula do contrato de seguro.",
+    },
+}
+
+
+def value_basis_guard(basis_id: str, produced_by_method: str) -> Dict[str, Any]:
+    """Refuse a base of value that the declared method cannot produce.
+
+    This is the A06 guard: a comparative-method regression estimates market
+    value and must never be converted into a reconstruction cost or into a
+    contractual guarantee limit by an arbitrary coefficient.
+    """
+    basis = VALUE_BASES.get(basis_id)
+    if basis is None:
+        return {
+            "status": "unsupported",
+            "basis": basis_id,
+            "detail": f"base de valor desconhecida: {basis_id!r}; não há regra registrada.",
+        }
+    if produced_by_method in basis["produced_by"]:
+        return {
+            "status": "ok",
+            "basis": basis_id,
+            "method": produced_by_method,
+            "definition_clause": basis["definition_clause"],
+            "detail": f"{basis['label']} é produzido por {produced_by_method}.",
+        }
+    return {
+        "status": "refused",
+        "basis": basis_id,
+        "method": produced_by_method,
+        "definition_clause": basis["definition_clause"],
+        "required_method": list(basis["produced_by"]),
+        "required_memory": basis.get("required_memory") or [],
+        "detail": (
+            f"{basis['label']} ({basis['definition_clause']}) NÃO é produzido por "
+            f"{produced_by_method}. Exige {basis['produced_by']}. Converter preço de "
+            "mercado nessa base por coeficiente é vedado: são grandezas distintas."
+        ),
+    }
+
+
+# --- 10.1: conteúdo mínimo do laudo completo ---------------------------------
+
+LAUDO_COMPLETO_ITEMS: List[Dict[str, Any]] = [
+    {"key": "a", "id": "10.1.a", "requirement": "identificação do solicitante"},
+    {"key": "b", "id": "10.1.b", "requirement": "finalidade do laudo, quando informada pelo solicitante"},
+    {"key": "c", "id": "10.1.c", "requirement": "objetivo da avaliação"},
+    {"key": "d", "id": "10.1.d", "requirement": "pressupostos, ressalvas e fatores limitantes",
+     "cross_reference": "7.2 da ABNT NBR 14653-1:2001 (renumerada na edição 2019)"},
+    {"key": "e", "id": "10.1.e", "requirement": "identificação e caracterização do imóvel avaliando",
+     "cross_reference": "7.3 da ABNT NBR 14653-1:2001, no que couber"},
+    {"key": "f", "id": "10.1.f", "requirement": "diagnóstico do mercado",
+     "cross_reference": "7.7.2 da ABNT NBR 14653-1:2001"},
+    {"key": "g", "id": "10.1.g", "requirement": "indicação do(s) método(s) e procedimento(s) utilizado(s)",
+     "cross_reference": "Seção 8 da ABNT NBR 14653-1:2001"},
+    {"key": "h", "id": "10.1.h", "requirement": (
+        "especificação da avaliação: grau de fundamentação e de precisão atingidos; "
+        "demonstrativo da pontuação quando solicitado pelo contratante")},
+    {"key": "i", "id": "10.1.i", "requirement": "planilha dos dados utilizados"},
+    {"key": "j", "id": "10.1.j", "requirement": (
+        "no método comparativo: descrição das variáveis do modelo, com o critério de "
+        "enquadramento de cada característica dos elementos amostrais e a escala das "
+        "diferenças qualitativas")},
+    {"key": "k", "id": "10.1.k", "requirement": (
+        "tratamento dos dados e identificação do resultado: cálculos efetuados, campo de "
+        "arbítrio se for o caso, justificativas do resultado adotado e, no método "
+        "comparativo, o gráfico de preços observados versus valores estimados pelo modelo")},
+    {"key": "l", "id": "10.1.l", "requirement": "resultado da avaliação e sua data de referência"},
+    {"key": "m", "id": "10.1.m", "requirement": (
+        "qualificação legal completa e assinatura do(s) profissional(is) responsável(is)")},
+]
+
+#: 9.2.1.1: additional obligations to reach Grau III, beyond the Tabela 1 points.
+GRAU_III_ADDITIONAL_REQUIREMENTS: List[Dict[str, Any]] = [
+    {"id": "9.2.1.1.a", "requirement": "apresentação do laudo na modalidade completa",
+     "verification": "documental"},
+    {"id": "9.2.1.1.b", "requirement": (
+        "análise do modelo no laudo, com verificação da coerência do comportamento da "
+        "variação das variáveis em relação ao mercado e suas elasticidades em torno do "
+        "ponto de estimação"),
+     "verification": "professional_evidenced",
+     "note": "As elasticidades são calculáveis; a COERÊNCIA com o mercado é juízo profissional."},
+    {"id": "9.2.1.1.c", "requirement": (
+        "identificação completa dos endereços dos dados de mercado usados no modelo e das "
+        "fontes de informação"),
+     "verification": "documental"},
+    {"id": "9.2.1.1.d", "requirement": "adoção da estimativa de tendência central",
+     "verification": "calculated"},
+]
+
+#: 9.1.2: when not even Grau I is reached, the laudo must identify and justify
+#: the unmet items — the standard's own route for a non-classified result.
+NAO_CLASSIFICADO_OBLIGATION = {
+    "id": "9.1.2",
+    "clause": "9.1.2",
+    "requirement": (
+        "Nos casos em que o grau mínimo I não for atingido, devem ser indicados e "
+        "justificados os itens das tabelas de especificação que não puderam ser atendidos, "
+        "bem como os procedimentos e cálculos utilizados na identificação do valor."
+    ),
+    "consequence": (
+        "Um resultado não classificado NÃO é um beco sem saída normativo: é uma via "
+        "prevista, condicionada a indicação e justificativa explícitas. É exatamente o "
+        "que sustenta o estado analysis_only do produto."
+    ),
+}
+
+#: 6.3.1 (Parte 1:2019): vistoria is essential; a situação-paradigma is
+#: admitted only exceptionally, agreed between the parties and stated in the
+#: laudo. Tabela 1 item 1 Grau I is precisely "adoção de situação paradigma".
+VISTORIA_REQUIREMENT = {
+    "id": "parte1.6.3.1",
+    "edition": EDITION_PART1_2019,
+    "clause": "6.3.1 / 6.3.2 / 6.3.3",
+    "requirement": (
+        "A vistoria é atividade essencial. Em casos excepcionais, quando impossível ou "
+        "inviável, admite-se situação-paradigma, desde que acordada entre as partes e "
+        "explicitada no laudo. Recomenda-se que a vistoria seja realizada pelo "
+        "responsável técnico."
+    ),
+    "verification": "professional_evidenced",
+    "link_to_tabela1": "Tabela 1 item 1 Grau I corresponde à adoção de situação-paradigma.",
+}
+
+#: 6 a) e b) (Parte 1:2019): the standard's own taxonomy of finalidade and
+#: objetivo. The qualification profile reuses it instead of inventing one.
+FINALIDADES = [
+    "locação", "arrendamento", "comodato", "aquisição", "doação", "alienação",
+    "dação em pagamento", "permuta", "garantia", "fins contábeis", "seguro",
+    "arrematação", "adjudicação", "indenização", "tributação",
+]
+OBJETIVOS = [
+    "valor de mercado de compra e venda", "valor de mercado de locação",
+    "valor em risco", "valor patrimonial", "valor econômico", "custo de reedição",
+    "valor de liquidação forçada", "valor de desmonte", "indicadores de viabilidade",
+]
+FINALIDADE_OBJETIVO_SOURCE = {
+    "edition": EDITION_PART1_2019, "clause": "Seção 6 a) e b)", "page": 23,
+    "note": "6.6: a metodologia deve ser compatível com a natureza do bem, o objetivo e a finalidade.",
+}
