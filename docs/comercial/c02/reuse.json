@@ -1,0 +1,40 @@
+{
+  "front": "C02",
+  "campaign": "MP-COM-20260912-V2",
+  "decision": "use_already_installed_libraries",
+  "copied_fragments": [],
+  "vendor_dir": "third_party/vendor/c02/",
+  "libraries": [
+    {
+      "name": "streamlit",
+      "already_in_product": true,
+      "reason": "UI existente (P02). Sem nova dependência global.",
+      "spdx": "Apache-2.0"
+    },
+    {
+      "name": "httpx",
+      "already_in_product": true,
+      "reason": "JobClient contra rotas reais /preview /jobs /projects.",
+      "spdx": "BSD-3-Clause"
+    },
+    {
+      "name": "pandas",
+      "already_in_product": true,
+      "reason": "Heurística de identificação já existente em forms.py.",
+      "spdx": "BSD-3-Clause"
+    }
+  ],
+  "candidates_inspected_not_adopted": [
+    {
+      "name": "playwright",
+      "reason": "Já é candidato de teste P02/P04. C02 não adiciona dependência global; se ausente, registra indisponibilidade honesta.",
+      "proposal_to": "C04"
+    },
+    {
+      "name": "pyHanko",
+      "reason": "Assinatura PDF pertence à C03 deste lote. C02 exporta para assinador externo e importa o arquivo original.",
+      "proposal_to": "C03"
+    }
+  ],
+  "new_global_dependency_proposal": null
+}

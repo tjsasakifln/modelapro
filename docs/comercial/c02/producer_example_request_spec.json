@@ -1,0 +1,44 @@
+{
+  "schema_version": "MP/1",
+  "note": "Exemplo sintético do produtor C02. Não é caso real nem aceite institucional.",
+  "synthetic": true,
+  "target_col": "preco",
+  "candidate_cols": ["area", "bairro"],
+  "roles": {
+    "preco": "target",
+    "area": "predictor",
+    "bairro": "predictor"
+  },
+  "target_unit": "BRL",
+  "reference_date": "2024-01-15",
+  "inspection_date": "2024-01-10",
+  "applicant": "Solicitante sintético",
+  "purpose": "avaliacao_profissional",
+  "rights": "plena_propriedade",
+  "recipient_id": "solicitante",
+  "value_basis": "market_value",
+  "asset_scope": "urban_real_estate",
+  "qualification_profile": {
+    "id": "urban-comparative-market-professional",
+    "version": "1",
+    "source_set_sha256": null,
+    "purpose": "avaliacao_profissional",
+    "value_basis": "market_value",
+    "method": "comparative_regression",
+    "asset_scope": "urban_real_estate",
+    "recipient_id": "solicitante"
+  },
+  "search_policy": {
+    "mode": "default",
+    "budget": null,
+    "objective": "minimum_fundamentacao_grade",
+    "seed": null,
+    "minimum_fundamentacao_grade": 2
+  },
+  "evaluation_policy": {
+    "method": "holdout",
+    "partitions": null,
+    "groups": null,
+    "seed": null
+  }
+}

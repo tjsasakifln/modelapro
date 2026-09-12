@@ -1,0 +1,35 @@
+{
+  "schema_version": "MP-QUAL/1",
+  "note": "Exemplo sintético do consumidor C02 para provenance.qualification_context emitido por C01. Não é prova de C05/C01 ao vivo.",
+  "synthetic": true,
+  "profile": {
+    "id": "urban-comparative-market-professional",
+    "version": "1",
+    "source_set_sha256": null,
+    "purpose": "avaliacao_profissional",
+    "value_basis": "market_value",
+    "method": "comparative_regression",
+    "asset_scope": "urban_real_estate",
+    "recipient_id": "solicitante"
+  },
+  "result_fingerprint": "synthetic-fingerprint-not-a-real-case",
+  "calculation_status": "valid_not_released",
+  "rule_results": [
+    {
+      "rule_id": "example.pending_c05",
+      "source_id": "C05.catalog",
+      "edition_or_version": null,
+      "clause": null,
+      "applicability": "applicable",
+      "status": "unverified",
+      "observed": null,
+      "criterion_ref": null,
+      "evidence_refs": [],
+      "explanation": "Catálogo C05 ainda não publicado nesta BASE_SHA. unverified não é passed."
+    }
+  ],
+  "grade_requirement_status": "pending",
+  "case_release_status": "review_required",
+  "review_events": [],
+  "institution_acceptance": null
+}

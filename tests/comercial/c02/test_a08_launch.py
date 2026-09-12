@@ -1,4 +1,4 @@
-"""Entrada real frontend/app.py — duas execuções in-process."""
+"""C02-A08: AppTest of the real frontend/app.py twice; professional path headings."""
 
 import os
 from pathlib import Path
@@ -10,7 +10,7 @@ os.environ.setdefault("MODELA_DISABLE_WS", "1")
 
 from frontend.components.layout import FIXTURE_SCREEN_NOTICE
 
-APP = str(Path(__file__).resolve().parents[2] / "frontend" / "app.py")
+APP = str(Path(__file__).resolve().parents[3] / "frontend" / "app.py")
 
 
 def _collect_text(at: AppTest) -> str:
@@ -21,10 +21,7 @@ def _collect_text(at: AppTest) -> str:
             continue
         for el in block:
             value = getattr(el, "value", None)
-            if value is not None:
-                chunks.append(str(value))
-            else:
-                chunks.append(str(el))
+            chunks.append(str(value if value is not None else el))
     return "\n".join(chunks)
 
 
@@ -40,13 +37,14 @@ def _run_once() -> str:
     assert "vistoria" in blob
     assert "modelagem" in blob
     assert "emissão" in blob or "emissao" in blob
-    assert "modela pro" in blob or "avaliação" in blob
-    assert "r² ajustado" not in blob
+    assert "atende à norma" not in blob
     assert "aceito pelo banco" not in blob
+    assert "aceito pela seguradora" not in blob
+    assert "r² ajustado" not in blob
     return text
 
 
-def test_launch_frontend_app_twice():
+def test_launch_professional_path_twice():
     first = _run_once()
     second = _run_once()
     assert first

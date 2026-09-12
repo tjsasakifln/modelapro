@@ -170,7 +170,8 @@ def _drive_two_files(sync_playwright, ui_port: int, csv_path: Path, xlsx_path: P
         page = context.new_page()
         page.on("request", lambda req: request_log.append({"method": req.method, "url": req.url}) if "/jobs" in req.url or "/preview" in req.url else None)
         page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(2000)
+        page.wait_for_selector("text=MODELA PRO", timeout=45000)
+        page.wait_for_timeout(500)
         page.screenshot(path=str(shots / "desktop-empty.png"))
         _upload_and_run(page, csv_path, "csv")
         page.set_viewport_size({"width": 390, "height": 720})
@@ -187,14 +188,24 @@ def _drive_two_files(sync_playwright, ui_port: int, csv_path: Path, xlsx_path: P
     (shots / "requests.json").write_text(json.dumps(sanitised, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _market_file_input(page):
+    labeled = page.locator("[data-testid='stFileUploader']").filter(
+        has_text="Arquivo de dados de mercado"
+    ).locator("input[type='file']")
+    if labeled.count() >= 1:
+        return labeled.first
+    return page.locator("input[type='file']").first
+
+
 def _upload_and_run(page, path: Path, tag: str) -> None:
-    file_input = page.locator("input[type='file']").first
+    file_input = _market_file_input(page)
     file_input.set_input_files(str(path))
     try:
-        page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=60000)
+        page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=90000)
     except Exception:
+        file_input = _market_file_input(page)
         file_input.set_input_files(str(path))
-        page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=60000)
+        page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=90000)
     area = page.get_by_placeholder("ex.: 73,5")
     assert area.count() >= 1, "subject area field missing; body=" + page.inner_text("body")[:1500]
     area.first.click()

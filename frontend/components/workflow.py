@@ -43,13 +43,17 @@ GRADE_REQUIREMENT_LABELS = {
 }
 
 DEPENDENTS_BY_CHANGE = {
-    "file": ("preview", "mapping", "subject", "result"),
-    "import_options": ("preview", "mapping", "subject", "result"),
-    "subject": ("result",),
-    "policy": ("result",),
-    "unit": ("result",),
-    "dates": ("result",),
-    "target": ("subject", "result"),
+    "file": ("preview", "mapping", "subject", "result", "review", "issuance"),
+    "import_options": ("preview", "mapping", "subject", "result", "review", "issuance"),
+    "subject": ("result", "review", "issuance"),
+    "policy": ("result", "review", "issuance"),
+    "unit": ("result", "review", "issuance"),
+    "dates": ("result", "review", "issuance"),
+    "target": ("subject", "result", "review", "issuance"),
+    "profile": ("result", "review", "issuance"),
+    "sample": ("preview", "mapping", "result", "review", "issuance"),
+    "document": ("review", "issuance"),
+    "inspection": ("result", "review", "issuance"),
 }
 
 BATCH_UI_VALIDO = "valido"
@@ -278,7 +282,52 @@ def apply_invalidation(session: Mapping[str, Any], change: str) -> dict:
             out["p02_result_stale"] = True
             out["p02_result_stale_reason"] = _stale_reason(change)
         out["p02_current_result_belongs_to"] = "previous_version"
+    if "review" in dropped or "issuance" in dropped:
+        previous_events = out.get("c02_review_events")
+        if previous_events is not None:
+            out["c02_review_events_history"] = list(previous_events)
+        out["c02_review_stale"] = True
+        out["c02_signature_stale"] = True
+        out["c02_issuance_stale"] = True
+        out["c02_consent_reusable"] = False
+        out["c02_invalidation_reason"] = _stale_reason(change)
+        # History is kept; live events must be rebound to the new fingerprint.
     return out
+
+
+INVALIDATION_FLAG_KEYS = (
+    "p02_result_stale",
+    "p02_result_stale_reason",
+    "p02_previous_snapshot",
+    "p02_current_result_belongs_to",
+    "c02_review_stale",
+    "c02_signature_stale",
+    "c02_issuance_stale",
+    "c02_consent_reusable",
+    "c02_invalidation_reason",
+    "c02_review_events_history",
+)
+
+_DROPPED_ON_INVALIDATION = (
+    "c09_preview",
+    "c09_preview_token",
+    "p02_preview",
+    "p02_preview_token",
+    "p02_form_model",
+    "p02_mapping",
+    "p02_roles",
+    "p02_units",
+    "p02_subject",
+    "p02_raw_values",
+)
+
+
+def merge_invalidation(session: Mapping[str, Any], change: str) -> tuple:
+    """Flags to write after widgets exist. Never copies widget keys back."""
+    out = apply_invalidation(session, change)
+    flags = {key: out[key] for key in INVALIDATION_FLAG_KEYS if key in out}
+    dropped = [key for key in _DROPPED_ON_INVALIDATION if key in session and key not in out]
+    return flags, dropped
 
 
 def _stale_reason(change: str) -> str:
@@ -290,6 +339,10 @@ def _stale_reason(change: str) -> str:
         "unit": "A unidade mudou. O resultado abaixo pertence à versão anterior.",
         "dates": "A data-base ou a vistoria mudaram. O resultado abaixo pertence à versão anterior.",
         "target": "O alvo mudou. O resultado abaixo pertence à versão anterior.",
+        "profile": "O perfil de qualificação mudou. Emissão e revisão anteriores ficam no histórico e não autorizam a versão atual.",
+        "sample": "A amostra mudou. O resultado e a emissão abaixo pertencem à versão anterior.",
+        "document": "Um documento ou evidência mudou. A revisão/assinatura anterior não pode ser reutilizada.",
+        "inspection": "A vistoria mudou. O resultado abaixo pertence à versão anterior.",
     }
     return labels.get(change, "Há um resultado de uma versão anterior deste trabalho.")
 
