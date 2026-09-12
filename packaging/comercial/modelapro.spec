@@ -64,6 +64,7 @@ hiddenimports = (
     collect_submodules("backend")
     + collect_submodules("frontend")
     + collect_submodules("modules")
+    + collect_submodules("streamlit")
     + collect_submodules("pyhanko")
     + collect_submodules("pyhanko_certvalidator")
     + ["c15_local.launcher"]

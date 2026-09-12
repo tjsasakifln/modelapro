@@ -229,6 +229,19 @@ def _terminate(procs: Sequence[subprocess.Popen]) -> None:
             proc.kill()
 
 
+def _log_frozen_child_diagnostics(logger, log_dir: Path) -> None:
+    """Copy frozen child tracebacks into the parent product log."""
+    for diagnostic in sorted(log_dir.glob("frozen-child-error-*.log")):
+        try:
+            detail = diagnostic.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.error(
+                "Could not read frozen child diagnostic %s: %s", diagnostic, exc
+            )
+            continue
+        logger.error("Frozen child diagnostic %s:\n%s", diagnostic, detail[-12_000:])
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Start MODELA PRO locally (loopback API + Streamlit process)."
@@ -333,6 +346,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             time.sleep(0.5)
     except Exception:
         _terminate(procs)
+        _log_frozen_child_diagnostics(logger, Path(cfg.LOG_DIR))
         raise
 
 
@@ -341,7 +355,27 @@ def _entrypoint(run=main) -> int:
     try:
         return run()
     except Exception:
-        traceback.print_exc()
+        detail = traceback.format_exc()
+        if sys.stderr is not None:
+            sys.stderr.write(detail)
+            sys.stderr.flush()
+        runtime = os.environ.get("MODELA_RUNTIME_ROOT", "").strip()
+        if runtime:
+            try:
+                diagnostic_dir = Path(runtime) / "logs"
+                diagnostic_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+                diagnostic = diagnostic_dir / f"frozen-child-error-{os.getpid()}.log"
+                diagnostic.write_text(
+                    f"command={sys.argv!r}\n{detail}", encoding="utf-8"
+                )
+                try:
+                    os.chmod(diagnostic, 0o600)
+                except OSError:
+                    pass
+            except OSError:
+                # Diagnostic persistence must not resurrect the windowed
+                # PyInstaller exception dialog that this boundary suppresses.
+                pass
         return 1
 
 
