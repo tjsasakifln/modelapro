@@ -212,6 +212,45 @@ Estas **não** foram corrigidas — a remediação delas nunca foi lançada:
   ser skip nem xfail, é invisível ao relatório de skips e ao agregador. É
   arquivo de P02/C02: handoff, não conserto meu.
 
+## Run 34669632998 (`cdb55ca`) — o primeiro com os `.dat` no checkout
+
+O conserto do rastreamento **funcionou**: as onze falhas de
+`test_vendored_dat_files_match_the_recorded_sha256` desapareceram. Os hashes
+agora conferem bytes que o CI de fato vê, que era o ponto.
+
+Sobraram **duas** falhas na suíte ampla, ambas em Pontius:
+
+- `test_certified_residual_standard_deviation_and_r_squared[Pontius]`
+- `test_certified_standard_deviations_of_estimates[Pontius]`
+
+Antes era **uma**. Não é regressão: a segunda estava mascarada pelas onze
+falhas de hash no mesmo arquivo. As duas são quantidades da classe "projeção"
+(`proj_rel_floor`), o que **reforça** o diagnóstico de variância de plataforma
+em vez de enfraquecê-lo: é a mesma classe de quantidade, no mesmo dataset, nas
+duas medições. Quem retomar deve medir as duas, não só a do desvio residual.
+
+### E o `p02/test_a01_playwright` **não** repetiu
+
+No run anterior (`c9ab4dc`) ele falhou com "subject area field missing". Neste
+run, com o mesmo alvo, passou. Então **é flake**, não quebra determinística.
+
+Isso não melhora o estado, piora. O contrato é explícito: flake de navegador
+que aparece de forma intermitente deve ser **reproduzido e corrigido**, não
+tolerado por uma segunda tentativa. Um teste de navegador que passa em um run e
+falha no seguinte, sobre o mesmo candidato, não sustenta afirmação nenhuma
+sobre o percurso de interface — e é justamente o arquivo do **FIND-05**, que já
+tinha o defeito de reportar verde quando o fluxo não rodava.
+
+Registro para C02 com a evidência dos dois runs:
+
+| run | SHA | resultado |
+|---|---|---|
+| 34667826006 | `c9ab4dc` | FAILED — `subject area field missing` |
+| 34669632998 | `cdb55ca` | PASSED |
+
+Não é conserto meu (arquivo de P02/C02), e **não** deve ser fechado como
+"passou na segunda vez".
+
 ## Achado sobre o próprio portão: a evidência é cancelável
 
 `c15-ci.yml` tem `concurrency` com `cancel-in-progress: true`. Perdi **dois**
