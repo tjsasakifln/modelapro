@@ -906,6 +906,27 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
             "item3_grade": _validate_degree(item3, field="declared_documentary.item3_grade"),
         }
 
+    if spec.get("qualification_profile") not in (None, {}):
+        from modules.valuation_policy.qualification import (
+            QualificationProfileError,
+            validate_qualification_profile,
+        )
+
+        try:
+            spec["qualification_profile"] = validate_qualification_profile(
+                spec.get("qualification_profile")
+            )
+        except QualificationProfileError as exc:
+            raise RequestSpecError(str(exc), exc.issues) from exc
+    elif "qualification_profile" in spec and spec.get("qualification_profile") is None:
+        spec["qualification_profile"] = None
+
+    if spec.get("cost_bom") is not None and not isinstance(spec.get("cost_bom"), Mapping):
+        raise RequestSpecError(
+            "cost_bom must be a mapping when provided",
+            [make_issue("TYPE_ERROR", "cost_bom must be a mapping")],
+        )
+
     spec["_applied_defaults"] = issues
     return spec
 
@@ -1237,6 +1258,11 @@ def freeze_result_snapshot(payload: Any) -> dict:
             "provenance must be a mapping",
             frozen_issues + [make_issue("TYPE_ERROR", "provenance must be a mapping")],
         )
+    provenance_out = dict(provenance)
+    if provenance_out.get("qualification_context") is not None:
+        provenance_out["qualification_context"] = _validate_qualification_context(
+            provenance_out.get("qualification_context"), frozen_issues
+        )
 
     frozen = {
         **canonical,
@@ -1256,7 +1282,7 @@ def freeze_result_snapshot(payload: Any) -> dict:
         "search": dict(search),
         "alternatives": list(alternatives),
         "next_actions": list(next_actions),
-        "provenance": dict(provenance),
+        "provenance": provenance_out,
     }
 
     # Artifacts and their hashes stay off the frozen snapshot so a later PDF
@@ -1277,6 +1303,100 @@ def freeze_result_snapshot(payload: Any) -> dict:
         ) from exc
 
     return frozen
+
+
+def _validate_qualification_context(raw: Any, issues: List[dict]) -> dict:
+    """Additive MP-QUAL/1 block. Absence is allowed; presence is structural."""
+    if not isinstance(raw, Mapping):
+        raise ResultSnapshotError(
+            "provenance.qualification_context must be a mapping",
+            issues + [make_issue("TYPE_ERROR", "qualification_context must be a mapping")],
+        )
+    out = dict(raw)
+    if out.get("schema_version") != "MP-QUAL/1":
+        raise ResultSnapshotError(
+            "qualification_context.schema_version must be MP-QUAL/1",
+            issues + [make_issue(
+                "SCHEMA_VERSION",
+                f"qualification_context.schema_version must be 'MP-QUAL/1', got {out.get('schema_version')!r}",
+            )],
+        )
+    grade = out.get("grade_requirement_status")
+    if grade not in {"not_requested", "met", "not_met", "pending", "error"}:
+        raise ResultSnapshotError(
+            "qualification_context.grade_requirement_status invalid",
+            issues + [make_issue("INVALID_GRADE_STATUS", "grade_requirement_status invalid")],
+        )
+    release = out.get("case_release_status")
+    if release not in {
+        "analysis_only",
+        "review_required",
+        "ready_for_professional_signoff",
+        "signed_integrity_verified",
+    }:
+        raise ResultSnapshotError(
+            "qualification_context.case_release_status invalid",
+            issues + [make_issue("INVALID_CASE_RELEASE", "case_release_status invalid")],
+        )
+    rules = out.get("rule_results")
+    if not isinstance(rules, list):
+        raise ResultSnapshotError(
+            "qualification_context.rule_results must be a list",
+            issues + [make_issue("TYPE_ERROR", "rule_results must be a list")],
+        )
+    allowed = {
+        "passed",
+        "failed",
+        "pending_manual",
+        "not_applicable",
+        "unsupported",
+        "unverified",
+        "error",
+    }
+    cleaned = []
+    for index, rule in enumerate(rules):
+        if not isinstance(rule, Mapping):
+            raise ResultSnapshotError(
+                "rule_results entries must be mappings",
+                issues + [make_issue("TYPE_ERROR", f"rule_results[{index}] must be a mapping")],
+            )
+        item = dict(rule)
+        if item.get("status") not in allowed:
+            raise ResultSnapshotError(
+                "rule status invalid",
+                issues + [make_issue("INVALID_RULE_STATUS", f"rule_results[{index}].status invalid")],
+            )
+        if item.get("status") == "passed" and item.get("unverified"):
+            item["status"] = "unverified"
+            issues.append(
+                make_issue(
+                    "UNVERIFIED_NOT_PASSED",
+                    "unverified rule cannot be stored as passed",
+                    evidence={"rule_id": item.get("rule_id")},
+                )
+            )
+        if item.get("status") == "not_applicable" and not item.get("explanation"):
+            raise ResultSnapshotError(
+                "not_applicable requires an explanation",
+                issues + [make_issue(
+                    "NOT_APPLICABLE_WITHOUT_REASON",
+                    f"rule_results[{index}] not_applicable missing explanation",
+                )],
+            )
+        for key in ("rule_id", "source_id", "status", "explanation"):
+            if not isinstance(item.get(key), str) or not item.get(key):
+                raise ResultSnapshotError(
+                    f"rule_results[{index}].{key} required",
+                    issues + [make_issue("INVALID_RULE", f"rule_results[{index}].{key} required")],
+                )
+        cleaned.append(item)
+    out["rule_results"] = cleaned
+    if not isinstance(out.get("result_fingerprint"), str) or len(out.get("result_fingerprint") or "") < 16:
+        raise ResultSnapshotError(
+            "result_fingerprint required",
+            issues + [make_issue("MISSING_FIELD", "qualification_context.result_fingerprint required")],
+        )
+    return out
 
 
 def validate_job_status_progress(progress: Any) -> Optional[float]:

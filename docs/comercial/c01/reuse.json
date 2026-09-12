@@ -1,0 +1,54 @@
+{
+  "front": "C01",
+  "schema_version": "MP-COM-REUSE/1",
+  "decision": "use_installed_libraries_no_vendor_copy",
+  "adoptions": [
+    {
+      "name": "statsmodels",
+      "origin_url": "https://github.com/statsmodels/statsmodels",
+      "pypi": "statsmodels",
+      "observed_version": "0.15.0",
+      "spdx": "BSD-3-Clause",
+      "usage": "OLS QR fit, AIC/BIC, condition_number, df_resid, influence diagnostics via public API sm.OLS(...).fit(method='qr', use_t=True)",
+      "copied_files": [],
+      "reason_dependency_vs_copy": "Library already installed; public API is the production fitter. No fork.",
+      "update_owner": "C04 (global constraints) + C01 (numeric call sites)",
+      "notes": "Not an ABNT certificate. License to be re-checked at the pinned constraint SHA by C04."
+    },
+    {
+      "name": "scipy",
+      "origin_url": "https://github.com/scipy/scipy",
+      "pypi": "scipy",
+      "observed_version": "1.18.1",
+      "spdx": "BSD-3-Clause",
+      "usage": "Student-t quantiles and independent OLS oracle in tests (scipy.stats). Production intervals use statsmodels get_prediction.",
+      "copied_files": [],
+      "reason_dependency_vs_copy": "Already installed. Independent oracle must not import product interval helpers.",
+      "update_owner": "C04 + C01",
+      "notes": "NIST StRD not incorporated; optional future numeric reference only."
+    },
+    {
+      "name": "numpy",
+      "origin_url": "https://github.com/numpy/numpy",
+      "pypi": "numpy",
+      "observed_version": "2.5.2",
+      "spdx": "BSD-3-Clause",
+      "usage": "lstsq oracle, rank, design matrices",
+      "copied_files": [],
+      "reason_dependency_vs_copy": "Already installed.",
+      "update_owner": "C04"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "CUB / ABNT full text / CAIXA manuals",
+      "reason": "Not licensed for redistribution. Cost route uses synthetic labeled BOM only."
+    },
+    {
+      "name": "scikit-learn",
+      "reason": "Not required for the announced comparative-regression core. Nested CV not used to pick the winner."
+    }
+  ],
+  "third_party_vendor_dir": "third_party/vendor/c01/",
+  "copied_fragments": []
+}

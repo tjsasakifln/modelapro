@@ -73,6 +73,8 @@ REASON_POLICY_MISMATCH = "request_spec_mismatch"
 
 DEFAULT_MAX_WORKERS = 1
 MAX_WORKERS_CAP = 8
+# Historical constant kept as a named leftover so tests can prove we do NOT
+# apply it as a statistical interval. C05 supplies arbitration when present.
 ARBITRATION_FRACTION = 0.15
 MEAN_CI_LEVEL = 0.80
 
@@ -1043,25 +1045,37 @@ def builtin_evaluate_fitted(
         )
         return _failed_assessment(candidate_id, subject_id, raw_values, used_row_ids, issues)
 
-    arb = _interval(point * (1.0 - ARBITRATION_FRACTION), point * (1.0 + ARBITRATION_FRACTION), {"fraction": ARBITRATION_FRACTION})
-    value["arbitration_interval"] = arb
+    from modules.valuation_policy.intervals import compose_value_intervals
+
+    residual_complete = LIMITATION_NO_INTERVALS not in limitations and LIMITATION_INCOMPLETE not in limitations and LIMITATION_MALFORMED not in limitations
+    c05_rule = None
+    if isinstance(spec, Mapping):
+        c05_rule = spec.get("c05_interval_rule") or (spec.get("qualification_profile") or {}).get("interval_rule")
+    unified, interval_notes = compose_value_intervals(
+        point=point,
+        mean_ci80=value.get("mean_ci80"),
+        prediction_interval=value.get("prediction_interval"),
+        c05_interval_rule=c05_rule,
+        residual_complete=residual_complete,
+        limitations=limitations,
+    )
+    value["mean_ci80"] = unified.get("mean_ci80")
+    value["prediction_interval"] = unified.get("prediction_interval")
+    value["arbitration_interval"] = unified.get("arbitration_interval")
+    value["admissible_interval"] = unified.get("admissible_interval")
+    for note in interval_notes:
+        if note not in limitations:
+            limitations.append(note)
     mean_ci80 = value.get("mean_ci80") if isinstance(value.get("mean_ci80"), Mapping) else None
-    # Incomplete residual state does not authorize a ±15% band as admissible precision.
-    if mean_ci80 and arb:
-        lo = max(float(mean_ci80["lower"]), float(arb["lower"]))
-        hi = min(float(mean_ci80["upper"]), float(arb["upper"]))
-        value["admissible_interval"] = _interval(lo, hi) if lo <= hi else None
-    else:
-        value["admissible_interval"] = None
-        if mean_ci80 is None and (LIMITATION_NO_INTERVALS in limitations or LIMITATION_INCOMPLETE in limitations or LIMITATION_MALFORMED in limitations):
-            issues.append(
-                _issue(
-                    LIMITATION_NO_INTERVALS,
-                    "warning",
-                    "c14.evaluate_fitted",
-                    "Intervalos estatísticos indisponíveis: estado residual incompleto ou malformado; faixa percentual não é IC.",
-                )
+    if mean_ci80 is None and (LIMITATION_NO_INTERVALS in limitations or LIMITATION_INCOMPLETE in limitations or LIMITATION_MALFORMED in limitations):
+        issues.append(
+            _issue(
+                LIMITATION_NO_INTERVALS,
+                "warning",
+                "c14.evaluate_fitted",
+                "Intervalos estatísticos indisponíveis: estado residual incompleto ou malformado; faixa percentual não é IC.",
             )
+        )
 
     statistical = {
         "n": n or None,

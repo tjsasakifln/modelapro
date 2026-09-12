@@ -407,23 +407,23 @@ def search_models(
     winner_rec = None
     alternatives: List[Dict[str, Any]] = []
     for rec in ordered:
-        label = rec["admissibility"].get("label")
-        if winner_rec is None and label == "admissible":
+        numeric = bool((rec.get("admissibility") or {}).get("numeric_technical"))
+        if winner_rec is None and numeric:
+            # Grade/framing is not a numeric winner gate. A fitted model with
+            # unmet fundamentação remains an analysis, not NO_WINNER.
             winner_rec = rec
             continue
-        if winner_rec is None and label != "admissible":
-            # Keep looking for an admissible winner; exploratories go to alternatives.
+        if winner_rec is None and not numeric:
             if len(alternatives) < n_alternatives:
                 rec = dict(rec)
                 rec["discard_reason"] = rec.get("discard_reason") or "exploratory_not_admissible"
                 alternatives.append(rec)
             continue
         if len(alternatives) < n_alternatives:
-            if rec["admissibility"].get("label") != "admissible":
-                rec = dict(rec)
+            rec = dict(rec)
+            if not numeric:
                 rec["discard_reason"] = rec.get("discard_reason") or "exploratory_not_admissible"
             else:
-                rec = dict(rec)
                 rec["discard_reason"] = rec.get("discard_reason") or "dominated_by_winner"
             alternatives.append(rec)
 
@@ -432,10 +432,22 @@ def search_models(
             _issue(
                 "no_admissible_winner",
                 "warning",
-                "No candidate met numeric/technical admissibility and required framing. "
+                "No candidate met numeric/technical admissibility. "
                 "Exploratory models may be listed in alternatives; none is implicitly admissible.",
             )
         )
+    elif winner_rec is not None:
+        adm = winner_rec.get("admissibility") or {}
+        if adm.get("numeric_technical") and not adm.get("framing"):
+            issues.append(
+                _issue(
+                    "grade_or_framing_not_met_analysis",
+                    "warning",
+                    "A numerically fitted model is returned as analysis; requested framing/grade "
+                    "was not met and this is not a qualified emission.",
+                    evidence={"reasons": list(adm.get("reasons") or []), "label": adm.get("label")},
+                )
+            )
 
     if len(compact_history) > HISTORY_SAMPLE_LIMIT:
         step = len(compact_history) / HISTORY_SAMPLE_LIMIT
@@ -545,11 +557,19 @@ def ranking_tuple(
     numeric = 1 if adm.get("numeric_technical") else 0
     framing = 1 if adm.get("framing") else 0
     required = list(objective.get("required_criteria") or ["original_rmse"])
-    rmse = metrics.get("original_rmse")
-    if "original_rmse" in required:
-        rmse_key = -float(rmse) if _finite_number(rmse) else float("-inf")
+    metric = objective.get("metric") or "original_rmse"
+    if metric == "original_rmse":
+        rmse = metrics.get("original_rmse")
+        if "original_rmse" in required:
+            rmse_key = -float(rmse) if _finite_number(rmse) else float("-inf")
+        else:
+            rmse_key = -float(rmse) if _finite_number(rmse) else 0.0
     else:
-        rmse_key = -float(rmse) if _finite_number(rmse) else 0.0
+        from modules.valuation_policy.selection import ranking_primary_score
+
+        rmse_key = ranking_primary_score(metrics, metric)
+        if metric in required and not _finite_number(metrics.get(metric)):
+            rmse_key = float("-inf")
     amp_key = 0.0
     if "precision_amplitude_pct" in required:
         amp = metrics.get("precision_amplitude_pct")
@@ -660,6 +680,7 @@ def build_search_cache_key(
     evaluation_policy.pop("extra_objective", None)
     search_policy.pop("progress_callback", None)
     scope = search_policy.get("model_scope") or request_spec.get("model_scope") or "population_model"
+    profile = request_spec.get("qualification_profile") or {}
     components = {
         "dataset_sha256": prepared_dataset.get("dataset_sha256"),
         "sample_fingerprint": _sample_fingerprint(prepared_dataset),
@@ -677,6 +698,11 @@ def build_search_cache_key(
         "y_transformations": y_transformations_from_policy(search_policy),
         "subject": None,
         "model_scope": scope,
+        "qualification_profile": {
+            "id": profile.get("id") if isinstance(profile, Mapping) else None,
+            "version": profile.get("version") if isinstance(profile, Mapping) else None,
+            "value_basis": profile.get("value_basis") if isinstance(profile, Mapping) else None,
+        },
     }
     if scope == "subject_specific" and subject_design is not None:
         components["subject"] = subject_design.get("raw_values") or subject_design.get("subject_raw")
@@ -1336,21 +1362,9 @@ def _resolve_mode(
 def _objective_descriptor(
     search_policy: Mapping[str, Any], evaluation_policy: Mapping[str, Any]
 ) -> Dict[str, Any]:
-    name = search_policy.get("objective") or "original_scale_error"
-    required = list(search_policy.get("required_criteria") or ["original_rmse"])
-    if evaluation_policy.get("require_precision") and "precision_amplitude_pct" not in required:
-        required.append("precision_amplitude_pct")
-    return {
-        "name": name,
-        "scale": "original",
-        "required_criteria": required,
-        "optional_criteria": ["precision_amplitude_pct", "stability", "complexity"],
-        "tie_break": "candidate_id_lexicographic_asc",
-        "does_not_use": [
-            "r2_across_transformed_vs_original_scales",
-            "automatic_sample_row_removal",
-        ],
-    }
+    from modules.valuation_policy.selection import objective_descriptor
+
+    return objective_descriptor(search_policy, evaluation_policy)
 
 
 def _resolve_hooks(request_spec: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1740,6 +1754,10 @@ def _fit_and_score(
         diagnostics = candidate_fit.get("diagnostics") if isinstance(candidate_fit, dict) else getattr(candidate_fit, "diagnostics", {}) or {}
         record["diagnostics"] = diagnostics or {}
         record["candidate_fit"] = candidate_fit
+        if _finite_number((diagnostics or {}).get("aic")):
+            record.setdefault("_fit_info", {})["aic"] = float(diagnostics["aic"])
+        if _finite_number((diagnostics or {}).get("bic")):
+            record.setdefault("_fit_info", {})["bic"] = float(diagnostics["bic"])
         if callable(evaluate_fitted) and subject_design is not None:
             try:
                 assessment = evaluate_fitted(candidate_fit, subject_design, request_spec)
@@ -1853,6 +1871,15 @@ def _fit_and_score(
         "n_outliers_removed": len(outliers_removed),
         "y_transformation": y_name,
     }
+    fit_info = record.get("_fit_info") or {}
+    diagnostics = record.get("diagnostics") or {}
+    for key in ("aic", "bic"):
+        raw = fit_info.get(key)
+        if raw is None:
+            raw = diagnostics.get(key)
+        if _finite_number(raw):
+            metrics[key] = float(raw)
+            criteria_used.append(key)
     if _finite_number(rmse):
         metrics["original_rmse"] = float(rmse)
         criteria_used.append("original_rmse")
