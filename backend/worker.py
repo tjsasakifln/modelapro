@@ -513,6 +513,7 @@ def build_frozen_project(
     artifact_refs: Mapping[str, Any],
     sample_ledger: Any,
     search_audit: Any = None,
+    value: Any = None,
 ) -> dict:
     candidate_spec = _as_dict(_get(winner_fit, "candidate_spec")) or {}
     feature_schema = _as_dict(_get(prepared_dataset, "feature_schema")) or _as_dict(
@@ -627,6 +628,7 @@ def build_frozen_project(
         },
         "calculation_version": CALCULATION_VERSION,
         "residual_state": residual_state,
+        "value": dict(value) if isinstance(value, Mapping) else None,
     }
 
 
@@ -977,6 +979,50 @@ def _pvalues_from_fit(winner_fit: Any) -> Dict[str, Any]:
     return pvalues
 
 
+def _documentary_from_spec(spec: Mapping[str, Any]) -> dict:
+    """Map RequestSpec.declared_documentary onto the C05/legacy documentary shape.
+
+    Canonical RequestSpec keys are item1_grade / item3_grade plus optional
+    nested item1/item3 provenance. assess_normative reads itemN.grade and
+    itemN.provenance (or grau_itemN / itemN_provenance on the context).
+    """
+    raw = spec.get("declared_documentary") if isinstance(spec.get("declared_documentary"), Mapping) else None
+    if raw is None and isinstance(spec.get("documentary"), Mapping):
+        raw = spec.get("documentary")
+    if not isinstance(raw, Mapping):
+        return {}
+    out = dict(raw)
+    for item, grade_key, prov_key in (
+        (1, "item1_grade", "item1_provenance"),
+        (3, "item3_grade", "item3_provenance"),
+    ):
+        nested_key = f"item{item}"
+        nested = dict(out.get(nested_key) or {}) if isinstance(out.get(nested_key), Mapping) else {}
+        if out.get(grade_key) is not None and nested.get("grade") is None:
+            nested["grade"] = out.get(grade_key)
+        if out.get(prov_key) is not None and not nested.get("provenance"):
+            nested["provenance"] = out.get(prov_key)
+        if nested:
+            out[nested_key] = nested
+    return out
+
+
+def _declared_item_grade(spec: Mapping[str, Any], item: int) -> Any:
+    doc = _documentary_from_spec(spec)
+    nested = doc.get(f"item{item}") if isinstance(doc.get(f"item{item}"), Mapping) else {}
+    if nested.get("grade") is not None:
+        return nested.get("grade")
+    return doc.get(f"item{item}_grade")
+
+
+def _declared_item_provenance(spec: Mapping[str, Any], item: int) -> Any:
+    doc = _documentary_from_spec(spec)
+    nested = doc.get(f"item{item}") if isinstance(doc.get(f"item{item}"), Mapping) else {}
+    if nested.get("provenance") is not None:
+        return nested.get("provenance")
+    return doc.get(f"item{item}_provenance")
+
+
 def _normative_context_from_fit(
     winner_fit: Any,
     prepared: Any,
@@ -1050,7 +1096,11 @@ def _normative_context_from_fit(
         "central_estimate": _point_from(assessment),
         "axes": axes,
         "extrapolation_details": axes,
-        "documentary": spec.get("declared_documentary") or spec.get("documentary") or {},
+        "documentary": _documentary_from_spec(spec),
+        "grau_item1": _declared_item_grade(spec, 1),
+        "grau_item3": _declared_item_grade(spec, 3),
+        "item1_provenance": _declared_item_provenance(spec, 1),
+        "item3_provenance": _declared_item_provenance(spec, 3),
         "request_spec": spec,
         "used_row_ids": used_ids,
         "statistical": statistical,
@@ -1614,6 +1664,7 @@ def compose_valuation_job(
         artifact_refs=artifact_refs,
         sample_ledger=sample_ledger,
         search_audit=search_audit,
+        value=snapshot.get("value") if isinstance(snapshot, Mapping) else None,
     )
     try:
         frozen_bytes = dumps_strict(frozen_project).encode("utf-8")

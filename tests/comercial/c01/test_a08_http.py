@@ -12,6 +12,7 @@ from backend.api import app
 from backend.worker import peer_kind, resolve_peers
 from tests.comercial.c01.conftest import (
     SCRATCH,
+    dump_bytes,
     dump_json,
     gold_csv_bytes,
     gold_spec,
@@ -84,9 +85,21 @@ def test_gold_job_twice_and_inapto_refusal(tmp_path):
         assert wf.get("grade_requirement_status") in {"met", "not_requested", "pending"}
         qc = (snap.get("provenance") or {}).get("qualification_context") or {}
         assert qc.get("schema_version") == "MP-QUAL/1"
-        artifacts = client.get(f"/jobs/{job_id}/artifacts/frozen_project.json")
-        # frozen may be on the job store even if this named route 404s
-        assert result.status_code == 200
+        frozen_resp = client.get(f"/jobs/{job_id}/artifacts/frozen_project.json")
+        log_lines.append(f"gold_{i+1} frozen {frozen_resp.status_code}")
+        assert frozen_resp.status_code == 200, frozen_resp.text
+        frozen = json.loads(frozen_resp.content.decode("utf-8"))
+        dump_json(f"a08_gold_{i+1}_frozen.json", frozen)
+        assert frozen.get("schema_version") == "MP/1"
+        assert isinstance(frozen.get("model_state"), dict) and frozen["model_state"]
+        frozen_point = (frozen.get("value") or {}).get("point")
+        assert frozen_point == snap["value"]["point"]
+        bundle_resp = client.get(f"/jobs/{job_id}/artifacts/evidence_bundle.zip")
+        log_lines.append(f"gold_{i+1} evidence_bundle {bundle_resp.status_code} bytes={len(bundle_resp.content)}")
+        assert bundle_resp.status_code == 200, bundle_resp.text
+        assert len(bundle_resp.content) > 4
+        assert bundle_resp.content[:2] == b"PK"
+        dump_bytes(f"a08_gold_{i+1}_evidence_bundle.zip", bundle_resp.content)
     assert bodies[0]["value"]["point"] == bodies[1]["value"]["point"]
 
     inapto_spec = gold_spec(candidate_cols=[])

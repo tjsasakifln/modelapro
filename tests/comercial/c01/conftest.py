@@ -38,6 +38,35 @@ def gold_subject():
     return {"area": 73.5, "bairro": "Centro"}
 
 
+def apto_declared_documentary() -> dict:
+    """Synthetic documentary declaration with provenance. Not independent verification."""
+    provenance_1 = {
+        "professional_id": "SYNTHETIC-C01-APTO",
+        "source": "synthetic-inspection-record",
+        "inspected_at": "2024-06-15",
+        "note": SYNTHETIC_LABEL,
+    }
+    provenance_3 = {
+        "professional_id": "SYNTHETIC-C01-APTO",
+        "source": "synthetic-market-identification",
+        "collected_at": "2024-06-01",
+        "note": SYNTHETIC_LABEL,
+    }
+    return {
+        "item1_grade": 1,
+        "item3_grade": 1,
+        "item1": {"grade": 1, "provenance": provenance_1},
+        "item3": {"grade": 1, "provenance": provenance_3},
+        "item1_provenance": provenance_1,
+        "item3_provenance": provenance_3,
+    }
+
+
+def dump_bytes(name: str, data: bytes) -> None:
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    (SCRATCH / name).write_bytes(data)
+
+
 def _shutdown_runner() -> None:
     runner = RuntimeBindings.task_runner
     if runner is not None and hasattr(runner, "shutdown"):

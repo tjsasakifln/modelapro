@@ -8,7 +8,12 @@ from backend.worker import CompositionError, compose_valuation_job, resolve_peer
 from modules.optimal_combination import search_models
 from modules.result_contract import RequestSpecError, validate_request_spec
 from tests.c05_search.helpers import make_prepared, request_spec
-from tests.comercial.c01.conftest import gold_csv_bytes, gold_spec, gold_subject
+from tests.comercial.c01.conftest import (
+    apto_declared_documentary,
+    gold_csv_bytes,
+    gold_spec,
+    gold_subject,
+)
 from tests.pro_workflow.p01.conftest import documented_identity_ols_frame
 from tests.pro_workflow.p01.test_a01_ols_oracle import _prepared
 
@@ -86,6 +91,7 @@ def test_reachable_grade_has_professional_review_path(isolated_c01_runtime):
     spec = gold_spec()
     spec["search_policy"] = dict(spec["search_policy"])
     spec["search_policy"]["minimum_fundamentacao_grade"] = 1
+    spec["declared_documentary"] = apto_declared_documentary()
     spec = validate_request_spec(spec)
     ctx = compose_valuation_job(
         job_id=created["job_id"],
@@ -100,8 +106,13 @@ def test_reachable_grade_has_professional_review_path(isolated_c01_runtime):
     snap = ctx["snapshot"]
     wf = (snap.get("provenance") or {}).get("workflow_context") or {}
     qc = (snap.get("provenance") or {}).get("qualification_context") or {}
+    fund = (snap.get("validation") or {}).get("fundamentacao") or {}
     assert wf.get("requested_minimum_grade") == 1
-    assert wf.get("grade_requirement_status") in {"met", "pending"}
+    assert fund.get("grade") is not None, fund
+    assert int(fund["grade"]) >= 1
+    assert not (fund.get("pending_items") or []), fund.get("pending_items")
+    assert wf.get("grade_requirement_status") == "met"
+    assert qc.get("grade_requirement_status") == "met"
     assert qc.get("case_release_status") in {
         "review_required",
         "ready_for_professional_signoff",
