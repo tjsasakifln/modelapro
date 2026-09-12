@@ -186,6 +186,10 @@ def main_api(argv: Optional[Sequence[str]] = None) -> int:
         host=cfg.API_HOST,
         port=cfg.API_PORT,
         reload=False,
+        access_log=False,
+        # The windowed PyInstaller entrypoint has no stderr object.  Uvicorn's
+        # default formatter calls stderr.isatty() during configuration.
+        log_config=None,
     )
     return 0
 

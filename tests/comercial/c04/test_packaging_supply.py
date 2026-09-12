@@ -625,6 +625,7 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir() -> None:
     assert "exclude_binaries=True" in spec
     assert "COLLECT(" in spec
     assert 'copy_metadata("streamlit", recursive=True)' in spec
+    assert 'collect_data_files("streamlit")' in spec
     assert 'copy_metadata("modelapro")' in spec
     for buyer_document in (
         "SECURITY.md", "operations_manual.md", "privacy.md",

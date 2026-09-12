@@ -43,6 +43,7 @@ if not trusted_anchor.is_file():
     raise RuntimeError("trusted vendor anchor resource is absent")
 datas = (
     collect_data_files("frontend")
+    + collect_data_files("streamlit")
     + copy_metadata("streamlit", recursive=True)
     + copy_metadata("modelapro")
     + module_datas
