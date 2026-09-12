@@ -344,3 +344,93 @@ cujo resultado vai ser citado como evidência.** Eu violei isso duas vezes hoje.
 Nenhum aceite sobe por causa destas correções. `COMMERCIAL_RELEASE_READY`
 continua **não**. A verificação adversarial por agentes **não é** revisão
 técnica independente e não conta como `INDEPENDENT_TECHNICAL_REVIEW`.
+
+## Fechamento local da capacidade documental C05/BB — 2026-09-12
+
+Esta seção registra a implementação posterior sem reescrever os achados acima e
+sem aprovar a candidata composta. O perfil resolvido
+`bb-meci-avaliacao-imovel-pf` versão `0.3.0` tem 40 requisitos: 29 capacidades
+classificadas como `emitted`, 11 portas classificadas como `human_input`, zero
+`partial` e zero `missing`. Essa linha de base afirma que o produto consegue
+representar o requisito quando recebe insumos válidos; ela não afirma que um
+caso vazio está conforme nem que o Banco do Brasil aceitou um laudo.
+
+A prova local `test_real_worker_numeric_disclosure_reaches_verified_pdf_docx_xlsx_bytes`
+executa o worker com o perfil BB e atravessa snapshot, contexto persistido, PDF,
+DOCX, XLSX e manifesto pós-render. Ela exige que 28 dos 29 itens `emitted`
+estejam em `representation.items`. A única exceção é
+`bb.guiar.assinatura_icp`: o teste exige que `signed_report.pdf` esteja ausente,
+que o item não apareça no manifesto e que exista exatamente uma pendência
+`output_requirement_pending_signature` no estágio
+`post_review_external_signature`. Os 11 itens humanos são conferidos
+individualmente como representados pelos dados da fixture, pendentes ou não
+aplicáveis pela condição do caso. Assim, os 40 IDs são contabilizados sem
+fabricar conteúdo profissional ou ato externo.
+
+### Representação e vínculo aos bytes
+
+`test_real_pdf_docx_xlsx_and_manifest_cover_every_applicable_bb_item_except_signature`
+prova representações reais e verificadas para um caso rico. O manifesto de
+conteúdo anterior ao render participa dos fingerprints; o manifesto posterior
+registra SHA-256, tamanho, tipo e verificação dos bytes de `report.pdf`,
+`report.docx` e `sample.xlsx`. O PDF não tenta incorporar o próprio hash. A
+solicitação de assinatura vincula o resultado, o conteúdo revisado e os bytes
+signáveis, e o manifesto pós-render vincula de volta aos fingerprints estáveis.
+
+Os verificadores não aceitam presença textual solta. Os testes
+`test_sample_panel_verifier_binds_each_value_to_row_and_panel` e
+`test_pdf_verifier_binds_metrics_and_diagnostics_to_their_sections` trocam
+linhas, painéis, cabeçalhos, métricas e células diagnósticas e exigem recusa.
+`test_xlsx_sanitizes_all_text_and_rejects_cell_level_tampering` cobre fórmulas,
+tipos, faixas de coordenadas, células e linhas ocultas. O XLSX também normaliza
+o timestamp interno `dcterms:modified` e os metadados ZIP; o teste de
+representação constrói o mesmo workbook com relógios de 2024 e 2037 e exige
+bytes idênticos.
+
+Na reabertura, `test_sample_row_override_wins_mapping_and_persists_for_reopening`
+e `test_persisted_sample_override_with_zero_coordinates_wins_when_reopened`
+fixam a precedência por `row_id`: correção profissional persistida vence a
+geolocalização materializada e a coluna original; novo request vence o contexto
+persistido campo a campo. Latitude e longitude zero continuam números válidos e
+reabrem na forma canônica `0`, sem serem tratadas como ausência.
+
+### Assinatura externa e limite da prova
+
+O produto prepara e importa uma assinatura externa; ele não gera chave privada
+nem ato ICP-Brasil. `test_revocation_requires_strict_context_and_accepts_real_test_crl_only_when_current`
+prova criptografia e revogação com cadeia e LCR sintéticas identificadas como
+TESTE. `test_test_certificate_configuration_cannot_become_icp_authority` exige
+que raiz sintética, texto ICP-Brasil e allowlist configurada pelo operador não
+sejam autoridade oficial. `test_signature_policy_uses_structural_oid_and_authenticated_policy_hash`
+recusa OID em qualificador, hash ou algoritmo divergente, duplicata e registro
+expirado. `synthetic_test_only=True` nunca satisfaz
+`bb.guiar.assinatura_icp`.
+
+Não houve positivo ponta a ponta BB com certificado ICP-Brasil real. A prova é
+composta: transição real do avaliador, assinatura PDF de TESTE com LCR real da
+fixture e verificação fechada de raízes/políticas públicas pinadas. Um caso BB
+continua bloqueado em `awaiting_signature` até receber assinatura externa cuja
+cadeia, revogação, política e vínculo aos bytes sejam todos verificados.
+
+### Execução local registrada
+
+No worktree documental, o comando abaixo terminou com **15 passed** em
+66,13 s. Isso é evidência local da suíte focal, não um resultado de CI nem da
+coorte candidata final.
+
+```bash
+C17_UI_EVIDENCE=/tmp/c06-final-composed-evidence \
+  /tmp/modelapro-c06-final-venv/bin/python -m pytest -q \
+  tests/comercial/test_c06_output_conformance.py
+```
+
+Além dos testes nomeados acima, a suíte inclui
+`test_manifest_rejects_labels_missing_diagnostics_and_tampered_bytes`,
+`test_wide_correlation_is_split_without_losing_values_and_pvalues_stay_nonzero`,
+`test_external_signature_transition_preserves_only_signable_material_identity`
+e `test_professional_review_is_invalidated_by_report_content_change_without_signature`.
+Depois dessa execução, os dois vermelhos encontrados pela composição — zero
+reaberto como `0.0` e timestamp interno variável no XLSX — foram reproduzidos
+em checkout isolado e os dois testes antes vermelhos passaram juntos. A coorte
+final e seus inventários pertencem ao fechamento de integração, não a este
+registro local.
