@@ -497,6 +497,18 @@ def _decide_release(
         })
 
     for ob in profile.get("_output_blocking") or []:
+        if (
+            ob.get("code") == "output_requirement_pending_signature"
+            and (
+                signature is None
+                or signature.get("required_output_signature_verified") is True
+            )
+        ):
+            # Stage boundary: the reviewed unsigned bytes must exist before an
+            # external signer can sign them. This pending item is still exposed
+            # by output_conformance and blocks a signed package, but it cannot
+            # make creation of the signature request impossible.
+            continue
         blockers.append({
             "code": ob["code"],
             "rule_id": ob.get("requirement_id"),
@@ -568,19 +580,46 @@ def _decide_release(
                 "detail": res.get("explanation") or "",
             })
 
-    pending_manual = [r["rule_id"] for r in rule_results if r["status"] == RULE_PENDING_MANUAL]
+    pending_manual = [
+        r["rule_id"] for r in rule_results
+        if r["status"] == RULE_PENDING_MANUAL
+        and r["rule_id"] != "bb.guiar.assinatura_icp"
+    ]
+
+    def review_result_fingerprint(event: Mapping[str, Any]) -> Any:
+        return event.get("result_fingerprint") or event.get("fingerprint")
+
+    def review_report_fingerprint(event: Mapping[str, Any]) -> Any:
+        return event.get("report_content_fingerprint") or event.get(
+            "document_fingerprint"
+        )
+
+    def report_fingerprint_matches(event: Mapping[str, Any]) -> bool:
+        event_report = review_report_fingerprint(event)
+        # Historical contexts without a report digest retain result-only
+        # semantics. Once a document digest exists, an event must bind it.
+        return not report_fingerprint or event_report == report_fingerprint
+
+    def structurally_reviewable(event: Mapping[str, Any]) -> bool:
+        return bool(
+            review_result_fingerprint(event)
+            and event.get("professional_id")
+            and event.get("motive")
+            and event.get("version")
+        )
 
     valid_reviews = [
         e for e in review_events
-        if e.get("fingerprint") == fingerprint
-        and e.get("professional_id")
-        and e.get("motive")
-        and e.get("version")
+        if review_result_fingerprint(e) == fingerprint
+        and report_fingerprint_matches(e)
+        and structurally_reviewable(e)
         and e.get("valid") is not False
         and e.get("decision") not in ("rejected", "cancelled")
     ]
     stale_reviews = [
-        e for e in review_events if e.get("fingerprint") not in (None, fingerprint)
+        e for e in review_events
+        if review_result_fingerprint(e) not in (None, fingerprint)
+        or (structurally_reviewable(e) and not report_fingerprint_matches(e))
     ]
 
     if stale_reviews and not valid_reviews:
@@ -588,13 +627,18 @@ def _decide_release(
             "code": "review_invalidated_by_material_change",
             "detail": (
                 f"{len(stale_reviews)} revisão(ões) registrada(s) sobre outro "
-                "result_fingerprint. Mudança material de dado, parâmetro, amostra, "
-                "perfil, regra, modelo ou documento invalida as decisões dependentes; "
+                "result_fingerprint ou report_content_fingerprint. Mudança material de "
+                "dado, parâmetro, amostra, perfil, regra, modelo ou documento invalida "
+                "as decisões dependentes; "
                 "o histórico é preservado em stale_review_events."
             ),
             "stale_fingerprints": sorted(
                 {str(e.get("fingerprint")) for e in stale_reviews}
             ),
+            "stale_report_fingerprints": sorted({
+                str(review_report_fingerprint(e)) for e in stale_reviews
+                if review_report_fingerprint(e) is not None
+            }),
         })
 
     if blockers and not (
@@ -834,7 +878,16 @@ def assess_qualification(
     # Conformidade da SAÍDA contra o padrão documental do destinatário. Um laudo
     # normativamente correto ainda volta com ressalva se faltar anexo que o
     # manual do destinatário exige, então isto bloqueia a liberação.
-    output = assess_output_conformance(resolved, output_manifest)
+    conformance_manifest = dict(output_manifest or {})
+    if (
+        signature
+        and signature.get("required_output_signature_verified") is True
+        and isinstance(signature.get("output_evidence"), Mapping)
+    ):
+        conformance_items = dict(conformance_manifest.get("items") or {})
+        conformance_items.update(signature["output_evidence"])
+        conformance_manifest["items"] = conformance_items
+    output = assess_output_conformance(resolved, conformance_manifest)
     rule_results.extend(output["rule_results"])
 
     release_profile = dict(resolved)

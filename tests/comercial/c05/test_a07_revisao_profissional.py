@@ -127,6 +127,7 @@ def _review(fingerprint, **over):
         "motive": "revisão técnica independente do modelo e da amostra",
         "version": "v3",
         "fingerprint": fingerprint,
+        "report_content_fingerprint": REPORT_FINGERPRINT,
     }
     ev.update(over)
     return ev

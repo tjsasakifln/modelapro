@@ -134,6 +134,136 @@ def _fingerprint_value(value: Any) -> Any:
     return {"type": type(value).__name__, "text": str(value)}
 
 
+_EXTERNAL_SIGNATURE_RULE_ID = "bb.guiar.assinatura_icp"
+_EXTERNAL_SIGNATURE_EVIDENCE = (
+    "MP-OUTPUT-MANIFEST/1:representations.signed_report.pdf"
+    "#assinatura-cadeia-validada"
+)
+_EXTERNAL_SIGNATURE_REQUIREMENT = (
+    "Via de assinatura digital do PDF por certificado ICP-Brasil"
+)
+_EXTERNAL_SIGNATURE_PENDING_EXPLANATION = (
+    _EXTERNAL_SIGNATURE_REQUIREMENT
+    + " — a via de importação e verificação existe, mas os bytes assinados e a "
+    "cadeia de confiança ainda não foram fornecidos nesta etapa. A pendência "
+    "permite preparar os bytes para assinatura, mas impede o pacote final assinado."
+)
+
+
+def _normalize_external_signature_state(qctx: Dict[str, Any]) -> None:
+    """Remove only lifecycle changes caused by receiving the signed bytes.
+
+    The unsigned report must be fingerprinted before an external signature can
+    exist.  Moving this one requirement from ``pending_manual`` to ``passed``
+    therefore cannot change the material the signature binds.  Every other
+    rule, declaration and output requirement remains byte-for-byte material.
+    """
+
+    def signature_phase(raw: Any) -> Optional[str]:
+        if not isinstance(raw, Mapping) or raw.get("rule_id") != _EXTERNAL_SIGNATURE_RULE_ID:
+            return None
+        status = raw.get("status")
+        observed = raw.get("observed")
+        evidence = raw.get("evidence_refs")
+        explanation = raw.get("explanation")
+        if (
+            status == "pending_manual"
+            and observed is None
+            and evidence == []
+            and explanation == _EXTERNAL_SIGNATURE_PENDING_EXPLANATION
+        ):
+            return "pending"
+        if (
+            status == "passed"
+            and observed == _EXTERNAL_SIGNATURE_EVIDENCE
+            and isinstance(evidence, list)
+            and evidence == [_EXTERNAL_SIGNATURE_EVIDENCE]
+            and explanation == _EXTERNAL_SIGNATURE_REQUIREMENT
+        ):
+            return "verified"
+        return None
+
+    def normalize_rule(raw: Any) -> Any:
+        rule = dict(raw)
+        rule.update(
+            {
+                "status": "external_signature_stage",
+                "observed": None,
+                "evidence_refs": [],
+                "explanation": "external signature state excluded from signable material",
+            }
+        )
+        return rule
+
+    if "rule_results" not in qctx:
+        return
+    top_rules = _list(qctx.get("rule_results"))
+    output = _mapping(qctx.get("output_conformance"))
+    if not output:
+        return
+    raw_output_rules = _list(output.get("rule_results"))
+    top_matches = [rule for rule in top_rules if isinstance(rule, Mapping)
+                   and rule.get("rule_id") == _EXTERNAL_SIGNATURE_RULE_ID]
+    output_matches = [rule for rule in raw_output_rules if isinstance(rule, Mapping)
+                      and rule.get("rule_id") == _EXTERNAL_SIGNATURE_RULE_ID]
+    if len(top_matches) != 1 or len(output_matches) != 1:
+        return
+    phase = signature_phase(top_matches[0])
+    if phase is None or signature_phase(output_matches[0]) != phase:
+        return
+    blockers = _list(output.get("blocking"))
+    signature_blockers = [
+        row for row in blockers
+        if isinstance(row, Mapping)
+        and row.get("requirement_id") == _EXTERNAL_SIGNATURE_RULE_ID
+    ]
+    awaiting = _list(output.get("awaiting_signature"))
+    if phase == "pending":
+        expected_blocker = {
+            "code": "output_requirement_pending_signature",
+            "requirement_id": _EXTERNAL_SIGNATURE_RULE_ID,
+            "clause": top_matches[0].get("clause"),
+            "detail": _EXTERNAL_SIGNATURE_PENDING_EXPLANATION,
+            "owner": "profissional responsável / cadeia de confiança configurada",
+            "stage": "post_review_external_signature",
+        }
+        if signature_blockers != [expected_blocker] or awaiting.count(
+            _EXTERNAL_SIGNATURE_RULE_ID
+        ) != 1:
+            return
+    elif signature_blockers or _EXTERNAL_SIGNATURE_RULE_ID in awaiting:
+        return
+
+    qctx["rule_results"] = [
+        normalize_rule(rule) if rule is top_matches[0] else rule for rule in top_rules
+    ]
+    output_rules = [
+        normalize_rule(rule) if rule is output_matches[0] else rule
+        for rule in raw_output_rules
+    ]
+    output["rule_results"] = output_rules
+    output["blocking"] = [
+        row
+        for row in blockers if row not in signature_blockers
+    ]
+    output["awaiting_signature"] = [
+        item
+        for item in awaiting
+        if item != _EXTERNAL_SIGNATURE_RULE_ID
+    ] + [_EXTERNAL_SIGNATURE_RULE_ID]
+    output["conforming"] = sum(
+        1
+        for rule in output_rules
+        if isinstance(rule, Mapping)
+        and rule.get("rule_id") != _EXTERNAL_SIGNATURE_RULE_ID
+        and rule.get("status") == "passed"
+    )
+    output["would_be_accepted_without_reservations"] = bool(
+        not output["blocking"] and int(output.get("applicable_requirements") or 0) > 0
+    )
+    qctx["output_conformance"] = output
+
+
 def report_content_fingerprint(
     snapshot: Mapping[str, Any],
     report_context: Optional[Mapping[str, Any]] = None,
@@ -159,6 +289,7 @@ def report_content_fingerprint(
         "claims",
     ):
         qctx.pop(field, None)
+    _normalize_external_signature_state(qctx)
     if qctx:
         provenance["qualification_context"] = qctx
     snap["provenance"] = provenance
@@ -202,6 +333,7 @@ def signable_snapshot_sha256(snapshot: Mapping[str, Any]) -> str:
         "claims",
     ):
         qctx.pop(field, None)
+    _normalize_external_signature_state(qctx)
     if qctx:
         provenance["qualification_context"] = qctx
     snap["provenance"] = provenance
