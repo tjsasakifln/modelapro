@@ -188,7 +188,10 @@ def _coordinate(value: Any, *, minimum: float, maximum: float) -> Optional[float
     number = _finite(value)
     if number is None or number < minimum or number > maximum:
         return None
-    return number
+    # Keep the canonical origin compact and stable across persist/reopen
+    # cycles.  Besides avoiding a UI-only textual drift (0 -> 0.0), this still
+    # remains a JSON number and does not weaken the coordinate range check.
+    return 0 if number == 0 else number
 
 
 def _normalize_geolocation(value: Any, *, fallback: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:

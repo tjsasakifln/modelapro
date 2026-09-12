@@ -483,6 +483,8 @@ def test_persisted_sample_override_with_zero_coordinates_wins_when_reopened():
         "issues": [],
     }
     assert rows["R000009"]["source_is_documentary"] is True
+    assert type(rows["R000009"]["geolocation"]["latitude"]) is int
+    assert type(rows["R000009"]["geolocation"]["longitude"]) is int
     assert reopened["sample_evidence"]["R000009"] == {
         "address": "Greenwich",
         "latitude": 0.0,
