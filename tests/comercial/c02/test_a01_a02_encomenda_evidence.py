@@ -14,6 +14,7 @@ from frontend.components.professional import (
     qualification_profile_wire,
     select_qualification_profile,
 )
+from modules.result_contract import validate_request_spec
 
 
 def _spec(**kwargs):
@@ -181,3 +182,17 @@ def test_wire_profile_does_not_embed_rules_or_homologation_seal():
     assert "checklist_ids" not in wire
     assert wire["recipient_id"] == "banco-do-brasil"
     assert "bb-meci-avaliacao-imovel-pf" in known_profile_ids()
+
+
+def test_recipient_neutral_profile_does_not_emit_an_empty_recipient_id():
+    """Regression for the real browser POST /jobs, which used to return 400."""
+    selected = select_qualification_profile(
+        "abnt-14653-2-regressao-mercado", recipient_id=""
+    )
+    wire = qualification_profile_wire(selected)
+
+    assert selected["resolved"] is True
+    assert selected["mismatch_with_catalog"] is False
+    assert wire["recipient_id"] is None
+    validated = validate_request_spec(_spec(qualification_profile=selected))
+    assert validated["qualification_profile"]["recipient_id"] is None

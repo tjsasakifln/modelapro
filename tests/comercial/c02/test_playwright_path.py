@@ -256,7 +256,16 @@ def _drive_twice(sync_playwright, ui_port: int, csv_path: Path, *, api_port: int
             if not downloaded and job_id:
                 import urllib.request
                 url = f"http://127.0.0.1:{api_port}/jobs/{job_id}/result"
-                with urllib.request.urlopen(url, timeout=15) as resp:
+                bearer = os.environ.get("LOCAL_AUTH_TOKEN")
+                assert bearer, "synthetic local bearer fixture was not installed"
+                request = urllib.request.Request(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {bearer}",
+                        "X-Workspace-ID": "local",
+                    },
+                )
+                with urllib.request.urlopen(request, timeout=15) as resp:
                     payload = resp.read()
                 target = SCRATCH / f"c02-download-run{run}.json"
                 target.write_bytes(payload)
