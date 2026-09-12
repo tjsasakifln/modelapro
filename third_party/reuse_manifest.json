@@ -65,8 +65,8 @@
     }
   ],
   "blocked": [
-    "Repository/contributor distribution rights require an authorised ownership/licence decision.",
+    "The candidate must record the legitimate rightsholder's authority, contributor/brand scope and buyer terms; no open-source licence is required and absence of one does not by itself prohibit that rightsholder.",
     "NOASSERTION metadata remains a review queue; the C06 SBOM now hashes installed LICENSE/NOTICE files and native binaries so each final-artifact unknown can be investigated without guessing.",
-    "The actual Windows bundle/installer SBOM, hashes, signatures and notices do not exist until the authorised Windows build."
+    "The actual Windows bundle/installer SBOM, hashes and notices do not exist until a successful Windows build; code signing remains optional unless the approved offer requires it."
   ]
 }

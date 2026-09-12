@@ -93,9 +93,10 @@ c15_local = "scripts/c15_local"
 
 [tool.setuptools.package-data]
 modules = ["templates/*.html"]
-frontend = ["assets/*.css"]
+frontend = ["assets/*.css", "assets/*.md"]
 "profiles.normative" = ["*.json"]
 "profiles.institutions" = ["*.json"]
+"modules.commercial_license" = ["trusted_vendor_anchor.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

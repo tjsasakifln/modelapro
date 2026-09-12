@@ -8,10 +8,12 @@ affected distribution when a material right is unknown or incompatible.
 
 ## Product source
 
-No repository licence file was present at the C04 baseline. Consequently, the
-right to distribute the product source and all contributor contributions is
-**BLOCKED_EXTERNAL_EVIDENCE** pending an authorised licence/ownership decision.
-This record does not change copyright, authorship, or any repository licence.
+No repository licence file was present at the C04 baseline. That absence does
+not prevent a legitimate rightsholder from distributing their own work and
+does not require an open-source licence. The candidate remains
+**BLOCKED_EXTERNAL_EVIDENCE** until the composition records the rightsholder's
+authority, contributor/brand scope and buyer terms. This record does not change
+copyright, authorship, or any repository licence.
 
 ## Dependencies
 
@@ -51,5 +53,12 @@ for installed LICENSE/COPYING/NOTICE files and native `.dll`, `.pyd`, `.so` and
 an incompatibility or an approval. The final Windows artifact must carry its
 newly generated inventory and file hashes.
 
-No third-party source, fonts, licensed standards, private data, or proprietary
-PDF template is bundled by the C04 packaging definitions.
+No product-specific font files, licensed standards, private data, or
+proprietary PDF template are added. Runtime dependencies such as Matplotlib may
+carry their own font files into the frozen bundle; the SBOM records those files
+by path/hash/size and the release manifest hashes the final bundle. The Windows
+candidate also bundles its actually loaded MSYS2 UCRT64 Pango/Fontconfig DLL
+closure and Fontconfig configuration. Its generated `native-runtime.json`
+records every package/version/DLL/hash, retains available licence files, and
+leaves missing metadata as `NOASSERTION` review; it is evidence to review, not
+a declaration of compatibility or permission.

@@ -1,3 +1,4 @@
+import base64
 from datetime import date
 
 import pytest
@@ -9,6 +10,8 @@ from modules.commercial_license import (
     install_license,
     load_license,
     make_signed_envelope,
+    trust_anchor_metadata,
+    trusted_vendor_public_key,
     verify_license,
 )
 
@@ -78,3 +81,46 @@ def test_offline_install_refuses_invalid_file(tmp_path):
             _key_bytes(key),
             tmp_path / "license.json",
         )
+
+
+def test_runtime_environment_cannot_replace_unconfigured_vendor_anchor(monkeypatch):
+    key = Ed25519PrivateKey.generate()
+    monkeypatch.setenv(
+        "MODELA_LICENSE_PUBLIC_KEY",
+        base64.urlsafe_b64encode(_key_bytes(key)).decode(),
+    )
+    monkeypatch.delenv("MODELA_TEST_CONTEXT", raising=False)
+    with pytest.raises(ValueError, match="not configured"):
+        trusted_vendor_public_key()
+
+
+def test_unconfigured_anchor_exposes_only_buyer_facing_identity():
+    metadata = trust_anchor_metadata()
+    assert metadata == {
+        "schema": "MP-COM-TRUSTED-VENDOR/1",
+        "state": "UNCONFIGURED",
+        "environment": "production",
+        "key_id": None,
+        "algorithm": "Ed25519",
+        "purpose": "buyer_entitlement",
+        "display_label": "CHAVE DO TITULAR NÃO CONFIGURADA",
+    }
+    assert "public_key_base64url" not in metadata
+
+
+def test_source_test_context_can_supply_legacy_fixture_anchor(monkeypatch):
+    key = Ed25519PrivateKey.generate()
+    encoded = base64.urlsafe_b64encode(_key_bytes(key)).decode().rstrip("=")
+    monkeypatch.setenv("MODELA_TEST_CONTEXT", "1")
+    monkeypatch.setenv("MODELA_LICENSE_PUBLIC_KEY", encoded)
+    assert trusted_vendor_public_key() == _key_bytes(key)
+
+
+def test_frozen_runtime_never_accepts_test_environment_override(monkeypatch):
+    key = Ed25519PrivateKey.generate()
+    encoded = base64.urlsafe_b64encode(_key_bytes(key)).decode().rstrip("=")
+    monkeypatch.setenv("MODELA_TEST_CONTEXT", "1")
+    monkeypatch.setenv("MODELA_LICENSE_PUBLIC_KEY", encoded)
+    monkeypatch.setattr(__import__("sys"), "frozen", True, raising=False)
+    with pytest.raises(ValueError, match="not configured"):
+        trusted_vendor_public_key()

@@ -2,6 +2,16 @@ name: C06 Windows installed-product verification
 
 on:
   workflow_dispatch:
+    inputs:
+      previous_run_id:
+        description: "Successful C06 run whose candidate is the distinct-tree A version"
+        required: false
+        type: string
+      previous_run_attempt:
+        description: "Attempt number of previous_run_id"
+        required: false
+        default: "1"
+        type: string
   pull_request:
     paths:
       - ".github/workflows/c06-windows.yml"
@@ -17,6 +27,7 @@ on:
       - "constraints/**"
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -58,6 +69,23 @@ jobs:
           $inno = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6"
           $inno | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Install the Windows PDF native stack from MSYS2 UCRT64
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-pango
+
+      - name: Record the native runtime location
+        shell: pwsh
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          if (-not (Test-Path "$env:MSYS2_LOCATION\ucrt64\bin")) { throw "MSYS2 UCRT64 bin directory absent" }
+          "C06_MSYS2_ROOT=$env:MSYS2_LOCATION" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WEASYPRINT_DLL_DIRECTORIES=$env:MSYS2_LOCATION\ucrt64\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Resolve an exact Windows build lock in a clean environment
         shell: pwsh
         run: |
@@ -67,20 +95,64 @@ jobs:
           python -m c15_local.update_constraints --commercial-build --output $lock
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "WINDOWS_LOCK=$lock" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $venv = Join-Path $env:RUNNER_TEMP "modelapro-build-venv"
+          python -m venv $venv
+          $buildPython = Join-Path $venv "Scripts\python.exe"
+          & $buildPython -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "BUILD_PYTHON=$buildPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install the exact build environment
         shell: pwsh
         run: |
-          python -m pip install -c $env:WINDOWS_LOCK ".[commercial-build]"
+          & $env:BUILD_PYTHON -m pip install -c $env:WINDOWS_LOCK ".[commercial-build]"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -c "from scripts.comercial.operacao.sbom import assert_environment_matches_lock; import os,sys,pathlib; assert_environment_matches_lock(sys.executable, pathlib.Path(os.environ['WINDOWS_LOCK']))"
+          & $env:BUILD_PYTHON -c "from scripts.comercial.operacao.sbom import assert_environment_matches_lock; import os,sys,pathlib; assert_environment_matches_lock(sys.executable, pathlib.Path(os.environ['WINDOWS_LOCK']))"
+
+      - name: Stage and inventory the Windows PDF DLL closure
+        shell: pwsh
+        run: |
+          $native = Join-Path $env:RUNNER_TEMP "modelapro-windows-native"
+          & $env:BUILD_PYTHON -m scripts.comercial.operacao.prepare_windows_native --msys-root $env:C06_MSYS2_ROOT --output $native
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "MODELA_WINDOWS_NATIVE_DIR=$native" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $env:WEASYPRINT_DLL_DIRECTORIES = "$env:C06_MSYS2_ROOT\ucrt64\bin"
+          & $env:BUILD_PYTHON -m c15_local.launcher --check-pdf
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Create a synthetic TEST-only entitlement anchor for this artifact
+        shell: pwsh
+        run: |
+          $testLicense = Join-Path $env:RUNNER_TEMP "c06-test-license"
+          & $env:BUILD_PYTHON -m scripts.comercial.operacao.prepare_test_entitlement --output $testLicense
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $acl = Get-Acl $testLicense
+          $acl.SetAccessRuleProtection($true, $false)
+          foreach ($identity in @(
+            [System.Security.Principal.WindowsIdentity]::GetCurrent().Name,
+            "NT AUTHORITY\SYSTEM",
+            "BUILTIN\Administrators"
+          )) {
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+              $identity,
+              "FullControl",
+              "ContainerInherit,ObjectInherit",
+              "None",
+              "Allow"
+            )
+            $acl.AddAccessRule($rule) | Out-Null
+          }
+          Set-Acl -Path $testLicense -AclObject $acl
+          "MODELA_BUILD_TRUSTED_ANCHOR=$testLicense\trusted_vendor_anchor.json" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C06_CURRENT_LICENSE=$testLicense\synthetic-test-entitlement.json" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C06_TEST_LICENSE_DIR=$testLicense" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Verify installed catalog and signature runtime before freezing
         shell: pwsh
         run: |
           Push-Location $env:RUNNER_TEMP
           try {
-            python -c "from modules.qualification_profile import known_profile_ids; from pyhanko.pdf_utils.reader import PdfFileReader; expected={'abnt-14653-2-custo-reedicao','abnt-14653-2-regressao-mercado','bb-meci-avaliacao-imovel-pf','bcb-res-4676-garantia-imobiliaria','caixa-cr-012-2026-avm-precificacao','susep-seguro-habitacional-dfi'}; actual=set(known_profile_ids()); assert actual == expected, (actual, expected)"
+            & $env:BUILD_PYTHON -c "from modules.qualification_profile import known_profile_ids; from pyhanko.pdf_utils.reader import PdfFileReader; expected={'abnt-14653-2-custo-reedicao','abnt-14653-2-regressao-mercado','bb-meci-avaliacao-imovel-pf','bcb-res-4676-garantia-imobiliaria','caixa-cr-012-2026-avm-precificacao','susep-seguro-habitacional-dfi'}; actual=set(known_profile_ids()); assert actual == expected, (actual, expected)"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } finally {
             Pop-Location
@@ -108,9 +180,15 @@ jobs:
             tree_sha = $tree
             tested_commit_parents = $parents
             windows_lock_sha256 = (Get-FileHash $env:WINDOWS_LOCK -Algorithm SHA256).Hash.ToLowerInvariant()
+            windows_native_manifest_sha256 = (Get-FileHash "$env:MODELA_WINDOWS_NATIVE_DIR\native-runtime.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+            trusted_entitlement_anchor_sha256 = (Get-FileHash $env:MODELA_BUILD_TRUSTED_ANCHOR -Algorithm SHA256).Hash.ToLowerInvariant()
+            trusted_entitlement_anchor_scope = "SYNTHETIC_TEST_ONLY"
+            msys2_setup_action = "msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884"
           }
           $identity | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $evidence "candidate-identity.json") -Encoding utf8
           Copy-Item $env:WINDOWS_LOCK (Join-Path $evidence "windows-py312-x64.txt")
+          $version = "0.1.0-c06.${{ github.run_number }}"
+          "C06_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "C06_EVIDENCE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build the unsigned candidate bundle and installer
@@ -118,33 +196,134 @@ jobs:
         run: |
           $build = Join-Path $env:RUNNER_TEMP "modelapro-build-b"
           $generated = (Get-Date).ToUniversalTime().ToString("o")
-          python -m scripts.comercial.operacao.build_windows `
+          & $env:BUILD_PYTHON -m scripts.comercial.operacao.build_windows `
             --root . `
             --output $build `
-            --version "0.1.0-c06-b" `
+            --version $env:C06_VERSION `
             --lock $env:WINDOWS_LOCK `
             --generated-at $generated
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $manifest = Get-Content "$build\release-manifest.json" -Raw | ConvertFrom-Json
+          $installerEntries = @($manifest.artifacts | Where-Object { $_.path -match '^MODELA-PRO-.*-win64\.exe$' })
+          if ($installerEntries.Count -ne 1) { throw "release manifest must identify exactly one installer" }
+          $installer = Join-Path $build $installerEntries[0].path
+          if (-not (Test-Path $installer)) { throw "current installer absent from release manifest path" }
+          "C06_CURRENT_INSTALLER=$installer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "C06_BUILD=$build" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build prior-label installer for update and rollback mechanics
+      - name: Download a previous distinct-tree candidate when explicitly selected
+        if: ${{ inputs.previous_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: c06-windows-candidate-${{ inputs.previous_run_id }}-${{ inputs.previous_run_attempt }}
+          path: ${{ runner.temp }}/modelapro-prior-candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.previous_run_id }}
+
+      - name: Select A for version transition and rollback
         shell: pwsh
         run: |
           $prior = Join-Path $env:RUNNER_TEMP "modelapro-installer-a"
           New-Item -ItemType Directory -Path $prior -Force | Out-Null
-          iscc.exe "/O$prior" "/DAppVersion=0.1.0-c06-a" "/DBundleDir=$env:C06_BUILD\MODELA-PRO" "packaging\comercial\modelapro.iss"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $previousRun = "${{ inputs.previous_run_id }}"
+          $distinct = -not [string]::IsNullOrWhiteSpace($previousRun)
+          $currentIdentity = Get-Content "$env:C06_EVIDENCE\candidate-identity.json" -Raw | ConvertFrom-Json
+          if ($distinct) {
+            $download = Join-Path $env:RUNNER_TEMP "modelapro-prior-candidate"
+            $identities = @(Get-ChildItem $download -Filter candidate-identity.json -File -Recurse)
+            $manifests = @(Get-ChildItem $download -Filter release-manifest.json -File -Recurse)
+            $installers = @(Get-ChildItem $download -Filter "MODELA-PRO-*-win64.exe" -File -Recurse)
+            $licenses = @(Get-ChildItem $download -Filter synthetic-test-entitlement.json -File -Recurse)
+            $anchors = @(Get-ChildItem $download -Filter trusted_vendor_anchor.json -File -Recurse)
+            $testManifests = @(Get-ChildItem $download -Filter test-entitlement-manifest.json -File -Recurse)
+            if (
+              $identities.Count -ne 1 -or $manifests.Count -ne 1 -or $installers.Count -ne 1 -or
+              $licenses.Count -ne 1 -or $anchors.Count -ne 1 -or $testManifests.Count -ne 1
+            ) {
+              throw "previous candidate must contain exactly one identity, release, installer and TEST entitlement"
+            }
+            $priorIdentity = Get-Content $identities[0].FullName -Raw | ConvertFrom-Json
+            $priorManifest = Get-Content $manifests[0].FullName -Raw | ConvertFrom-Json
+            if ($priorIdentity.tree_sha -ne $priorManifest.tree_sha) { throw "previous identity/manifest tree mismatch" }
+            if ($priorIdentity.tested_commit_sha -ne $priorManifest.source_sha) { throw "previous identity/source mismatch" }
+            if ($priorIdentity.tree_sha -eq $currentIdentity.tree_sha) { throw "previous candidate is not a distinct source tree" }
+            $manifestInstaller = @(
+              $priorManifest.artifacts | Where-Object { $_.path -match '^MODELA-PRO-.*-win64\.exe$' }
+            )
+            if ($manifestInstaller.Count -ne 1) { throw "previous manifest must identify exactly one installer" }
+            $expectedHash = $manifestInstaller[0].sha256
+            $actualHash = (Get-FileHash $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) { throw "previous installer hash does not match its manifest" }
+            $testManifest = Get-Content $testManifests[0].FullName -Raw | ConvertFrom-Json
+            $expectedLicenseHash = $testManifest.files.'synthetic-test-entitlement.json'
+            $actualLicenseHash = (Get-FileHash $licenses[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualLicenseHash -ne $expectedLicenseHash) { throw "previous TEST entitlement hash mismatch" }
+            $expectedAnchorHash = $testManifest.files.'trusted_vendor_anchor.json'
+            $actualAnchorHash = (Get-FileHash $anchors[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualAnchorHash -ne $expectedAnchorHash) { throw "previous TEST anchor hash mismatch" }
+            if ($actualAnchorHash -ne $priorIdentity.trusted_entitlement_anchor_sha256) {
+              throw "previous TEST anchor does not match candidate identity"
+            }
+            if ($actualAnchorHash -ne $priorManifest.trusted_entitlement_anchor.sha256) {
+              throw "previous TEST anchor does not match release manifest"
+            }
+            $selected = Join-Path $prior $installers[0].Name
+            Copy-Item $installers[0].FullName $selected
+            $priorLicense = $licenses[0].FullName
+            $priorVersion = $priorManifest.version
+            $priorTree = $priorIdentity.tree_sha
+          } else {
+            $priorVersion = "$env:C06_VERSION-mechanics-a"
+            iscc.exe "/O$prior" "/DAppVersion=$priorVersion" "/DBundleDir=$env:C06_BUILD\MODELA-PRO" "packaging\comercial\modelapro.iss"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $selected = Join-Path $prior "MODELA-PRO-$priorVersion-win64.exe"
+            $priorLicense = $env:C06_CURRENT_LICENSE
+            $priorTree = $currentIdentity.tree_sha
+          }
+          if (-not (Test-Path $selected)) { throw "selected A installer absent" }
+          [ordered]@{
+            schema_version = "MP-COM-WINDOWS-TRANSITION/1"
+            previous_run_id = if ($distinct) { $previousRun } else { $null }
+            previous_version = $priorVersion
+            previous_tree_sha = $priorTree
+            current_version = $env:C06_VERSION
+            current_tree_sha = $currentIdentity.tree_sha
+            distinct_source_trees = $distinct
+          } | ConvertTo-Json | Set-Content "$env:C06_EVIDENCE\version-transition.json" -Encoding utf8
+          "C06_PRIOR_INSTALLER=$selected" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C06_PRIOR_LICENSE=$priorLicense" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C06_DISTINCT_PRIOR=$($distinct.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "C06_PRIOR=$prior" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Isolate installed verification from the build-host native stack
+        shell: pwsh
+        run: |
+          $absent = Join-Path $env:RUNNER_TEMP "intentionally-absent-native-runtime"
+          $cleanPath = @(
+            $env:PATH -split ';' | Where-Object {
+              -not $_.StartsWith($env:C06_MSYS2_ROOT, [System.StringComparison]::OrdinalIgnoreCase)
+            }
+          ) -join ';'
+          "PATH=$cleanPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WEASYPRINT_DLL_DIRECTORIES=$absent" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FONTCONFIG_FILE=$absent\fonts.conf" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          [ordered]@{
+            schema_version = "MP-COM-WINDOWS-BUNDLE-ISOLATION/1"
+            build_host_msys2_removed_from_path = $true
+            build_host_weasyprint_directory_hidden = $true
+            build_host_fontconfig_hidden = $true
+          } | ConvertTo-Json | Set-Content "$env:C06_EVIDENCE\bundle-isolation.json" -Encoding utf8
 
       - name: Install A into a clean per-user path
         shell: pwsh
         run: |
           $install = Join-Path $env:RUNNER_TEMP "clean-user\MODELA-PRO"
           New-Item -ItemType Directory -Path (Split-Path $install) -Force | Out-Null
-          $installer = Join-Path $env:C06_PRIOR "MODELA-PRO-0.1.0-c06-a-win64.exe"
-          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$install"
+          & $env:C06_PRIOR_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$install"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path (Join-Path $install "MODELA-PRO.exe"))) { throw "installed executable absent" }
+          & "$install\MODELA-PRO.exe" --check-pdf
+          if ($LASTEXITCODE -ne 0) { throw "installed A cannot render PDF with its bundled native runtime" }
           "C06_INSTALL=$install" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Calculate, emit documents, save, reopen and back up on A
@@ -152,8 +331,9 @@ jobs:
         run: |
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
+          $env:MODELA_LICENSE_PATH = $env:C06_PRIOR_LICENSE
           $backup = Join-Path $env:C06_EVIDENCE "modelapro-backup.zip"
-          python -m scripts.comercial.operacao.verify_windows_install `
+          & $env:BUILD_PYTHON -m scripts.comercial.operacao.verify_windows_install `
             --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
             --evidence $env:C06_EVIDENCE `
             --backup $backup `
@@ -162,12 +342,14 @@ jobs:
       - name: Update installed product to B and verify saved state
         shell: pwsh
         run: |
-          $installer = Join-Path $env:C06_BUILD "MODELA-PRO-0.1.0-c06-b-win64.exe"
-          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
+          & $env:C06_CURRENT_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:C06_INSTALL\MODELA-PRO.exe" --check-pdf
+          if ($LASTEXITCODE -ne 0) { throw "installed B cannot render PDF with its bundled native runtime" }
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-active"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
-          python -m scripts.comercial.operacao.verify_windows_install `
+          $env:MODELA_LICENSE_PATH = $env:C06_CURRENT_LICENSE
+          & $env:BUILD_PYTHON -m scripts.comercial.operacao.verify_windows_install `
             --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
             --evidence $env:C06_EVIDENCE `
             --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
@@ -176,16 +358,84 @@ jobs:
       - name: Return to A and restore the verified backup in a clean profile
         shell: pwsh
         run: |
-          $installer = Join-Path $env:C06_PRIOR "MODELA-PRO-0.1.0-c06-a-win64.exe"
-          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
+          & $env:C06_PRIOR_INSTALLER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$env:C06_INSTALL"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:C06_INSTALL\MODELA-PRO.exe" --check-pdf
+          if ($LASTEXITCODE -ne 0) { throw "restored A cannot render PDF with its bundled native runtime" }
           $env:MODELA_RUNTIME_ROOT = Join-Path $env:RUNNER_TEMP "profile-restored"
           $env:MODELA_STORE_ROOT = Join-Path $env:MODELA_RUNTIME_ROOT "store"
-          python -m scripts.comercial.operacao.verify_windows_install `
+          $env:MODELA_LICENSE_PATH = $env:C06_PRIOR_LICENSE
+          & $env:BUILD_PYTHON -m scripts.comercial.operacao.verify_windows_install `
             --executable "$env:C06_INSTALL\MODELA-PRO.exe" `
             --evidence $env:C06_EVIDENCE `
             --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
             --phase restore
+
+      - name: Verify Windows ACLs on private runtime and entitlement paths
+        if: always()
+        shell: pwsh
+        run: |
+          $evidence = if ($env:C06_EVIDENCE) {
+            $env:C06_EVIDENCE
+          } else {
+            Join-Path $env:RUNNER_TEMP "c06-windows-evidence"
+          }
+          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+          $allowedSids = @(
+            [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value,
+            "S-1-5-18",
+            "S-1-5-32-544",
+            "S-1-3-0"
+          )
+          $targets = @(
+            (Join-Path $env:RUNNER_TEMP "profile-active"),
+            (Join-Path $env:RUNNER_TEMP "profile-restored"),
+            $env:C06_TEST_LICENSE_DIR
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $entries = @()
+          $unsafe = @()
+          foreach ($target in $targets) {
+            $paths = @((Get-Item -Force $target)) + @(Get-ChildItem -Force -Recurse $target)
+            foreach ($path in $paths) {
+              $acl = Get-Acl -LiteralPath $path.FullName
+              foreach ($ace in $acl.Access) {
+                try {
+                  $sid = $ace.IdentityReference.Translate(
+                    [System.Security.Principal.SecurityIdentifier]
+                  ).Value
+                } catch {
+                  $sid = $ace.IdentityReference.Value
+                }
+                $entry = [ordered]@{
+                  path = $path.FullName.Substring($target.Length).TrimStart('\')
+                  root = $target
+                  identity = $ace.IdentityReference.Value
+                  sid = $sid
+                  type = $ace.AccessControlType.ToString()
+                  rights = $ace.FileSystemRights.ToString()
+                  inherited = $ace.IsInherited
+                  inheritance_flags = $ace.InheritanceFlags.ToString()
+                  propagation_flags = $ace.PropagationFlags.ToString()
+                }
+                $entries += $entry
+                $inheritedOnly = $ace.PropagationFlags.ToString().Contains("InheritOnly")
+                if ($ace.AccessControlType -eq "Allow" -and -not $inheritedOnly -and $sid -notin $allowedSids) {
+                  $unsafe += $entry
+                }
+              }
+            }
+          }
+          $aclStatus = if ($targets.Count -gt 0 -and $unsafe.Count -eq 0) { "PASSED" } else { "FAILED" }
+          [ordered]@{
+            schema_version = "MP-COM-WINDOWS-ACL/1"
+            status = $aclStatus
+            model = "Windows discretionary ACL; POSIX chmod is not accepted as evidence"
+            allowed_sids = $allowedSids
+            targets = $targets
+            entries = $entries
+            unsafe_allow_entries = $unsafe
+          } | ConvertTo-Json -Depth 8 | Set-Content "$evidence\runtime-acl.json" -Encoding utf8
+          if ($aclStatus -ne "PASSED") { throw "private runtime paths have missing or overbroad Windows ACLs" }
 
       - name: Uninstall without deleting the separate evidence profile
         shell: pwsh
@@ -222,18 +472,32 @@ jobs:
             }
           }
           $phasesPassed = $true
-          foreach ($phase in @("initial", "upgrade", "restore", "uninstall")) {
+          foreach ($phase in @("initial", "upgrade", "restore", "runtime-acl", "uninstall")) {
             $phasePath = Join-Path $evidence "$phase.json"
             if (-not (Test-Path $phasePath)) { $phasesPassed = $false; continue }
             $phasePayload = Get-Content $phasePath -Raw | ConvertFrom-Json
             if ($phasePayload.status -ne "PASSED") { $phasesPassed = $false }
           }
+          $transitionPath = Join-Path $evidence "version-transition.json"
+          $distinctTrees = $false
+          if (Test-Path $transitionPath) {
+            $transition = Get-Content $transitionPath -Raw | ConvertFrom-Json
+            $distinctTrees = $transition.distinct_source_trees -eq $true
+          }
           [ordered]@{
             schema_version = "MP-COM-WINDOWS-EVIDENCE/1"
             workflow_conclusion = "derived_from_required_steps"
-            windows_distribution_verified = $phasesPassed
-            same_tree_version_transition = $true
-            migration_across_distinct_source_trees_verified = $false
+            installed_product_lifecycle_verified = $phasesPassed
+            windows_distribution_verified = ($phasesPassed -and $distinctTrees)
+            same_tree_version_transition = ($phasesPassed -and -not $distinctTrees)
+            migration_across_distinct_source_trees_verified = ($phasesPassed -and $distinctTrees)
+            blocking_reasons = if (-not $phasesPassed) {
+              @("one or more required installed-product lifecycle phases failed or did not run")
+            } elseif (-not $distinctTrees) {
+              @("migration across distinct source trees not run")
+            } else {
+              @()
+            }
             installer_signing_status = "UNSIGNED"
             synthetic_test_data = $true
             professional_review = $false
@@ -250,7 +514,23 @@ jobs:
           path: |
             ${{ runner.temp }}/c06-windows-evidence
             ${{ runner.temp }}/modelapro-build-b/release-manifest.json
-            ${{ runner.temp }}/modelapro-build-b/MODELA-PRO-0.1.0-c06-b-win64.exe
-            ${{ runner.temp }}/modelapro-installer-a/MODELA-PRO-0.1.0-c06-a-win64.exe
-          if-no-files-found: warn
+            ${{ runner.temp }}/modelapro-build-b/MODELA-PRO-*-win64.exe
+            ${{ runner.temp }}/c06-test-license
+            ${{ runner.temp }}/modelapro-installer-a/MODELA-PRO-*-win64.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish the verified current candidate for a later distinct-tree transition
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c06-windows-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/c06-windows-evidence/candidate-identity.json
+            ${{ runner.temp }}/modelapro-build-b/release-manifest.json
+            ${{ runner.temp }}/modelapro-build-b/MODELA-PRO-*-win64.exe
+            ${{ runner.temp }}/c06-test-license/trusted_vendor_anchor.json
+            ${{ runner.temp }}/c06-test-license/synthetic-test-entitlement.json
+            ${{ runner.temp }}/c06-test-license/test-entitlement-manifest.json
+          if-no-files-found: error
           retention-days: 14

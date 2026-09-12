@@ -1,6 +1,7 @@
 """C04 release tooling tests: no Windows toolchain is needed here."""
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -10,8 +11,42 @@ from pathlib import Path
 import pytest
 
 from scripts.c15_local.packaging_meta import commercial_build_specs, requirement_name
-from scripts.comercial.operacao import audit, build_windows, sbom
+from scripts.comercial.operacao import (
+    audit,
+    build_windows,
+    prepare_test_entitlement,
+    prepare_windows_native,
+    sbom,
+    verify_windows_install,
+)
 from scripts.comercial.operacao.operational_harness import run_harness
+
+
+def _native_fixture(tmp_path: Path, monkeypatch) -> Path:
+    native = tmp_path / "windows-native"
+    (native / "dlls").mkdir(parents=True)
+    (native / "licenses").mkdir()
+    (native / "fontconfig").mkdir()
+    dll = native / "dlls" / "synthetic.dll"
+    config = native / "fontconfig" / "fonts.conf"
+    dll.write_bytes(b"synthetic-dll")
+    config.write_bytes(b"synthetic-fontconfig")
+
+    def evidence(path: Path) -> dict:
+        payload = path.read_bytes()
+        return {"size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+
+    manifest = {
+        "schema_version": "MP-COM-WINDOWS-NATIVE/1",
+        "platform": "windows-x64-ucrt",
+        "dlls": [{"name": dll.name, **evidence(dll)}],
+        "fontconfig": {"path": "fontconfig/fonts.conf", **evidence(config)},
+        "packages": [],
+        "review_queue": [{"name": "synthetic", "reason": "test_fixture"}],
+    }
+    (native / "native-runtime.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("MODELA_WINDOWS_NATIVE_DIR", str(native))
+    return native
 
 
 def test_commercial_build_tools_are_release_only() -> None:
@@ -46,6 +81,7 @@ def test_sbom_is_sorted_and_uses_noassertion_for_absent_license(monkeypatch) -> 
             "project_urls": [],
             "license_files": [],
             "native_files": [],
+            "font_files": [],
         },
     )
     first = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")
@@ -71,12 +107,14 @@ def test_sbom_preserves_hashed_license_and_native_binary_evidence(monkeypatch) -
             "summary": "fixture",
             "license_files": [{"path": "dist-info/LICENSE", "sha256": "a" * 64, "size": 123}],
             "native_files": [{"path": "binary_lib/core.pyd", "sha256": "b" * 64, "size": 456}],
+            "font_files": [{"path": "binary_lib/ui.ttf", "sha256": "c" * 64, "size": 789}],
         },
     )
     component = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")["components"][0]
     assert component["version"] == "4.2"
     assert component["evidence"]["license_files"][0]["sha256"] == "a" * 64
     assert component["evidence"]["native_files"][0]["sha256"] == "b" * 64
+    assert component["evidence"]["font_files"][0]["sha256"] == "c" * 64
 
 
 def test_sbom_cli_requires_fixed_timestamp(tmp_path: Path) -> None:
@@ -98,6 +136,9 @@ def test_release_environment_must_exactly_match_lock(tmp_path: Path, monkeypatch
         ],
     )
     assert sbom.assert_environment_matches_lock("python-test", lock)["matches"] is True
+    lock.write_text("Alpha==1\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="unexpected.*zeta-pkg"):
+        sbom.assert_environment_matches_lock("python-test", lock)
     lock.write_text("Alpha==9\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="does not match"):
         sbom.assert_environment_matches_lock("python-test", lock)
@@ -118,6 +159,35 @@ def test_windows_build_refuses_non_windows_host(tmp_path: Path, monkeypatch) -> 
         build_windows.build(tmp_path, tmp_path / "dist", "1.0")
 
 
+def test_native_windows_staging_refuses_non_windows_host(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(prepare_windows_native.platform, "system", lambda: "Linux")
+    with pytest.raises(RuntimeError, match="only be staged on Windows"):
+        prepare_windows_native.prepare(tmp_path / "msys64", tmp_path / "native")
+
+
+def test_test_entitlement_generator_never_persists_private_key(tmp_path: Path) -> None:
+    manifest_path = prepare_test_entitlement.prepare(tmp_path / "test-entitlement")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    files = {path.name for path in manifest_path.parent.iterdir()}
+    assert manifest["test_only"] is True
+    assert manifest["private_key_persisted"] is False
+    assert files == {
+        "synthetic-test-entitlement.json",
+        "test-entitlement-manifest.json",
+        "trusted_vendor_anchor.json",
+    }
+
+
+def test_windows_build_refuses_tampered_native_runtime(tmp_path: Path, monkeypatch) -> None:
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.setattr(build_windows.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(build_windows.platform, "machine", lambda: "AMD64")
+    native = _native_fixture(tmp_path, monkeypatch)
+    (native / "dlls" / "synthetic.dll").write_bytes(b"tampered")
+    with pytest.raises(RuntimeError, match="does not match its manifest"):
+        build_windows.build(root, tmp_path / "dist", "1.0")
+
+
 def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -125,6 +195,7 @@ def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
     output = tmp_path / "dist"
     monkeypatch.setattr(build_windows.platform, "system", lambda: "Windows")
     monkeypatch.setattr(build_windows.platform, "machine", lambda: "AMD64")
+    _native_fixture(tmp_path, monkeypatch)
 
     def fake_audit(_python, path):
         path.write_text('{"dependencies":[]}', encoding="utf-8")
@@ -169,9 +240,42 @@ def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["source_sha"] == "deadbeef"
     assert manifest["signing_status"] == "UNSIGNED"
+    assert manifest["signing_requirement"] == "OPTIONAL_UNLESS_APPROVED_OFFER_REQUIRES_CODE_SIGNING"
     assert manifest["commercial_release_ready"] is False
+    assert not any("signature" in reason.lower() for reason in manifest["blocking_reasons"])
     assert (output / "MODELA-PRO" / "SBOM.modelapro.json").is_file()
     assert (output / "MODELA-PRO" / "pip-audit.json").is_file()
+    assert (output / "qualification-evidence" / "native-runtime.json").is_file()
+
+
+def test_windows_bundle_requires_native_runtime_and_hardens_distribution_evidence() -> None:
+    root = Path(__file__).resolve().parents[3]
+    spec = (root / "packaging" / "comercial" / "modelapro.spec").read_text(encoding="utf-8")
+    workflow = (root / ".github" / "workflows" / "c06-windows.yml").read_text(encoding="utf-8")
+    assert "MODELA_WINDOWS_NATIVE_DIR" in spec
+    assert "windows_runtime.py" in spec
+    assert "native_binaries" in spec
+    assert "modelapro-build-venv" in workflow
+    assert "previous candidate is not a distinct source tree" in workflow
+    assert "windows_distribution_verified = ($phasesPassed -and $distinctTrees)" in workflow
+    assert "installed A cannot render PDF" in workflow
+
+
+def test_windows_update_semantic_comparison_ignores_only_execution_identity(tmp_path: Path) -> None:
+    first = {
+        "job_id": "job-a",
+        "generated_at": "2026-09-12T00:00:00Z",
+        "code_sha": "a" * 40,
+        "value": {"point": 123.0, "mean_ci80": [120.0, 126.0]},
+        "policy": {"mode": "exact"},
+    }
+    second = {**first, "job_id": "job-b", "generated_at": "later", "code_sha": "b" * 40}
+    first_hash = verify_windows_install._semantic_result_evidence(first, tmp_path / "first.json")
+    second_hash = verify_windows_install._semantic_result_evidence(second, tmp_path / "second.json")
+    assert first_hash == second_hash
+    second["value"] = {"point": 123.0, "mean_ci80": [119.0, 127.0]}
+    changed_hash = verify_windows_install._semantic_result_evidence(second, tmp_path / "changed.json")
+    assert changed_hash != first_hash
 
 
 def test_windows_build_preserves_failed_stage_evidence(tmp_path: Path, monkeypatch) -> None:
@@ -179,6 +283,7 @@ def test_windows_build_preserves_failed_stage_evidence(tmp_path: Path, monkeypat
     output = tmp_path / "failed-dist"
     monkeypatch.setattr(build_windows.platform, "system", lambda: "Windows")
     monkeypatch.setattr(build_windows.platform, "machine", lambda: "AMD64")
+    _native_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(build_windows, "_source_identity", lambda _root: "source-sha")
     monkeypatch.setattr(build_windows, "_git_identity", lambda _root, _ref: "tree-sha")
     monkeypatch.setattr(
@@ -251,6 +356,7 @@ def test_wheel_contains_runtime_components_but_not_release_tooling(tmp_path: Pat
         names = archive.namelist()
     assert any(name.startswith("modules/operacao_local/") for name in names)
     assert any(name.startswith("modules/commercial_license/") for name in names)
+    assert "modules/commercial_license/trusted_vendor_anchor.json" in names
     assert any(name.startswith("profiles/normative/") and name.endswith(".json") for name in names)
     assert any(name.startswith("profiles/institutions/") and name.endswith(".json") for name in names)
     assert not any(name.startswith("scripts/comercial/") for name in names)

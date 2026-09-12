@@ -35,7 +35,7 @@ Direct runtime ranges live only in `pyproject.toml`. `requirements.txt` and `req
 | OS | Lock used in CI | Notes |
 | --- | --- | --- |
 | Linux | `linux-py3.txt` | Generated and applied. |
-| Windows | same file if it resolves; otherwise unconstrained ranges | PDF native stack is **not** claimed; see WeasyPrint probe. |
+| Windows | generated on the Windows candidate runner and retained with its evidence | The build uses a clean venv, checks the exact lock, inventories the MSYS2 UCRT64 Pango DLL closure and proves PDF output again from the installed frozen bundle. |
 | macOS | untested | Declared, not assumed. |
 
 Redis is `modelapro[redis]`, not part of the default lock application unless you install that extra.

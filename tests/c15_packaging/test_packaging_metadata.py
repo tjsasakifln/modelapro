@@ -17,6 +17,8 @@ def test_pyproject_packages_and_package_data():
     data = load_pyproject(REPO_ROOT)["tool"]["setuptools"]["package-data"]
     assert "templates/*.html" in data["modules"]
     assert "assets/*.css" in data["frontend"]
+    assert "assets/*.md" in data["frontend"]
+    assert "trusted_vendor_anchor.json" in data["modules.commercial_license"]
     scripts = load_pyproject(REPO_ROOT)["project"]["scripts"]
     assert scripts["modelapro"] == "c15_local.launcher:main"
     assert "frontend.app:main" not in scripts.values()
@@ -63,6 +65,7 @@ def test_wheel_contains_packages_templates_css_and_entrypoint(tmp_path: Path):
             "backend/api.py",
             "modules/__init__.py",
             "modules/templates/report.html",
+            "modules/commercial_license/trusted_vendor_anchor.json",
             "frontend/__init__.py",
             "frontend/app.py",
             "frontend/assets/styles.css",
@@ -71,6 +74,7 @@ def test_wheel_contains_packages_templates_css_and_entrypoint(tmp_path: Path):
         ):
             assert required in names, required
         assert archive.read("modules/templates/report.html")
+        assert archive.read("modules/commercial_license/trusted_vendor_anchor.json")
         assert archive.read("frontend/assets/styles.css")
         dist_info = [name for name in names if name.endswith("entry_points.txt")]
         assert dist_info

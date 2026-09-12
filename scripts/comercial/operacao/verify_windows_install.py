@@ -34,6 +34,20 @@ PROFILE = {
     "asset_scope": "imovel_urbano",
 }
 REQUIRED_ARTIFACTS = ("frozen_project.json", "report.pdf", "report.docx", "evidence_bundle.zip")
+VOLATILE_RESULT_KEYS = frozenset(
+    {
+        "code_sha",
+        "completed_at",
+        "created_at",
+        "duration_seconds",
+        "elapsed_seconds",
+        "generated_at",
+        "job_id",
+        "result_snapshot_id",
+        "started_at",
+        "updated_at",
+    }
+)
 
 
 class VerificationError(RuntimeError):
@@ -50,30 +64,14 @@ def _csrf_token(secret_text: str, bearer: str) -> str:
 
 
 def _provision_ephemeral_test_controls(evidence_dir: Path) -> None:
-    """Create process-local security values and a TEST entitlement, never a release key."""
+    """Create process-local HTTP controls and require a build-pinned TEST entitlement."""
     os.environ.setdefault("LOCAL_AUTH_TOKEN", _b64url(secrets.token_bytes(32)))
     os.environ.setdefault("LOCAL_CSRF_SECRET", _b64url(secrets.token_bytes(32)))
-    if os.environ.get("MODELA_LICENSE_PATH") and os.environ.get("MODELA_LICENSE_PUBLIC_KEY"):
-        return
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-    from modules.commercial_license import make_signed_envelope
-
-    private_key = Ed25519PrivateKey.generate()
-    public_key = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    envelope = make_signed_envelope(
-        {
-            "license_id": "TESTE-C06-WINDOWS-SEM-VALIDADE-COMERCIAL",
-            "expires_on": "2099-12-31",
-            "rights": ["calculate", "read", "export"],
-            "synthetic": True,
-        },
-        private_key,
-    )
-    license_path = evidence_dir / "synthetic-test-entitlement.json"
-    license_path.write_text(json.dumps(envelope, sort_keys=True) + "\n", encoding="utf-8")
-    os.environ["MODELA_LICENSE_PATH"] = str(license_path)
-    os.environ["MODELA_LICENSE_PUBLIC_KEY"] = _b64url(public_key)
+    license_value = os.environ.get("MODELA_LICENSE_PATH", "").strip()
+    if not license_value or not Path(license_value).is_file():
+        raise VerificationError("MODELA_LICENSE_PATH must identify the CI TEST entitlement")
+    if os.environ.get("MODELA_LICENSE_PUBLIC_KEY"):
+        raise VerificationError("runtime public-key environment override must not be present")
 
 
 def _headers(*, mutate: bool = False, content_type: str | None = None) -> dict[str, str]:
@@ -261,7 +259,37 @@ def _stop(process: subprocess.Popen, log: Any) -> None:
     log.close()
 
 
-def _run_job(api: str, evidence_dir: Path, variant: int) -> tuple[str, dict, dict]:
+def _stable_semantic_result(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _stable_semantic_result(item)
+            for key, item in sorted(value.items())
+            if key not in VOLATILE_RESULT_KEYS
+        }
+    if isinstance(value, list):
+        return [_stable_semantic_result(item) for item in value]
+    return value
+
+
+def _semantic_result_evidence(snapshot: dict, destination: Path) -> str:
+    stable = _stable_semantic_result(snapshot)
+    encoded = json.dumps(
+        stable,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    destination.write_bytes(encoded + b"\n")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _run_job(
+    api: str,
+    evidence_dir: Path,
+    variant: int,
+    namespace: str,
+) -> tuple[str, dict, dict, str]:
     csv_bytes, spec, subject = _synthetic_case(variant=variant)
     body, media = _multipart(
         {"request_json": json.dumps(spec), "subject_json": json.dumps(subject), "project_id": "TESTE-C06-PROJETO"},
@@ -294,9 +322,10 @@ def _run_job(api: str, evidence_dir: Path, variant: int) -> tuple[str, dict, dic
             raise VerificationError(f"{name} is not a PDF")
         if name.endswith((".docx", ".zip")) and not payload.startswith(b"PK"):
             raise VerificationError(f"{name} is not a ZIP/OOXML container")
-        target = evidence_dir / f"job-{variant}-{name}"
+        target = evidence_dir / f"{namespace}-job-{variant}-{name}"
         target.write_bytes(payload)
-    frozen = json.loads((evidence_dir / f"job-{variant}-frozen_project.json").read_text(encoding="utf-8"))
+    frozen_path = evidence_dir / f"{namespace}-job-{variant}-frozen_project.json"
+    frozen = json.loads(frozen_path.read_text(encoding="utf-8"))
     saved = _json_request(
         f"{api}/projects/TESTE-C06-PROJETO/revisions",
         method="POST",
@@ -306,7 +335,11 @@ def _run_job(api: str, evidence_dir: Path, variant: int) -> tuple[str, dict, dic
     reopened = _json_request(f"{api}/projects/TESTE-C06-PROJETO")
     if reopened.get("revision", {}).get("revision_id") != saved.get("revision_id"):
         raise VerificationError("saved project revision could not be reopened")
-    return job_id, snapshot, saved
+    semantic_hash = _semantic_result_evidence(
+        snapshot,
+        evidence_dir / f"{namespace}-semantic-result.json",
+    )
+    return job_id, snapshot, saved, semantic_hash
 
 
 def _verify_existing_project(api: str) -> dict:
@@ -361,19 +394,30 @@ def verify(args: argparse.Namespace) -> dict:
         health, ui_size = _wait_ready(api, ui)
         result["checks"]["backend_and_ui"] = {"status": "PASSED", "health": health, "ui_bytes": ui_size}
         if args.phase == "initial":
-            job_id, snapshot, saved = _run_job(api, evidence_dir, 0)
+            job_id, snapshot, saved, semantic_hash = _run_job(api, evidence_dir, 0, "initial")
             result["checks"]["calculate_documents_save_reopen"] = {
                 "status": "PASSED", "job_id": job_id, "revision_id": saved["revision_id"],
                 "point": (snapshot.get("value") or {}).get("point"),
+                "semantic_result_sha256": semantic_hash,
             }
             result["checks"]["backup"] = {"status": "PASSED", "sha256": _backup(api, args.backup)}
         elif args.phase == "upgrade":
             existing = _verify_existing_project(api)
-            job_id, snapshot, saved = _run_job(api, evidence_dir, 1)
+            job_id, snapshot, saved, semantic_hash = _run_job(api, evidence_dir, 0, "upgrade")
+            initial = json.loads((evidence_dir / "initial.json").read_text(encoding="utf-8"))
+            expected_hash = initial["checks"]["calculate_documents_save_reopen"][
+                "semantic_result_sha256"
+            ]
+            if semantic_hash != expected_hash:
+                raise VerificationError(
+                    "recalculation after update changed values, intervals, policies or qualification content"
+                )
             result["checks"]["upgrade_reopen_and_recalculate"] = {
                 "status": "PASSED", "previous_revision_id": existing["revision"]["revision_id"],
                 "new_revision_id": saved["revision_id"], "job_id": job_id,
                 "point": (snapshot.get("value") or {}).get("point"),
+                "semantic_result_sha256": semantic_hash,
+                "matches_initial_result": True,
             }
         elif args.phase == "restore":
             result["checks"]["restore"] = {"status": "PASSED", "response": _restore(api, args.backup)}

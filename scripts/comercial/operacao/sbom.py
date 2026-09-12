@@ -79,6 +79,7 @@ dist = importlib.metadata.distribution(sys.argv[1])
 metadata = dist.metadata
 license_files = []
 native_files = []
+font_files = []
 for entry in dist.files or ():
     relative = str(entry).replace('\\', '/')
     basename = pathlib.PurePosixPath(relative).name.lower()
@@ -99,6 +100,13 @@ for entry in dist.files or ():
             'sha256': hashlib.sha256(payload).hexdigest(),
             'size': len(payload),
         })
+    if located.suffix.lower() in {'.ttf', '.otf', '.woff', '.woff2', '.pfb'}:
+        payload = located.read_bytes()
+        font_files.append({
+            'path': relative,
+            'sha256': hashlib.sha256(payload).hexdigest(),
+            'size': len(payload),
+        })
 print(json.dumps({
     'license': metadata.get('License') or '',
     'license_expression': metadata.get('License-Expression') or '',
@@ -107,6 +115,7 @@ print(json.dumps({
     'summary': metadata.get('Summary') or '',
     'license_files': sorted(license_files, key=lambda item: item['path']),
     'native_files': sorted(native_files, key=lambda item: item['path']),
+    'font_files': sorted(font_files, key=lambda item: item['path']),
 }))
 """
     result = subprocess.run([python, "-c", script, name], check=True, capture_output=True, text=True)
@@ -138,6 +147,7 @@ def build_sbom(
                     "project_urls": list(meta.get("project_urls") or []),
                     "license_files": list(meta.get("license_files") or []),
                     "native_files": list(meta.get("native_files") or []),
+                    "font_files": list(meta.get("font_files") or []),
                 },
             }
         )

@@ -15,6 +15,25 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Mapping
 
+from .trusted_anchor import (
+    trust_anchor_metadata,
+    trusted_anchor_metadata,
+    trusted_vendor_public_key,
+)
+
+
+__all__ = [
+    "LicenseDecision",
+    "LicenseError",
+    "install_license",
+    "load_license",
+    "make_signed_envelope",
+    "trust_anchor_metadata",
+    "trusted_anchor_metadata",
+    "trusted_vendor_public_key",
+    "verify_license",
+]
+
 
 class LicenseError(ValueError):
     pass
