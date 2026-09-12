@@ -133,6 +133,20 @@ jobs:
           "$HOME/c15-smoke-venv/bin/python" -m pip install -c constraints/linux-py3.txt "$WHEEL"
           echo "$WHEEL" > "$HOME/c15-smoke-venv/wheel-path.txt"
           sha256sum "$WHEEL" | tee "$HOME/c15-smoke-venv/wheel.sha256"
+      - name: Clean-venv wheel install smoke (boots /health off the installed dist)
+        env:
+          C15_INSTALL_SMOKE: "1"
+        run: |
+          python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+          python -m pytest tests/c15_packaging/test_wheel_install_smoke.py -q --tb=short \
+            --junitxml=artifacts/install-smoke.junit.xml
+      - name: Upload install-smoke evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-smoke
+          path: artifacts/
+          if-no-files-found: error
       - name: Evaluate from installed package until document
         working-directory: ${{ runner.temp }}
         env:
@@ -354,6 +368,7 @@ jobs:
     needs:
       - lint
       - c15-tests-linux
+      - c15-tests-windows
       - build-sdist-wheel
       - install-eval-linux
       - wide-suite-linux
@@ -377,7 +392,7 @@ jobs:
           CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: >
           python scripts/c15_local/aggregate_required.py
-          --required-jobs lint,c15-tests-linux,build-sdist-wheel,install-eval-linux,wide-suite-linux,c16-harness,p04-harness
+          --required-jobs lint,c15-tests-linux,c15-tests-windows,build-sdist-wheel,install-eval-linux,wide-suite-linux,c16-harness,p04-harness
           --results-json '${{ toJSON(needs) }}'
           --artifacts-dir evidence
           --expected-sha "$CANDIDATE_SHA"

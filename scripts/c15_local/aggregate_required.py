@@ -29,6 +29,7 @@ SUCCESS = "success"
 DEFAULT_REQUIRED_JOBS = (
     "lint",
     "c15-tests-linux",
+    "c15-tests-windows",
     "build-sdist-wheel",
     "install-eval-linux",
     "wide-suite-linux",

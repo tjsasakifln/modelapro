@@ -206,3 +206,46 @@ jobs:
 def test_reader_does_not_silently_return_empty():
     assert _load_yaml("") == {}
     assert _jobs(), "reader returned nothing for the real workflow"
+
+
+# --- gaps found by the C06 requirement inventory -------------------------
+
+
+def test_windows_blocks_the_gate():
+    """Windows x64 is an announced target of the commercial offer.
+
+    It was absent from --required-jobs, so a Windows failure was not a red
+    build. A job that cannot turn the gate red announces nothing.
+    """
+    acc = _jobs()["acceptance"]
+    assert "c15-tests-windows" in acc["needs"], acc["needs"]
+    run_bodies = " ".join(s.get("run", "") for s in acc["steps"])
+    required = run_bodies.split("--required-jobs", 1)[1].split()[0]
+    assert "c15-tests-windows" in required.split(","), required
+
+
+def test_every_required_job_is_a_real_job_and_a_declared_need():
+    """A name in --required-jobs that is not a job would never be seen."""
+    jobs = _jobs()
+    acc = jobs["acceptance"]
+    run_bodies = " ".join(s.get("run", "") for s in acc["steps"])
+    required = run_bodies.split("--required-jobs", 1)[1].split()[0].split(",")
+    for name in required:
+        assert name in jobs, f"{name} is required but is not a job"
+        assert name in acc["needs"], f"{name} is required but is not a need"
+
+
+def test_install_smoke_flag_is_actually_set_by_a_job():
+    """The installed-artifact /health property was asserted nowhere.
+
+    tests/c15_packaging/test_wheel_install_smoke.py is skipif-gated on
+    C15_INSTALL_SMOKE, and no job set it: the test was permanently skipped
+    while its docstring claimed CI ran it.
+    """
+    setters = [
+        (name, step.get("name"))
+        for name, job in _jobs().items()
+        for step in job.get("steps") or []
+        if "C15_INSTALL_SMOKE" in str(step.get("env") or "")
+    ]
+    assert setters, "no job sets C15_INSTALL_SMOKE; the smoke test can only skip"
