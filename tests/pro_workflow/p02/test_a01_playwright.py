@@ -256,9 +256,6 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
     current_job = page.locator("p").filter(
         has_text=re.compile(rf"^Identificador do trabalho: {re.escape(job_id)}$")
     ).first
-    stale_result = page.get_by_text(
-        "O arquivo mudou. O resultado abaixo pertence à versão anterior.", exact=True
-    )
     terminal_state = page.locator("p").filter(
         has_text=re.compile(r"^Estado:\s*Cálculo disponível$")
     ).first
@@ -270,7 +267,6 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
         try:
             expect(current_job).to_be_visible(timeout=10000)
             expect(terminal_state).to_be_visible(timeout=10000)
-            expect(stale_result).to_have_count(0, timeout=10000)
             expect(result_region).to_be_visible(timeout=10000)
             break
         except AssertionError:
@@ -280,10 +276,16 @@ def _upload_and_run(page, path: Path, tag: str) -> str:
             refresh.click()
     expect(current_job).to_be_visible(timeout=10000)
     expect(terminal_state).to_be_visible(timeout=10000)
-    expect(stale_result).to_have_count(0, timeout=10000)
     expect(result_region).to_be_visible(timeout=10000)
     body = page.inner_text("body")
     page.screenshot(path=str(_evidence_dir() / f"result-{tag}.png"))
     assert "Valor da avaliação" in body or "Cálculo disponível" in body, body[:2000]
     assert "735.000" in body or "735000" in body or "735.000,00" in body, body[:1500]
+    with page.expect_download(timeout=45000) as download_info:
+        page.get_by_role("button", name="Baixar cálculo (JSON)", exact=True).click()
+    downloaded_snapshot = json.loads(
+        Path(download_info.value.path()).read_text(encoding="utf-8")
+    )
+    assert downloaded_snapshot["job_id"] == job_id
+    assert abs(float(downloaded_snapshot["value"]["point"]) - 735000.0) < 0.01
     return job_id
