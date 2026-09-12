@@ -45,6 +45,25 @@ def test_same_schema_same_file_keeps_token():
     assert token == again
 
 
+def test_request_spec_keeps_declared_document_context_separate_from_purpose():
+    spec = build_request_spec(
+        target_col="preco", candidate_cols=["area"], roles={"area": "predictor", "preco": "target"},
+        purpose="garantia", report_context={
+            "objective": "estimar valor de mercado para decisão interna",
+            "market_diagnosis": "amostra declarada pelo responsável",
+            "variable_classification": {"area": {"criterion": "área privativa", "coding": "contínua"}},
+            "grade_i_justification": "justificativa declarada",
+            "observations": "sem inferência automática",
+            "subject": {"geolocation": {"latitude": -23.5, "longitude": -46.6, "address": "Rua A", "source": "declaração"}},
+            "sample_evidence": {"1": {"address": "Rua B", "latitude": -23.6, "longitude": -46.7, "source": "declaração"}},
+        },
+    )
+    assert spec["purpose"] == "garantia"
+    assert spec["report_context"]["objective"] != spec["purpose"]
+    assert spec["report_context"]["subject"]["geolocation"]["latitude"] == -23.5
+    assert "sample_evidence" not in spec["candidate_cols"]
+
+
 def test_file_change_invalidates_preview_and_marks_previous_result():
     session = {
         "c09_preview": PREVIEW_BAIRRO_FORMATTED,

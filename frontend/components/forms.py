@@ -369,6 +369,7 @@ def build_request_spec(
     professional_findings: Optional[Mapping[str, Any]] = None,
     value_policy: Optional[Mapping[str, Any]] = None,
     synthetic_test_only: bool = False,
+    report_context: Optional[Mapping[str, Any]] = None,
 ) -> dict:
     """Monta RequestSpec MP/1. Não presume BRL, BRL/m² nem data de hoje.
 
@@ -457,6 +458,8 @@ def build_request_spec(
         spec["asset_scope"] = asset_scope
     if qualification_profile:
         spec["qualification_profile"] = qualification_profile_wire(qualification_profile)
+    if report_context:
+        spec["report_context"] = dict(report_context)
     if justified_exclusions:
         spec["justified_exclusions"] = [dict(item) for item in justified_exclusions]
     if profile_evidence:
@@ -1333,6 +1336,21 @@ def _iso_or_none(value: Any) -> Optional[str]:
     return text or None
 
 
+def _geolocation(latitude: Any, longitude: Any, address: str, source: str) -> dict:
+    """Keep operator-provided location context out of model predictors."""
+    result = {"address": address.strip() or None, "source": source.strip() or None}
+    for name, value in (("latitude", latitude), ("longitude", longitude)):
+        try:
+            numeric = float(str(value).replace(",", ".")) if str(value).strip() else None
+        except (TypeError, ValueError):
+            numeric = None
+        if numeric is not None and ((name == "latitude" and -90 <= numeric <= 90) or (name == "longitude" and -180 <= numeric <= 180)):
+            result[name] = numeric
+        else:
+            result[name] = None
+    return result
+
+
 def _encomenda_widgets() -> dict:
     """Opening of the professional order. Never auto-attests ART/inspection."""
     st.subheader("1. Encomenda e perfil")
@@ -2107,6 +2125,32 @@ def upload_form(
 
     item1_ref = st.text_input("Evidência da caracterização do avaliando", key=f"p02_{ns}_item1_ref")
     item3_ref = st.text_input("Evidência da identificação dos dados de mercado", key=f"p02_{ns}_item3_ref")
+    st.markdown("#### Contexto documental do caso")
+    st.caption("Campos declarados pelo responsável; não alteram as variáveis do modelo.")
+    objective = st.text_input("Objetivo do trabalho (distinto da finalidade)", key=f"p02_{ns}_objective")
+    market_diagnosis = st.text_area("Diagnóstico de mercado", key=f"p02_{ns}_market_diagnosis")
+    variable_classification_text = st.text_area(
+        "Classificação das variáveis (JSON)",
+        key=f"p02_{ns}_variable_classification",
+        help='Ex.: {"area":{"criterion":"área privativa","coding":"numérica contínua"}}',
+    )
+    grade_i_justification = st.text_area("Justificativa do grau I", key=f"p02_{ns}_grade_i")
+    observations = st.text_area("Observações", key=f"p02_{ns}_observations")
+    sample_evidence_text = st.text_area(
+        "Evidências de localização da amostra por linha (JSON)",
+        key=f"p02_{ns}_sample_evidence",
+        help='Ex.: {"linha-1":{"address":"…","latitude":-23.5,"longitude":-46.6,"source":"declaração"}}',
+    )
+    try:
+        variable_classification = json.loads(variable_classification_text) if variable_classification_text.strip() else {}
+    except json.JSONDecodeError:
+        variable_classification = {}
+        st.error("Classificação das variáveis deve ser JSON válido; não será enviada.")
+    try:
+        sample_evidence = json.loads(sample_evidence_text) if sample_evidence_text.strip() else {}
+    except json.JSONDecodeError:
+        sample_evidence = {}
+        st.error("Evidências da amostra devem ser JSON válido; não serão enviadas.")
     qualification_evidence = _qualification_evidence_widgets(
         ns=ns,
         profile=encomenda_state.get("profile") or {},
@@ -2142,6 +2186,14 @@ def upload_form(
         professional_findings=qualification_evidence["professional_findings"],
         value_policy=value_policy,
         synthetic_test_only=bool(encomenda_state.get("synthetic_test_only")),
+        report_context={
+            "objective": objective.strip() or None,
+            "market_diagnosis": market_diagnosis.strip() or None,
+            "variable_classification": variable_classification,
+            "grade_i_justification": grade_i_justification.strip() or None,
+            "observations": observations.strip() or None,
+            "sample_evidence": sample_evidence,
+        },
     )
 
     policies = policies_on_the_wire(request_spec)
@@ -2249,12 +2301,22 @@ def upload_form(
             if extra_res != "pendente":
                 resolutions[extra_unsupported] = {"action": extra_res}
 
+        st.markdown("Localização do imóvel avaliando (contexto, fora da regressão)")
+        subject_latitude = st.text_input("Latitude do avaliando", key=f"p02_{ns}_subject_latitude")
+        subject_longitude = st.text_input("Longitude do avaliando", key=f"p02_{ns}_subject_longitude")
+        subject_address = st.text_input("Endereço do avaliando", key=f"p02_{ns}_subject_address")
+        subject_source = st.text_input("Fonte da localização do avaliando", key=f"p02_{ns}_subject_source")
+
         execute_clicked = st.form_submit_button(
             "Executar avaliação",
             help="Envia o avaliando preenchido neste passo. Não dispara com campos ainda não confirmados.",
         )
 
     subject = build_subject_payload(feature_schema, raw_values, resolutions=resolutions)
+    subject["geolocation"] = _geolocation(
+        subject_latitude, subject_longitude, subject_address, subject_source
+    )
+    request_spec["report_context"]["subject"] = {"geolocation": subject["geolocation"]}
     for iss in subject.get("issues") or []:
         if iss.get("requires_resolution"):
             st.error(iss.get("message"))
