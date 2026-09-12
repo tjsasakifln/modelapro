@@ -28,10 +28,12 @@
     "C05": "a877c14fca2f4ff175ee5419d25f914f044e40a4"
   },
   "internal_remaining": [
-    "Cobertura externa e estado da UI após novo job",
-    "Windows instalado: operação e atualização/rollback entre árvores distintas",
-    "Inventário regenerável, licenças e DLLs da candidata",
-    "CI final completo com identidade, bytes e inspeção documental"
+    "Fechar os 26 gaps de capacidade de saída com worker real, PDF/DOCX/XLSX, assinatura e manifesto por requisito",
+    "Validar a preservação da evidência profissional por linha na reabertura e os consumidores UI/documentos integrados",
+    "Corrigir e provar Windows instalado operacional, seguido por atualização/restauração entre árvores distintas",
+    "Confirmar inventários por bytes, regeneração nativa, SBOM/licenças e pacote/manual da candidata final",
+    "Concluir CI final com identidade/coleta/JUnit/bytes; alteração histórica do checkout não reproduzida localmente e ausente nos dois C15 A2",
+    "Inspecionar representações finais, fluxo de assinatura TESTE, anexos e legibilidade; atualizar matriz e topo da PR"
   ],
   "external_requirements": "integration-matrix.md#dependências-externas-exatas-não-são-desculpa-para-código-faltante",
   "nao_autorizado_e_nao_feito": [
@@ -40,5 +42,13 @@
     "compra de normas, certificados ou serviços",
     "submissão de dados a instituições",
     "assinatura de laudo ou contrato em nome de pessoa"
-  ]
+  ],
+  "published_candidate": {
+    "head_sha": "df6b7b786f91b7a545d4c925d954cbedb9fbdf17",
+    "role": "intermediate_windows_A2_not_final",
+    "c15_pr_run": "34721474693",
+    "c15_push_run": "34721472670",
+    "windows_run": "34721474609",
+    "status_at_recording": "C15_PR_AND_PUSH_SUCCESS_WINDOWS_FAILURE_NOT_FINAL"
+  }
 }
