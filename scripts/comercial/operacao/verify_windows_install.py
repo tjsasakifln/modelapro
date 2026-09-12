@@ -521,9 +521,7 @@ def _wait_for_product_ports_closed(timeout: float = 15.0) -> list[str]:
     return _open_product_ports()
 
 
-def _windows_descendant_pids(
-    parent_pid: int, executable_name: str = "MODELA-PRO.exe"
-) -> list[int]:
+def _windows_descendant_pids(parent_pid: int) -> list[int]:
     """Snapshot descendants before terminating a windowless launcher."""
     import ctypes
     from ctypes import wintypes
@@ -555,7 +553,6 @@ def _windows_descendant_pids(
     if snapshot == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
     parents: dict[int, int] = {}
-    executable_names: dict[int, str] = {}
     enumeration_error: BaseException | None = None
     try:
         entry = ProcessEntry()
@@ -566,7 +563,6 @@ def _windows_descendant_pids(
             raise ctypes.WinError(ctypes.get_last_error())
         while present:
             parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
-            executable_names[int(entry.th32ProcessID)] = str(entry.szExeFile)
             ctypes.set_last_error(0)
             present = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
         error = ctypes.get_last_error()
@@ -590,11 +586,7 @@ def _windows_descendant_pids(
             ):
                 descendants.add(pid)
                 changed = True
-    return sorted(
-        pid
-        for pid in descendants
-        if executable_names.get(pid, "").casefold() == executable_name.casefold()
-    )
+    return sorted(descendants)
 
 
 def _windows_open_process_handles(child_pids: list[int]) -> list[tuple[int, int]]:
