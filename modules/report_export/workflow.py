@@ -105,6 +105,11 @@ def _recipient_documentary_file(store: Any, job_id: str, context: Mapping[str, A
         return []
     raw = store.get_artifact(job_id, str(record.get("stored_name") or ""))
     valid = raw is not None and _sha(raw) == record.get("proof_sha256")
+    if not valid:
+        raise DocumentWorkflowError(
+            "RECIPIENT_RETURN_INTEGRITY_FAILED",
+            "recipient proof included in the document is missing or changed",
+        )
     item = {
         "filename": record.get("filename"), "media_type": record.get("media_type"),
         "sha256": record.get("proof_sha256"), "size": record.get("size"),
@@ -414,8 +419,8 @@ def generate_documents(
         latest = receipt_status.get("latest") or {}
         if latest.get("authorized_for_report") is True:
             context["institution_receipt"] = receipt_status["institution_acceptance"]
-        if any(item.get("synthetic_test_only") for item in receipt_status["records"]):
-            context["synthetic_test_only"] = True
+            if latest.get("synthetic_test_only") is True:
+                context["synthetic_test_only"] = True
         # The proof is integral evidence in the new dossier, not only a string
         # copied into the visible report. It never satisfies valuation rules.
         receipt_file = _recipient_documentary_file(store, job_id, context)
