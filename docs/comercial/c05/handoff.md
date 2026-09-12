@@ -169,13 +169,19 @@ regra, modelo, documento, **inclusive a amplitude do IC que define o grau de pre
 altera o fingerprint, invalida as decisões dependentes e preserva o histórico em
 `stale_review_events`.
 
-### 2.4 → C01 — rota de cálculo do custo (necessária ao perfil securitário)
+### 2.4 → C01/C06 — rota de cálculo do custo (integrada em 2026-09-12)
 
-O perfil `abnt-14653-2-custo-reedicao` está em `blocked_external_evidence`: a **regra** de
-enquadramento (Tabelas 6 e 7) está implementada em `classify_custo_fundamentacao`, e as
-bases de valor estão especificadas em `VALUE_BASES`, mas a **rota de cálculo** não existe.
+O perfil `abnt-14653-2-custo-reedicao` versão `0.2.0` é `verified` para as edições
+identificadas no catálogo. A atualidade dessas edições permanece
+`edition_on_hand_verified_currency_unconfirmed`, exatamente como no perfil de regressão:
+isto não autoriza alegar conformidade com a edição vigente sem verificação externa datada.
 
-Especificação para C01:
+A rota `MP-COST/1`, o enquadramento das Tabelas 6 e 7 e seu consumidor no worker estão
+integrados. O contrato `cost_bom` registra local/data/moeda, itens e fontes, modalidade do
+custo direto, BDI e depreciação. O worker não exige nem processa amostra de mercado nessa
+rota; a memória integral segue no snapshot, no laudo e no dossiê.
+
+Regras preservadas:
 - Base correta: `custo_de_reedicao` = custo de reprodução − depreciação
   (ABNT NBR 14653-1:2019, 3.1.11.3 e 3.1.11.5). **Não** é valor de mercado.
 - É **vedado** converter preço de mercado em custo por coeficiente. `value_basis_guard`
@@ -184,8 +190,12 @@ Especificação para C01:
   semelhante/diferente do padrão, com ajustes), BDI (calculado/justificado/arbitrado) e
   depreciação física (levantamento do custo de recuperação / métodos técnicos consagrados
   com idade, vida útil e estado de conservação / arbitrada).
-- Insumo externo faltante: série **CUB vigente por região e padrão** e o projeto padrão da
-  ABNT NBR 12721. Não obtidos nesta campanha — ver `docs/comercial/c05/blockers.md`.
+- Série CUB ou orçamento autorizado é insumo do **caso** e deve trazer referência; sua
+  ausência torna aquele caso não qualificável, não bloqueia a implementação global.
+- `None`, zero e erro permanecem estados distintos. Depreciação solicitada mas inválida
+  não pode devolver custo bruto sob o rótulo de custo depreciado.
+- Dados sintéticos são aceitos somente em testes rotulados e não comprovam fonte externa,
+  revisão profissional, vigência normativa ou aceitação institucional.
 
 ### 2.5 → C04 — dependências
 

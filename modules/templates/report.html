@@ -553,6 +553,27 @@
   <p class="pending">Pendência: o snapshot não trouxe next_actions.</p>
   {% endif %}
 
+  {% if cost_route %}
+  <h2>Memória da quantificação de custo</h2>
+  <p>A memória abaixo reproduz o resultado armazenado. Preço de mercado, conversão cambial e atualização temporal não foram usados como fatores implícitos.</p>
+  <table>
+    <thead><tr><th>Parcela</th><th>Valor integral</th><th>Apresentação</th></tr></thead>
+    <tbody>
+      {% for item in cost_memory_rows %}
+      <tr><td>{{ item.label }}</td><td>{{ item.raw }}</td><td>{{ item.display }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <h3>Itens integrais</h3>
+  <table>
+    <thead><tr><th>ID</th><th>Categoria</th><th>Quantidade</th><th>Custo unitário</th><th>Total</th><th>Fonte</th></tr></thead>
+    <tbody>
+      {% for item in cost_items %}
+      <tr><td>{{ item.item_id }}</td><td>{{ item.category }}</td><td>{{ item.quantity }} {{ item.unit or '' }}</td><td>{{ item.unit_cost }} {{ item.currency or '' }}</td><td>{{ item.amount }} {{ item.currency or '' }}</td><td>{{ item.source }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
   <h2>Especificação estatística do modelo</h2>
   <p>
     Equação na escala de ajuste (<b>{{ fitting_scale }}</b>).
@@ -572,6 +593,7 @@
   {% for note in formula_notes %}
   <p class="disclaimer">{{ note }}</p>
   {% endfor %}
+  {% endif %}
   {% if variable_meanings %}
   <h3>Significado das variáveis na especificação</h3>
   <table>

@@ -64,12 +64,14 @@ responde "LINK EXPIRADO".
 **efetivamente consultadas**, com SHA-256 registrado e reconferível. Fica bloqueado
 afirmar conformidade com "a edição vigente" ou ausência de emenda posterior.
 
-## 5. Rota de cálculo do custo — bloqueia o perfil securitário que exija custo
+## 5. Fonte de custo por caso — não bloqueia mais a implementação
 
-Material exato: **série CUB vigente por região e padrão** (SINDUSCON) e o projeto padrão
-da **ABNT NBR 12721**. A *regra* de enquadramento (Tabelas 6 e 7) está implementada em
-`classify_custo_fundamentacao` e a base de valor está especificada em `VALUE_BASES`; falta
-a rota de cálculo, que é **handoff a C01** (ver [`handoff.md` §2.4](handoff.md)).
+A rota `MP-COST/1` e seu consumidor estão integrados. O material exato continua sendo
+uma fonte de custo autorizada para o **caso** — orçamento sintético identificado ou série
+CUB aplicável por região/padrão, conforme a modalidade declarada — além das memórias de
+BDI e depreciação. Esses insumos não são incorporados ao produto e não são inferidos de
+preço de mercado. Ausência ou invalidade reprova o cálculo daquele caso; não justifica um
+bloqueio global de software. Ver [`handoff.md` §2.4](handoff.md).
 
 ## 6. Blocos que NÃO devem consumir orçamento de recuperação
 

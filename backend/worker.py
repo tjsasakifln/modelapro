@@ -1181,6 +1181,281 @@ def compose_preview(
     }
 
 
+def _compose_cost_valuation_job(
+    *, context: Dict[str, Any], emit: Callable[[str, Optional[float]], None],
+    spec: Mapping[str, Any], file_bytes: bytes, filename: str,
+    subject_raw: Optional[Mapping[str, Any]], project_id: Optional[str],
+    peers: Mapping[str, Any], job_store: Any, output_dir: Optional[str],
+) -> dict:
+    """Compose the cost method without parsing/fitting a market sample."""
+    from modules.cost_valuation import compute_reconstruction_cost
+    from modules.valuation_policy.qualification import compose_qualification_context, map_issuance_status
+
+    emit(STAGE_NORMATIVE, None)
+    bom = spec.get("cost_bom")
+    cost_result = compute_reconstruction_cost(
+        bom,
+        value_basis="depreciated_cost",
+        include_depreciation=True,
+    )
+    issues = list(cost_result.get("issues") or [])
+    if isinstance(bom, Mapping):
+        if spec.get("reference_date") != bom.get("reference_date"):
+            issues.append(make_issue(
+                "COST_REFERENCE_DATE_CONFLICT",
+                "RequestSpec.reference_date e cost_bom.reference_date devem coincidir; atualização implícita é proibida.",
+                origin="c06.worker",
+                evidence={"request_reference_date": spec.get("reference_date"), "cost_reference_date": bom.get("reference_date")},
+            ))
+        if spec.get("target_unit") != bom.get("currency"):
+            issues.append(make_issue(
+                "COST_CURRENCY_CONFLICT",
+                "RequestSpec.target_unit e cost_bom.currency devem coincidir; conversão implícita é proibida.",
+                origin="c06.worker",
+                evidence={"target_unit": spec.get("target_unit"), "cost_currency": bom.get("currency")},
+            ))
+    if any(item.get("severity") == "error" for item in issues):
+        cost_result = dict(cost_result)
+        cost_result["computable"] = False
+        cost_result["reason"] = issues[0].get("code") if issues else "cost_not_computable"
+        cost_result["issues"] = issues
+        cost_result["value"] = dict(cost_result.get("value") or {})
+        cost_result["value"]["point"] = None
+
+    normative = {
+        "schema_version": "MP-NORMATIVE-COST/1",
+        "edition": "ABNT NBR 14653-2:2011",
+        "verification_status": "case_cost_evidence_assessed_profile_currency_unconfirmed",
+        "fundamentacao": dict(cost_result.get("fundamentacao") or {}),
+        "precisao": {"status": "not_computed", "grade": None, "reason": "not_applicable_to_cost_quantification"},
+        "documentary": {"status": "derived_from_cost_memory", "verified": False},
+        "issues": [],
+    }
+    value = empty_value_block()
+    cost_value = dict(cost_result.get("value") or {})
+    for key in value:
+        value[key] = cost_value.get(key)
+    value["basis"] = "depreciated_cost"
+    model = {
+        "candidate_id": "cost-quantification",
+        "status": "fitted" if cost_result.get("computable") else "rejected",
+        "method": "metodo_quantificacao_de_custo",
+        "coefficients": {},
+        "formula": None,
+    }
+    input_sha = sha256_bytes(dumps_strict(bom or {}).encode("utf-8"))
+    validation = _map_validation(normative, {})
+    validation["fundamentacao"] = dict(cost_result.get("fundamentacao") or {})
+    validation["statistical"] = {
+        "route": "cost_quantification",
+        "market_sample_applicable": False,
+        "precision_grade_applicable": False,
+    }
+    draft = {
+        "schema_version": SCHEMA_VERSION,
+        "job_id": context["job_id"],
+        "project_id": project_id,
+        "input_sha256": input_sha,
+        "code_sha": current_code_sha(),
+        "reference_date": spec.get("reference_date"),
+        "generated_at": _utc_now_iso(),
+        "target": {"column": "", "unit": spec.get("target_unit") or "", "estimand": "depreciated_reconstruction_cost"},
+        "value": value,
+        "sample": {"received": 0, "observed_target": 0, "prepared": 0, "used": 0, "excluded": 0,
+                   "used_row_ids": [], "excluded_row_ids": []},
+        "validation": validation,
+        "issues": issues,
+        "model": model,
+        "search": {"audit": {"route": "cost_quantification", "search_invoked": False}, "winner_candidate_id": "cost-quantification"},
+        "alternatives": [],
+        "next_actions": [],
+        "provenance": {
+            "filename": filename or "cost-bom.json",
+            "composed_by": "c06.worker.cost",
+            "peers": {},
+            "sample_ledger_present": False,
+            "subject_categorical_survived": False,
+            "calculation_version": CALCULATION_VERSION,
+            "normative_assessment": normative,
+            "cost_result": cost_result,
+            "market_sample_not_required": True,
+            "market_value_not_used_as_cost": True,
+            "workflow_context": build_workflow_context(
+                request_spec=spec, subject_raw=subject_raw, validation=validation,
+                search_audit={"route": "cost_quantification", "search_invoked": False},
+                limitation_codes=[item.get("code") for item in issues], issues=issues,
+            ),
+        },
+    }
+    qc = compose_qualification_context(
+        request_spec=spec, snapshot_draft=draft,
+        winner={"status": "fitted"} if cost_result.get("computable") else None,
+        search_audit=draft["search"]["audit"], issues=issues,
+        review_events=list(spec.get("review_events") or []), cost_result=cost_result,
+        normative_assessment=normative,
+    )
+    draft["provenance"]["qualification_context"] = qc
+    issuance = dict(validation.get("issuance") or {})
+    issuance["status"] = map_issuance_status(qc.get("case_release_status"))
+    issuance["case_release_status"] = qc.get("case_release_status")
+    issuance["reasons"] = list(dict.fromkeys(list(issuance.get("reasons") or []) + (["not_qualified_emission"] if qc.get("case_release_status") == "analysis_only" else [])))
+    draft["validation"]["issuance"] = issuance
+    emit(STAGE_FREEZE, None)
+    try:
+        snapshot = freeze_result_snapshot(draft)
+    except ResultSnapshotError as exc:
+        raise CompositionError("freeze_result_snapshot failed", exc.issues) from exc
+    if job_store is not None:
+        job_store.save_snapshot(context["job_id"], snapshot)
+
+    sources = []
+    if isinstance(bom, Mapping):
+        direct = bom.get("direct_cost")
+        if isinstance(direct, Mapping) and direct.get("source"):
+            sources.append(direct.get("source"))
+        for item in cost_result.get("items") or []:
+            if item.get("source") and item.get("source") not in sources:
+                sources.append(item.get("source"))
+    report_context = complete_report_context(
+        {
+            "cost_memory": cost_result.get("memory"),
+            "cost_items": cost_result.get("items"),
+            "cost_fundamentacao": cost_result.get("fundamentacao"),
+            "sources": sources,
+            "used_rows": [], "excluded_rows": [],
+            "methodology_justification": "Método da quantificação de custo; memória MP-COST/1 sem fator de mercado.",
+        },
+        request_spec=spec, subject_raw=subject_raw, snapshot=snapshot,
+    )
+    artifact_refs: Dict[str, Any] = {}
+    for artifact_name, artifact_value in (("normative_assessment.json", normative), ("report_context.json", report_context)):
+        payload = dumps_strict(artifact_value).encode("utf-8")
+        context["artifact_bytes"][artifact_name] = payload
+        context["artifact_states"][artifact_name] = {"state": "ready", "error": None}
+        artifact_refs[artifact_name] = {"sha256": sha256_bytes(payload)}
+        _save_artifact(job_store, context["job_id"], artifact_name, payload)
+
+    emit(STAGE_REPORT, None)
+    render = peers.get("render_report")
+    if callable(render):
+        try:
+            pdf = render(snapshot, report_context)
+            if not isinstance(pdf, (bytes, bytearray)) or not pdf:
+                raise ValueError("render_report returned no bytes")
+            payload = bytes(pdf)
+            context["artifact_bytes"]["report.pdf"] = payload
+            context["artifact_states"]["report.pdf"] = {"state": "ready", "error": None}
+            artifact_refs["report.pdf"] = {"sha256": sha256_bytes(payload)}
+            _save_artifact(job_store, context["job_id"], "report.pdf", payload)
+        except Exception as exc:
+            context["artifact_states"]["report.pdf"] = {"state": "failed", "error": make_issue("PDF_FAILED", f"render_report failed: {exc}", origin="c06.worker.cost")}
+    else:
+        context["artifact_states"]["report.pdf"] = {"state": "failed", "error": make_issue("PEER_UNAVAILABLE", "render_report unavailable", severity="warning", origin="c06.worker.cost")}
+
+    emit(STAGE_EVIDENCE, None)
+    evidence_files = {
+        "snapshot/result_snapshot.json": dumps_strict(snapshot).encode("utf-8"),
+        "calculation/cost_bom.json": dumps_strict(bom or {}).encode("utf-8"),
+        "calculation/cost_result.json": dumps_strict(cost_result).encode("utf-8"),
+        "documents/report_context.json": dumps_strict(report_context).encode("utf-8"),
+        "metadata/request_spec.json": dumps_strict(request_spec_for_peers(spec)).encode("utf-8"),
+        "qualification/context.json": dumps_strict(qc).encode("utf-8"),
+    }
+    if context["artifact_bytes"].get("report.pdf"):
+        evidence_files["documents/report.pdf"] = context["artifact_bytes"]["report.pdf"]
+    ledger = {
+        "schema_version": "MP-COMPLETENESS/1",
+        "items": [
+            {"component": "cost_input", "status": "verified", "declared": True, "source": "calculation/cost_bom.json", "notes": "BOM integral identificado por hash.", "evidence": {}},
+            {"component": "cost_calculation", "status": "verified", "declared": True, "source": "calculation/cost_result.json", "notes": "Memória reproduz o point do snapshot.", "evidence": {}},
+            {"component": "frozen_snapshot", "status": "verified", "declared": True, "source": "snapshot.schema_version", "notes": "Snapshot MP/1.", "evidence": {}},
+            {"component": "qualification_context", "status": "present", "declared": True, "source": "snapshot.provenance.qualification_context", "notes": "", "evidence": {}},
+            {"component": "report_artifact", "status": "present", "declared": True, "source": "artifacts.report_pdf", "notes": "", "evidence": {}},
+            {"component": "docx_artifact", "status": "missing", "declared": False, "source": "", "notes": "Gerado na passagem documental.", "evidence": {}},
+            {"component": "review_history", "status": "missing", "declared": False, "source": "", "notes": "Ato humano ainda não realizado.", "evidence": {}},
+            {"component": "signature_record", "status": "missing", "declared": False, "source": "", "notes": "Assinatura ainda não importada.", "evidence": {}},
+            {"component": "photos_documents", "status": "missing", "declared": False, "source": "", "notes": "Anexos documentais ainda não fornecidos.", "evidence": {}},
+        ],
+    }
+    ledger["missing"] = [item["component"] for item in ledger["items"] if item["status"] == "missing"]
+    ledger["counts"] = {status: sum(item["status"] == status for item in ledger["items"])
+                        for status in ("declared", "missing", "present", "verified")}
+    evidence_files["completeness/ledger.json"] = dumps_strict(ledger).encode("utf-8")
+    media = {
+        ".json": "application/json", ".pdf": "application/pdf",
+    }
+    evidence_manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "bundle_version": "C12/1",
+        "input_id": snapshot.get("input_sha256"),
+        "code_id": snapshot.get("code_sha"),
+        "snapshot_sha256": sha256_bytes(evidence_files["snapshot/result_snapshot.json"]),
+        "job_id": snapshot.get("job_id"),
+        "project_id": snapshot.get("project_id"),
+        "cost_evidence_schema": "MP-COST-EVIDENCE/1",
+        "result_fingerprint": qc.get("result_fingerprint"),
+        "calculation_schema": cost_result.get("schema_version"),
+        "completeness_status": "incomplete",
+        "completeness_missing": ledger["missing"],
+        "completeness_summary": ledger["counts"],
+        "replay": {
+            "formula": (cost_result.get("memory") or {}).get("formula"),
+            "point": snapshot.get("value", {}).get("point"),
+            "automatic_currency_or_date_adjustment": False,
+        },
+        "files": [
+            {"path": name, "sha256": sha256_bytes(payload), "size": len(payload),
+             "type": media.get(os.path.splitext(name)[1], "application/octet-stream"),
+             "version": "MP-COST/1", "function": "cost_evidence_" + name.replace("/", "_")}
+            for name, payload in sorted(evidence_files.items())
+        ],
+    }
+    manifest_payload = dumps_strict(evidence_manifest).encode("utf-8")
+    evidence_files["MANIFEST.json"] = manifest_payload
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, payload in sorted(evidence_files.items()):
+            info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            zf.writestr(info, payload)
+    bundle_payload = archive.getvalue()
+    for artifact_name, payload in (("evidence_manifest.json", manifest_payload), ("evidence_bundle.zip", bundle_payload)):
+        context["artifact_bytes"][artifact_name] = payload
+        context["artifact_states"][artifact_name] = {"state": "ready", "error": None}
+        artifact_refs[artifact_name] = {"sha256": sha256_bytes(payload)}
+        _save_artifact(job_store, context["job_id"], artifact_name, payload)
+
+    frozen_project = {
+        "schema_version": SCHEMA_VERSION, "project_id": project_id, "revision_id": None,
+        "input_sha256": input_sha, "dataset_sha256": None,
+        "request_spec": request_spec_for_peers(spec), "feature_schema": {}, "encoder_state": {},
+        "model_spec": {"method": "metodo_quantificacao_de_custo"},
+        "model_state": {"status": model["status"], "cost_result": cost_result},
+        "model_scope": "cost_inputs", "selection_conditioned_on_subject": False,
+        "subject_constraints": {}, "domain": {"kind": "cost_inputs", "target_col": "", "target_unit": spec.get("target_unit"), "reference_date": spec.get("reference_date"), "variables": {}},
+        "sample_ledger": {}, "normative_version": normative["edition"], "artifact_refs": artifact_refs,
+        "provenance": {"code_sha": current_code_sha(), "composed_by": "c06.worker.cost", "calculation_version": CALCULATION_VERSION},
+        "calculation_version": CALCULATION_VERSION, "residual_state": {}, "value": snapshot.get("value"),
+    }
+    frozen_payload = dumps_strict(frozen_project).encode("utf-8")
+    context["artifact_bytes"]["frozen_project.json"] = frozen_payload
+    context["artifact_states"]["frozen_project.json"] = {"state": "ready", "error": None}
+    _save_artifact(job_store, context["job_id"], "frozen_project.json", frozen_payload)
+    emit(STAGE_PERSIST, None)
+    patch = {"stage": STAGE_PERSIST, "progress": context["progress"], "result_available": True,
+             "artifact_states": context["artifact_states"], "calculation_state": "succeeded", "issues": list(snapshot.get("issues") or [])}
+    if job_store is not None:
+        for old in ("running", "queued"):
+            try:
+                job_store.update_transition(context["job_id"], old, "succeeded", patch=patch); break
+            except Exception:
+                continue
+    context.update({"snapshot": snapshot, "frozen_project": frozen_project,
+                    "report_context": report_context, "calculation_state": "succeeded"})
+    return context
+
+
 def compose_valuation_job(
     *,
     job_id: str,
@@ -1240,6 +1515,24 @@ def compose_valuation_job(
                 logger.debug("update_transition(running→running) not accepted; continuing")
 
     spec = request_spec_for_peers(request_spec)
+    profile_wire = spec.get("qualification_profile") if isinstance(spec.get("qualification_profile"), Mapping) else {}
+    is_cost_route = bool(
+        profile_wire.get("method") == "metodo_quantificacao_de_custo"
+        and profile_wire.get("value_basis") == "custo_de_reedicao"
+    )
+    if is_cost_route:
+        return _compose_cost_valuation_job(
+            context=context,
+            emit=emit,
+            spec=spec,
+            file_bytes=file_bytes,
+            filename=filename,
+            subject_raw=context.get("subject_raw"),
+            project_id=project_id,
+            peers=peers,
+            job_store=job_store,
+            output_dir=output_dir,
+        )
     required = list(REQUIRED_VALUATION_PEERS)
     if context["subject_raw"] is not None:
         required.append("transform_subject")

@@ -546,6 +546,7 @@ def assess_document_state(
         value = _mapping(snapshot.get("value"))
         sample = _mapping(snapshot.get("sample"))
         model = _mapping(snapshot.get("model"))
+        cost_route = bool(_mapping(provenance.get("cost_result")))
         required_content = {
             "applicant": ctx.get("applicant")
             or snapshot.get("applicant")
@@ -572,6 +573,12 @@ def assess_document_state(
             "used_row_ids": sample.get("used_row_ids"),
             "model_specification": model.get("coefficients") or model.get("formula"),
         }
+        if cost_route:
+            # Cost quantification has a BOM/memory, not a regression sample,
+            # confidence/prediction intervals or model coefficients.
+            for field in ("mean_ci80", "prediction_interval", "used_row_ids", "model_specification"):
+                required_content.pop(field, None)
+            required_content["cost_memory"] = ctx.get("cost_memory")
         missing_content = [
             name for name, value in required_content.items() if _empty(value)
         ]

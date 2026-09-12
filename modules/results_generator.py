@@ -772,6 +772,19 @@ def build_report_view(
     model = _as_mapping(snapshot.get("model"))
     search = _as_mapping(snapshot.get("search"))
     provenance = _as_mapping(snapshot.get("provenance"))
+    cost_result = _as_mapping(provenance.get("cost_result"))
+    cost_memory = _as_mapping(cost_result.get("memory")) or _as_mapping(ctx.get("cost_memory"))
+    cost_labels = (
+        ("direct_subtotal", "Custo direto"),
+        ("bdi_rate", "Taxa de BDI"),
+        ("bdi_amount", "BDI"),
+        ("reproduction_building", "Custo de reprodução da benfeitoria"),
+        ("depreciation_rate", "Taxa de depreciação física"),
+        ("depreciation_amount", "Depreciação física"),
+        ("depreciated_building", "Benfeitoria depreciada"),
+        ("land_subtotal", "Terreno explicitamente incluído"),
+        ("total", "Total"),
+    )
     issuance = _as_mapping(validation.get("issuance"))
     precisao = _as_mapping(validation.get("precisao"))
     fundamentacao = _as_mapping(validation.get("fundamentacao"))
@@ -1222,6 +1235,24 @@ def build_report_view(
             format_snapshot_number(point) if point is not None else "—"
         ),
         "point_raw": format_snapshot_number(point),
+        "cost_route": bool(cost_result),
+        "cost_memory": cost_memory,
+        "cost_memory_rows": [
+            {
+                "key": key,
+                "label": label,
+                "raw": format_snapshot_number(cost_memory.get(key)),
+                "display": (
+                    f"{_fmt_pt_br(cost_memory.get(key) * 100, 4)}%"
+                    if key.endswith("_rate") and _as_finite_number(cost_memory.get(key)) is not None
+                    else format_value_with_unit(cost_memory.get(key), unit)
+                ),
+            }
+            for key, label in cost_labels
+            if cost_memory.get(key) is not None
+        ],
+        "cost_items": [_redact_mapping(item) for item in _as_list(cost_result.get("items")) if isinstance(item, Mapping)],
+        "cost_fundamentacao": _redact_mapping(cost_result.get("fundamentacao")),
         "adopted_value": adopted_point,
         "adopted_value_display": (
             format_value_with_unit(adopted_point, unit) if adopted_point is not None and not unit_pending else (

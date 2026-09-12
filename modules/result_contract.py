@@ -575,6 +575,13 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
     except ContractError as exc:
         raise RequestSpecError(str(exc), exc.issues) from exc
     spec = dict(raw)
+    raw_profile = spec.get("qualification_profile")
+    cost_request = bool(
+        isinstance(raw_profile, Mapping)
+        and raw_profile.get("method") == "metodo_quantificacao_de_custo"
+        and raw_profile.get("value_basis") == "custo_de_reedicao"
+        and isinstance(spec.get("cost_bom"), Mapping)
+    )
 
     if spec.get("schema_version") != SCHEMA_VERSION:
         raise RequestSpecError(
@@ -600,18 +607,18 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
         )
 
     raw_target = spec.get("target_col")
-    if raw_target is None and allow_empty_target:
+    if raw_target is None and (allow_empty_target or cost_request):
         spec["target_col"] = ""
     else:
         spec["target_col"] = _require_str(
-            raw_target, field="target_col", allow_empty=allow_empty_target
+            raw_target, field="target_col", allow_empty=allow_empty_target or cost_request
         )
 
     candidate_cols = spec.get("candidate_cols")
     if candidate_cols is None:
         spec["candidate_cols"] = None
     elif isinstance(candidate_cols, list):
-        if len(candidate_cols) == 0:
+        if len(candidate_cols) == 0 and not cost_request:
             raise RequestSpecError(
                 "candidate_cols=[] authorizes no predictors",
                 [make_issue(
@@ -982,6 +989,9 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
             "cost_bom must be a mapping when provided",
             [make_issue("TYPE_ERROR", "cost_bom must be a mapping")],
         )
+    if cost_request:
+        spec["cost_bom"] = dict(spec["cost_bom"])
+        spec["_valuation_route"] = "cost"
 
     spec["_applied_defaults"] = issues
     return spec

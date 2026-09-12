@@ -64,6 +64,11 @@ def result_fingerprint(payload: Mapping[str, Any]) -> str:
 
 
 def _calculation_status(assessment: Mapping[str, Any], context: Mapping[str, Any]) -> str:
+    cost_result = context.get("cost_result")
+    if isinstance(cost_result, Mapping) and cost_result:
+        if cost_result.get("schema_version") != "MP-COST/1":
+            return CALC_FAILED
+        return CALC_OK if cost_result.get("computable") is True else CALC_FAILED
     if context.get("calculation_failed"):
         return CALC_FAILED
     if not assessment:
@@ -211,6 +216,12 @@ def _profile_rule_results(
     """Requirements the profile itself declares, beyond the ABNT rules."""
     out: List[Dict[str, Any]] = []
     provided = context.get("profile_evidence") if isinstance(context.get("profile_evidence"), Mapping) else {}
+    cost_result = context.get("cost_result") if isinstance(context.get("cost_result"), Mapping) else {}
+    cost_items = {
+        item.get("id"): item
+        for item in ((cost_result.get("fundamentacao") or {}).get("items") or [])
+        if isinstance(item, Mapping)
+    }
     for req in profile.get("requirements") or []:
         rid = req.get("id")
         verification = req.get("verification", "professional_evidenced")
@@ -232,7 +243,64 @@ def _profile_rule_results(
                 )
             )
             continue
-        if req.get("state") in ("blocked_external_evidence", "pending", "discovery"):
+        if rid == "9.3.1.laudo_completo" and cost_result:
+            output_manifest = context.get("output_manifest")
+            content = (
+                output_manifest.get("content")
+                if isinstance(output_manifest, Mapping)
+                and isinstance(output_manifest.get("content"), Mapping)
+                else {}
+            )
+            required = (
+                "applicant", "asset_identification", "rights", "reference_date",
+                "inspection_date", "value_point", "fundamentacao",
+                "region_characterization", "property_characterization",
+                "methodology_justification", "assumptions", "documents",
+                "sources", "cost_memory",
+            )
+            missing = [field for field in required if content.get(field) is not True]
+            status = RULE_PASSED if not missing else RULE_PENDING_MANUAL
+            evidence = "output_manifest:content" if not missing else None
+            out.append(make_rule_result(
+                rule_id=rid, source_id=profile.get("id", "profile"),
+                edition_or_version=str(profile.get("version")),
+                clause=req.get("clause") or "9.3.1", status=status,
+                observed={"missing": missing},
+                criterion_ref="MP-OUTPUT-MANIFEST/1.content",
+                evidence_refs=[evidence] if evidence else [],
+                explanation=(
+                    "Conteúdo completo da representação documental verificado pelo manifesto C03."
+                    if not missing else f"Laudo completo ainda sem conteúdo: {', '.join(missing)}."
+                ),
+            ))
+            continue
+        cost_item = cost_items.get(rid)
+        if cost_item is not None:
+            status = RULE_PASSED if (
+                cost_item.get("grade") in (1, 2, 3)
+                and cost_item.get("provenance_verified") is True
+            ) else RULE_UNVERIFIED
+            evidence = cost_item.get("provenance")
+            explanation = cost_item.get("detail") or req.get("requirement") or ""
+        elif rid == "metodos.custo.calculo" and cost_result:
+            memory = cost_result.get("memory") if isinstance(cost_result.get("memory"), Mapping) else {}
+            status = RULE_PASSED if (
+                cost_result.get("schema_version") == "MP-COST/1"
+                and cost_result.get("computable") is True
+                and memory.get("total") == (cost_result.get("value") or {}).get("point")
+                and memory.get("automatic_currency_or_date_adjustment") is False
+            ) else RULE_FAILED
+            evidence = "result:provenance.cost_result"
+            explanation = (
+                "Memória MP-COST/1 reproduz o valor sem fator de mercado nem atualização implícita."
+                if status == RULE_PASSED else
+                "Resultado MP-COST/1 ausente, inválido ou sem memória reproduzível."
+            )
+        elif rid == "metodos.custo.calculo":
+            status = RULE_UNVERIFIED
+            evidence = None
+            explanation = "Resultado e memória MP-COST/1 não foram produzidos; declaração lateral não comprova cálculo."
+        elif req.get("state") in ("blocked_external_evidence", "pending", "discovery"):
             status = RULE_UNVERIFIED
             explanation = (
                 f"{req.get('requirement') or ''} — fonte do requisito em estado "
@@ -262,7 +330,7 @@ def _profile_rule_results(
                 status=status,
                 observed=evidence,
                 criterion_ref=req.get("criterion_ref"),
-                evidence_refs=[evidence] if evidence else [],
+                evidence_refs=[str(evidence)] if evidence else [],
                 explanation=explanation,
             )
         )
@@ -542,7 +610,13 @@ def assess_qualification(
 
     calculation_status = _calculation_status(assessment, ctx)
 
-    achieved = (assessment.get("fundamentacao") or {}).get("grade")
+    cost_result = ctx.get("cost_result") if isinstance(ctx.get("cost_result"), Mapping) else {}
+    achieved = (
+        (cost_result.get("fundamentacao") or {}).get("grade")
+        if cost_result else (assessment.get("fundamentacao") or {}).get("grade")
+    )
+    if cost_result and achieved == 3:
+        ctx["targets_grau_iii"] = True
     requested = ctx.get("requested_minimum_grade")
     if requested is None:
         requested = (ctx.get("search_policy") or {}).get("minimum_fundamentacao_grade")
@@ -553,12 +627,25 @@ def assess_qualification(
     )
 
     rule_results: List[Dict[str, Any]] = []
-    if assessment:
+    if assessment and not cost_result:
         rule_results.extend(_tabela1_rule_results(assessment))
         micro = _micronumerosidade_rule_result(assessment)
         if micro:
             rule_results.append(micro)
         rule_results.extend(_pressuposto_rule_results(assessment))
+    if cost_result:
+        cost_fund = cost_result.get("fundamentacao") or {}
+        rule_results.append(make_rule_result(
+            rule_id="tabela6_7.custo.enquadramento",
+            source_id=_SRC2,
+            edition_or_version=_PART2,
+            clause="Tabelas 6 e 7 / 9.3",
+            status=RULE_PASSED if cost_fund.get("grade") in (1, 2, 3) else RULE_UNVERIFIED,
+            observed={"grade": cost_fund.get("grade"), "points": cost_fund.get("points")},
+            criterion_ref="modules.normative_rules.classify_custo_fundamentacao",
+            evidence_refs=["result:provenance.cost_result.fundamentacao"],
+            explanation=cost_fund.get("detail") or "Enquadramento de custo pendente.",
+        ))
     rule_results.append(_value_basis_rule_result(resolved))
     rule_results.extend(_profile_rule_results(resolved, ctx))
 
@@ -575,7 +662,10 @@ def assess_qualification(
             for r in rule_results
         ],
         "grade": achieved,
-        "fundamentacao_points": (assessment.get("fundamentacao") or {}).get("points"),
+        "fundamentacao_points": (
+            (cost_result.get("fundamentacao") or {}).get("points")
+            if cost_result else (assessment.get("fundamentacao") or {}).get("points")
+        ),
         "requested_minimum_grade": requested,
         "calculation_status": calculation_status,
         # Precisão, the interval roles and n/k are material facts: changing the

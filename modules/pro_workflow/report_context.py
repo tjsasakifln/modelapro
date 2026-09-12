@@ -337,11 +337,15 @@ def complete_report_context(
 
     # Technical source hashes are retained alongside (never in place of)
     # documentary/market citations explicitly supplied by the operator.
-    technical_sources = _mapping(base.get("sources"))
+    raw_base_sources = base.get("sources")
+    technical_sources = _mapping(raw_base_sources)
     human_sources = _first(spec.get("sources"), supplied.get("sources"))
     if human_sources:
         resolved["sources"] = human_sources
         resolved["technical_sources"] = technical_sources
+    elif isinstance(raw_base_sources, (list, tuple)):
+        resolved["sources"] = _json_value(raw_base_sources)
+        resolved["technical_sources"] = {}
     else:
         resolved["sources"] = technical_sources
     return _json_value(resolved)
@@ -393,6 +397,8 @@ def build_output_manifest(
         "assumptions": ctx.get("assumptions") is not None,
         "documents": bool(ctx.get("documents")),
         "annexes": bool(ctx.get("annexes")),
+        "sources": bool(ctx.get("sources") or ctx.get("technical_sources")),
+        "cost_memory": bool(_mapping(ctx.get("cost_memory"))),
     }
     return {
         "schema_version": OUTPUT_MANIFEST_SCHEMA,

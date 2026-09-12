@@ -37,7 +37,7 @@ from modules.qualification_profile import (
     resolve_profile,
 )
 from modules.qualification_profile.schema import (
-    PROFILE_BLOCKED_EXTERNAL,
+    PROFILE_VERIFIED,
     RULE_PASSED,
 )
 
@@ -435,19 +435,23 @@ def _fully_supplied_context(profile, fingerprint=None):
     return ctx
 
 
-class TestBlockedCostProfileDoesNotRelease:
+class TestCostProfileCalculationBoundary:
 
     PROFILE_ID = "abnt-14653-2-custo-reedicao"
 
     def _profile(self):
         return resolve_profile({"id": self.PROFILE_ID})
 
-    def test_cost_profile_is_in_the_catalog_and_blocked(self):
+    def test_cost_profile_is_verified_for_the_identified_editions_only(self):
         assert self.PROFILE_ID in known_profile_ids()
         resolved = self._profile()
-        assert resolved["state"] == PROFILE_BLOCKED_EXTERNAL
+        assert resolved["state"] == PROFILE_VERIFIED
+        assert resolved["version"] == "0.2.0"
+        assert {source["currency_status"] for source in resolved["sources"]} == {
+            "edition_on_hand_verified_currency_unconfirmed"
+        }
 
-    def test_blocked_profile_never_reaches_ready_for_signoff(self):
+    def test_generic_declared_evidence_cannot_replace_cost_result(self):
         profile = self._profile()
         first = assess_qualification(_fully_supplied_context(profile), {"id": self.PROFILE_ID})
         fingerprint = first["result_fingerprint"]
@@ -461,18 +465,15 @@ class TestBlockedCostProfileDoesNotRelease:
         )
         assert second["result_fingerprint"] == fingerprint
 
-        assert second["profile"]["state"] == PROFILE_BLOCKED_EXTERNAL
+        assert second["profile"]["state"] == PROFILE_VERIFIED
         assert second["case_release_status"] != CASE_READY_FOR_SIGNOFF, (
-            "perfil em blocked_external_evidence liberou assinatura: um perfil "
-            "bloqueado não libera, por mais evidência que se acumule ao lado."
+            "evidência lateral sem resultado MP-COST/1 não pode liberar assinatura."
         )
         assert second["case_release_status"] != CASE_SIGNED_INTEGRITY_VERIFIED
         assert second["case_release_status"] == CASE_ANALYSIS_ONLY
 
         codes = {b["code"] for b in second["release_blockers"]}
-        assert "profile_not_verified" in codes, (
-            f"o estado bloqueado do perfil não apareceu entre os blockers: {codes}"
-        )
+        assert "decisive_rule_absent" in codes
 
     def test_cost_profile_declares_custo_de_reedicao_and_the_cost_method(self):
         profile = self._profile()

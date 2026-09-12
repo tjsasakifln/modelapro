@@ -10,6 +10,7 @@ from tests.comercial.c01.conftest import gold_csv_bytes, gold_spec, gold_subject
 
 
 SYNTHETIC_BOM = {
+    "schema_version": "MP-COST-BOM/1",
     "reference_location": "SYNTHETIC-Cidade-X",
     "reference_date": "2024-06-01",
     "currency": "BRL",
@@ -71,7 +72,8 @@ def test_bom_sum_excludes_implicit_land_and_is_not_market_factor():
     point = result["value"]["point"]
     assert point == 80 * 450 + 80 * 220 + 8000
     assert point == 61600.0
-    assert result["land_included"] is True
+    assert result["land_present"] is True
+    assert result["land_included"] is False
     assert not any(i["item_id"] == "land" for i in result["items"])
     assert any(e["item_id"] == "land" for e in result["exclusions"])
     assert result["value"]["basis"] == "reconstruction_cost"
@@ -84,7 +86,7 @@ def test_missing_bom_blocks_insurance_profile_but_allows_analysis(isolated_c01_r
     store = isolated_c01_runtime["job_store"]
     created = store.create(payload={"filename": "gold.csv"})
     spec = gold_spec()
-    resolved = resolve_profile({"id": "abnt-14653-2-custo-reedicao", "version": "0.1.0"})
+    resolved = resolve_profile({"id": "abnt-14653-2-custo-reedicao", "version": "0.2.0"})
     spec["qualification_profile"] = {
         key: resolved.get(key)
         for key in (
@@ -108,7 +110,7 @@ def test_missing_bom_blocks_insurance_profile_but_allows_analysis(isolated_c01_r
     assert snap["value"]["point"] is None or snap["value"].get("basis") == "reconstruction_cost"
     assert qc.get("case_release_status") != "ready_for_professional_signoff"
     assert qc.get("case_release_status") == "analysis_only"
-    assert "profile_not_verified" in {
+    assert "calculation_failed" in {
         blocker.get("code") for blocker in qc.get("release_blockers") or []
     }
     assert qc["profile"]["id"] == "abnt-14653-2-custo-reedicao"

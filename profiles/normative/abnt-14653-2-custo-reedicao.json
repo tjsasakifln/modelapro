@@ -1,8 +1,8 @@
 {
   "id": "abnt-14653-2-custo-reedicao",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "normative",
-  "state": "blocked_external_evidence",
+  "state": "verified",
   "label": "Custo de reedição de benfeitoria por método da quantificação de custo",
   "purpose": "seguro",
   "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
@@ -10,7 +10,7 @@
   "method": "metodo_quantificacao_de_custo",
   "asset_scope": "benfeitoria_imovel_urbano",
   "primary_edition": "ABNT NBR 14653-2:2011",
-  "implemented_requirements_label": "Tabela 6 e Tabela 7 (enquadramento); rota de cálculo pendente",
+  "implemented_requirements_label": "Método da quantificação de custo com memória, Tabela 6 e Tabela 7 (enquadramento)",
   "minimum_fundamentacao_grade": null,
   "sources": [
     {
@@ -41,9 +41,12 @@
   "act_type_established": "nenhum_ato_identificado",
   "notes": [
     "A REGRA de enquadramento (Tabelas 6 e 7) está implementada em classify_custo_fundamentacao.",
-    "A ROTA DE CÁLCULO do custo não está implementada: depende de insumos de custo (CUB por região/padrão, projeto padrão da ABNT NBR 12721) que NÃO foram obtidos nesta campanha.",
+    "A rota calcula insumos identificados fornecidos por caso; não incorpora tabelas CUB, não inventa fonte e não converte preço de mercado em custo.",
+    "A versão 0.2.0 substitui o bloqueio estático da rota por verificação do resultado MP-COST/1 e das evidências reais dos itens da Tabela 6.",
+    "Verified significa compatibilidade com as edições identificadas e conferidas, não afirma que sejam as edições vigentes na data de um caso futuro.",
+    "A atualidade das edições permanece explicitamente currency_unconfirmed; qualquer alegação de conformidade vigente exige verificação externa datada e não é inferida pelo software.",
     "É vedado converter preço de mercado em custo por coeficiente: valor de mercado (3.1.47) e custo de reedição (3.1.11.3) são grandezas distintas. O guard value_basis_guard recusa essa conversão.",
-    "Enquanto o estado for blocked_external_evidence, este perfil NÃO habilita emissão qualificada."
+    "A classificação do caso usa somente fontes e evidências reais daquele caso; fixtures sintéticas são rotuladas TESTE e não comprovam conformidade externa."
   ],
   "decisive_rules": [
     "tabela6_7.custo.enquadramento",
@@ -55,22 +58,19 @@
       "id": "tabela6.item1",
       "clause": "Tabela 6 item 1",
       "requirement": "Estimativa do custo direto: orçamento no mínimo sintético (III); CUB para projeto semelhante ao padrão (II); CUB para projeto diferente do padrão, com ajustes (I).",
-      "verification": "documental",
-      "state": "blocked_external_evidence"
+      "verification": "documental"
     },
     {
       "id": "tabela6.item2",
       "clause": "Tabela 6 item 2",
       "requirement": "BDI: calculado (III); justificado (II); arbitrado (I).",
-      "verification": "documental",
-      "state": "blocked_external_evidence"
+      "verification": "documental"
     },
     {
       "id": "tabela6.item3",
       "clause": "Tabela 6 item 3",
       "requirement": "Depreciação física: por levantamento do custo de recuperação ou bem novo (III); por métodos técnicos consagrados considerando idade, vida útil e estado de conservação (II); arbitrada (I).",
-      "verification": "documental",
-      "state": "blocked_external_evidence"
+      "verification": "documental"
     },
     {
       "id": "9.3.1.laudo_completo",
@@ -84,7 +84,6 @@
       "clause": "9.3",
       "requirement": "Memória de cálculo do custo com os insumos identificados (série CUB vigente por região e padrão, ou orçamento sintético), BDI e depreciação.",
       "verification": "calculated",
-      "state": "blocked_external_evidence",
       "criterion_ref": "handoff C05→C01: rota de cálculo de custo"
     }
   ],

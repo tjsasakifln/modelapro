@@ -406,6 +406,7 @@ def compose_qualification_context(
         "result_material": material,
         "report_content_fingerprint": spec.get("report_content_fingerprint"),
         "calculation_failed": calc_status != "fitted",
+        "cost_result": dict(cost_result or {}),
     }
     block = _try_assess_qualification(context, profile or {})
     if not isinstance(block, Mapping):
@@ -487,6 +488,7 @@ def reassess_qualification_context(
 
     winner = {"status": "fitted"} if current.get("calculation_status") == "ok" else None
     search_audit = _as_mapping(_as_mapping(snapshot.get("search")).get("audit"))
+    cost_result = _as_mapping(provenance.get("cost_result"))
     return compose_qualification_context(
         request_spec=spec,
         snapshot_draft=snapshot,
@@ -495,4 +497,5 @@ def reassess_qualification_context(
         issues=list(snapshot.get("issues") or []),
         review_events=spec["review_events"],
         normative_assessment=normative,
+        cost_result=cost_result or None,
     )

@@ -100,12 +100,35 @@ def _document_body(
         _paragraph(f"Intervalo de predição: {view.get('prediction_interval_display')}"),
         _paragraph(f"Campo de arbítrio: {view.get('arbitration_interval_display')}"),
         _paragraph(f"Intervalo admissível: {view.get('admissible_interval_display')}"),
-        _paragraph("Método, equação e diagnóstico", style="Heading1"),
-        _paragraph(f"Método: {view.get('methodology_display')}"),
         _paragraph(
-            f"Equação: {view.get('formula_display') or view.get('formula') or 'PENDENTE'}"
+            "Método e memória de custo" if view.get("cost_route") else "Método, equação e diagnóstico",
+            style="Heading1",
         ),
+        _paragraph(f"Método: {view.get('methodology_display')}"),
     ]
+    if not view.get("cost_route"):
+        parts.append(_paragraph(
+            f"Equação: {view.get('formula_display') or view.get('formula') or 'PENDENTE'}"
+        ))
+    if view.get("cost_route"):
+        parts.append(_paragraph("Memória da quantificação de custo", style="Heading2"))
+        parts.append(_paragraph(
+            "Preço de mercado, conversão cambial e atualização temporal não foram usados como fatores implícitos."
+        ))
+        rows = [["Parcela", "Valor integral", "Apresentação"]]
+        rows.extend([
+            [item.get("label"), item.get("raw"), item.get("display")]
+            for item in (view.get("cost_memory_rows") or [])
+        ])
+        parts.append(_table(rows))
+        item_rows = [["ID", "Categoria", "Quantidade", "Custo unitário", "Total", "Fonte"]]
+        item_rows.extend([
+            [item.get("item_id"), item.get("category"), f"{item.get('quantity')} {item.get('unit') or ''}",
+             f"{item.get('unit_cost')} {item.get('currency') or ''}",
+             f"{item.get('amount')} {item.get('currency') or ''}", item.get("source")]
+            for item in (view.get("cost_items") or [])
+        ])
+        parts.append(_table(item_rows))
     coef_rows = [["Variável", "Coeficiente integral", "p-valor", "VIF"]]
     for coefficient in view.get("coef_rows") or []:
         coef_rows.append(
