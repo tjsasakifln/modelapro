@@ -12,12 +12,12 @@ record.
 
 ``PRODUCT_SIDE_GUARD_STATUS`` records the current implementation, while
 ``PRODUCT_SIDE_GUARD_LAYER`` names the consumer that rejects or safely
-presents each defect.  Nine defects have a shipped product/tooling guard.
-``method_none`` remains PARTIAL: the UI derives an honest "não executada"
-label from the real request/result, but the general claim detector below is
-still audit-only because the product has no arbitrary
-``claims_external_validation`` field.  We do not invent such a field merely
-to turn this status green.
+presents each defect.  All ten defects have a shipped product/tooling guard.
+For ``method_none``, the UI requires a real worker ``statistical.procedure``
+with execution evidence before presenting external coverage.  The general
+claim detector below remains audit-only because the product has no arbitrary
+``claims_external_validation`` field; we do not invent such a field merely to
+test it.
 
 The following historical findings about the real S01 worker surface remain
 regression evidence for the method-none boundary.
@@ -120,7 +120,7 @@ GUARD_NONE = "none"         # the only detector today is the one in this module
 PRODUCT_SIDE_GUARD_STATUS: Dict[str, str] = {
     "lost_exit_code": GUARD_SHIPPED,
     "empty_result": GUARD_SHIPPED,
-    "method_none": GUARD_PARTIAL,
+    "method_none": GUARD_SHIPPED,
     "tampered_coefficient": GUARD_SHIPPED,
     "tampered_confidence_interval": GUARD_SHIPPED,
     "missing_attachments": GUARD_SHIPPED,
@@ -133,7 +133,7 @@ PRODUCT_SIDE_GUARD_STATUS: Dict[str, str] = {
 PRODUCT_SIDE_GUARD_LAYER: Dict[str, str] = {
     "lost_exit_code": "acceptance_aggregator",
     "empty_result": "document_consistency",
-    "method_none": "presentation_only",
+    "method_none": "presentation_validation_procedure",
     "tampered_coefficient": "document_and_dossier_consistency",
     "tampered_confidence_interval": "document_consistency",
     "missing_attachments": "dossier_integrity",
@@ -830,16 +830,14 @@ def test_defect_inventory_is_complete_and_partitioned():
 
 def test_guard_status_matches_the_docstring_prose():
     """Keep audit helpers distinct from the product consumers they accompany."""
-    assert defects_with_guard_status(GUARD_SHIPPED) == set(COMMERCIAL_DEFECTS) - {
-        "method_none"
-    }
-    assert defects_with_guard_status(GUARD_PARTIAL) == {"method_none"}
+    assert defects_with_guard_status(GUARD_SHIPPED) == set(COMMERCIAL_DEFECTS)
+    assert defects_with_guard_status(GUARD_PARTIAL) == set()
     assert defects_with_guard_status(GUARD_NONE) == set()
     assert set(PRODUCT_SIDE_GUARD_LAYER) == set(COMMERCIAL_DEFECTS)
-    assert PRODUCT_SIDE_GUARD_LAYER["method_none"] == "presentation_only"
+    assert PRODUCT_SIDE_GUARD_LAYER["method_none"] == "presentation_validation_procedure"
     doc = __doc__ or ""
-    assert "Nine defects have a shipped product/tooling guard" in doc
-    assert "method_none`` remains PARTIAL" in doc
+    assert "All ten defects have a shipped product/tooling guard" in doc
+    assert "statistical.procedure" in doc
     assert "audit-only" in doc
 
 

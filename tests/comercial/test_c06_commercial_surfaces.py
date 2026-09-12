@@ -11,7 +11,9 @@ import copy
 import hashlib
 import io
 import json
+import sys
 import zipfile
+from importlib.metadata import distribution
 
 import pytest
 
@@ -76,6 +78,28 @@ def emitted_product(tmp_path_factory):
         dossier_bytes=dossier,
     )
     assert verify_submission_package(package)["ok"] is True
+    holdout_spec = _professional_spec()
+    holdout_spec["evaluation_policy"] = {
+        "method": "holdout",
+        "partitions": None,
+        "groups": None,
+        "seed": 17,
+    }
+    holdout_job = store.create(
+        request_spec=holdout_spec,
+        payload={"filename": "SYNTHETIC_TEST_HOLDOUT.csv"},
+    )
+    holdout = compose_valuation_job(
+        job_id=holdout_job["job_id"],
+        file_bytes=analytic_linear_csv(n=30, tag="C06SURFACE-HOLDOUT"),
+        filename="SYNTHETIC_TEST_HOLDOUT.csv",
+        request_spec=holdout_spec,
+        subject_raw={"area": 73.5, "bairro": "Centro"},
+        project_id=None,
+        peers=resolve_peers(),
+        job_store=store,
+    )["snapshot"]
+    assert isinstance(holdout["validation"]["statistical"].get("procedure"), dict)
     return {
         "snapshot": snapshot,
         "context": context,
@@ -86,6 +110,8 @@ def emitted_product(tmp_path_factory):
         "spec": spec,
         "normative": normative,
         "output_manifest": output_manifest,
+        "holdout_snapshot": holdout,
+        "holdout_spec": holdout_spec,
     }
 
 
@@ -157,19 +183,57 @@ def test_03_method_none_surface_never_presents_training_metrics_as_external(emit
     spec = copy.deepcopy(emitted_product["spec"])
     spec["evaluation_policy"] = {"method": "none"}
     snapshot = copy.deepcopy(emitted_product["snapshot"])
-    snapshot.setdefault("model", {}).setdefault("diagnostics", {})["r2"] = 0.999999
-    snapshot.setdefault("validation", {})["statistical"] = {}
+    diagnostics = snapshot["model"]["diagnostics"]
+    assert diagnostics["r2"] is not None
+    assert diagnostics["r2_adjusted"] is not None
+    statistical_before = copy.deepcopy(snapshot["validation"]["statistical"])
     clean = present_independent_validation_coverage(snapshot, spec)
     assert clean["external_available"] is False
     assert clean["presented_train_as_external"] is False
     assert clean["label"] == "Validação independente não executada"
-    # Deliberately attractive train metrics are the mutation.  They remain
-    # visible as train metrics and cannot change the independent label.
-    snapshot["model"]["diagnostics"].update({"rmse_train": 0.000001, "adj_r2": 0.99999})
-    guarded = present_independent_validation_coverage(snapshot, spec)
-    assert guarded["external_available"] is False
-    assert guarded["presented_train_as_external"] is False
-    assert guarded["train_metrics"]["rmse_train"] == 0.000001
+    assert clean["train_metrics"] == {
+        "r2": diagnostics["r2"],
+        "r2_adjusted": diagnostics["r2_adjusted"],
+    }
+    assert snapshot["validation"]["statistical"] == statistical_before
+
+
+def test_03_requested_holdout_requires_real_worker_procedure_evidence(emitted_product):
+    """A non-empty in-sample statistical block is not holdout evidence."""
+    missing = copy.deepcopy(emitted_product["snapshot"])
+    missing_spec = copy.deepcopy(emitted_product["holdout_spec"])
+    assert missing["validation"]["statistical"]
+    assert "procedure" not in missing["validation"]["statistical"]
+    not_run = present_independent_validation_coverage(missing, missing_spec)
+    assert not_run["requested"] is True
+    assert not_run["external_available"] is False
+    assert "cobertura ainda não veio" in not_run["label"]
+
+    holdout = emitted_product["holdout_snapshot"]
+    procedure = holdout["validation"]["statistical"]["procedure"]
+    assert procedure["method"] not in (None, "none", "not_requested", "skip")
+    assert any(
+        procedure.get(key) not in (None, {}, [])
+        for key in ("coverage", "metrics", "partition", "predictions")
+    )
+    covered = present_independent_validation_coverage(
+        holdout, emitted_product["holdout_spec"]
+    )
+    assert covered["external_available"] is True
+
+    metadata_only = copy.deepcopy(holdout)
+    proc = metadata_only["validation"]["statistical"]["procedure"]
+    for key in ("coverage", "metrics", "partition", "predictions"):
+        proc[key] = None
+    assert present_independent_validation_coverage(
+        metadata_only, emitted_product["holdout_spec"]
+    )["external_available"] is False
+
+    method_none = copy.deepcopy(holdout)
+    method_none["validation"]["statistical"]["procedure"]["method"] = "none"
+    assert present_independent_validation_coverage(
+        method_none, emitted_product["holdout_spec"]
+    )["external_available"] is False
 
 
 def test_04_emitted_report_refuses_tampered_coefficient(emitted_product):
@@ -240,33 +304,37 @@ def test_08_emitted_report_refuses_unverified_rule_laundered_as_release(emitted_
 
 
 def test_09_emitted_sbom_queues_missing_licence_metadata(monkeypatch):
-    packages = [{"name": "known", "version": "1"}]
+    """Mutate one real installed distribution, not an invented component."""
+    installed = distribution("pypdf")
+    package_name = installed.metadata["Name"]
+    package_version = installed.version
+    real_metadata = sbom._metadata(sys.executable, package_name)
+    assert real_metadata["license_expression"] or real_metadata["license"]
+    packages = [{"name": package_name, "version": package_version}]
     monkeypatch.setattr(sbom, "_pip_report", lambda _python: packages)
-
-    def metadata(_python, _name):
-        return {
-            "license": "MIT",
-            "license_expression": "",
-            "home_page": "",
-            "summary": "SYNTHETIC TEST component",
-            "project_urls": [],
-            "license_files": [],
-            "native_files": [],
-            "font_files": [],
-        }
-
-    monkeypatch.setattr(sbom, "_metadata", metadata)
+    monkeypatch.setattr(sbom, "_metadata", lambda _python, _name: real_metadata)
     clean = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")
+    assert clean["components"][0]["name"] == package_name
+    assert clean["components"][0]["version"] == package_version
     assert clean["review_queue"] == []
+    missing_licence = {
+        **real_metadata,
+        "license": "",
+        "license_expression": "",
+    }
     monkeypatch.setattr(
         sbom,
         "_metadata",
-        lambda python, name: {**metadata(python, name), "license": ""},
+        lambda _python, _name: missing_licence,
     )
     mutated = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")
     assert mutated["components"][0]["licenses"][0]["license"]["name"] == "NOASSERTION"
     assert mutated["review_queue"] == [
-        {"name": "known", "version": "1", "reason": "license_metadata_missing"}
+        {
+            "name": package_name,
+            "version": package_version,
+            "reason": "license_metadata_missing",
+        }
     ]
 
 

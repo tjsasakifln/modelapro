@@ -580,16 +580,64 @@ def present_independent_validation_coverage(
     if isinstance(model, Mapping):
         diagnostics = model.get("diagnostics") or {}
         if isinstance(diagnostics, Mapping):
-            for key in ("r2", "r_squared", "adj_r2", "rmse_train", "mae_train"):
+            for key in (
+                "r2",
+                "r_squared",
+                "r2_adjusted",
+                "adj_r2",
+                "rmse_train",
+                "mae_train",
+            ):
                 if key in diagnostics:
                     train_like[key] = diagnostics[key]
     requested = str(method or "none") not in {"none", "not_requested", "skip", "", "None"}
-    has_external = bool(statistical) and any(
-        statistical.get(key) not in (None, {}, [])
-        for key in ("holdout", "group", "temporal", "kfold", "external", "test")
+    procedure = (
+        statistical.get("procedure")
+        if isinstance(statistical.get("procedure"), Mapping)
+        else {}
     )
-    if not has_external and requested and statistical:
-        has_external = True
+    procedure_method = str(procedure.get("method") or "none")
+    method_executed = procedure_method not in {
+        "none",
+        "not_requested",
+        "skip",
+        "",
+        "None",
+    }
+    coverage = procedure.get("coverage")
+    metrics = procedure.get("metrics")
+    partition = procedure.get("partition")
+    predictions = procedure.get("predictions")
+    coverage_evidence = (
+        isinstance(coverage, Mapping)
+        and isinstance(coverage.get("n_reserved"), int)
+        and not isinstance(coverage.get("n_reserved"), bool)
+        and coverage["n_reserved"] > 0
+        and isinstance(coverage.get("n_covered"), int)
+        and not isinstance(coverage.get("n_covered"), bool)
+        and 0 < coverage["n_covered"] <= coverage["n_reserved"]
+    )
+    metrics_evidence = isinstance(metrics, Mapping) and any(
+        value is not None for value in metrics.values()
+    )
+    partition_evidence = (
+        isinstance(partition, Mapping)
+        and isinstance(partition.get("folds"), list)
+        and bool(partition["folds"])
+    )
+    predictions_evidence = isinstance(predictions, list) and bool(predictions)
+    # worker._map_validation publishes independent evidence only under the
+    # procedure block.  The surrounding statistical mapping also contains
+    # in-sample n/k/intercept and normative precision data, so its mere
+    # non-emptiness cannot establish an external run.
+    has_external = (
+        requested
+        and method_executed
+        and coverage_evidence
+        and metrics_evidence
+        and partition_evidence
+        and predictions_evidence
+    )
     return {
         "requested": requested,
         "method": method or "none",
