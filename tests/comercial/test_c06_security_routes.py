@@ -1,6 +1,8 @@
 """SYNTHETIC local installation: real ASGI guards stay enabled in every test."""
+import asyncio
 import base64
 from datetime import date, timedelta
+import io
 import json
 
 import pytest
@@ -102,6 +104,118 @@ def test_credentials_in_urls_are_rejected_even_percent_encoded(installation):
     client, headers, _ = installation
     for query in ("access_token=secret", "%61ccess_token=secret", "token=secret"):
         assert client.get("/jobs/unknown/result?" + query, headers=headers).status_code == 403
+
+
+def test_report_signature_context_requires_offline_revocation_even_when_empty(
+    monkeypatch,
+):
+    from backend import document_routes
+    import pyhanko_certvalidator
+
+    monkeypatch.setenv("MODELA_REPORT_SIGNATURE_TRUST_ROOTS", "root.der")
+    monkeypatch.delenv("MODELA_REPORT_SIGNATURE_CRLS", raising=False)
+    monkeypatch.delenv("MODELA_REPORT_SIGNATURE_OCSPS", raising=False)
+    loaded = {"MODELA_REPORT_SIGNATURE_TRUST_ROOTS": ["root"]}
+    monkeypatch.setattr(
+        document_routes,
+        "_load_operator_asn1",
+        lambda environment_name, *_args, **_kwargs: loaded.get(environment_name, []),
+    )
+    captured = {}
+
+    class FakeValidationContext:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(pyhanko_certvalidator, "ValidationContext", FakeValidationContext)
+
+    document_routes._configured_signature_validation_context()
+
+    assert captured == {
+        "trust_roots": ["root"],
+        "crls": [],
+        "ocsps": [],
+        "revocation_mode": "require",
+        "allow_fetching": False,
+    }
+
+
+def test_report_signature_context_loads_only_operator_paths(monkeypatch):
+    from backend import document_routes
+    import pyhanko_certvalidator
+
+    monkeypatch.setenv("MODELA_REPORT_SIGNATURE_TRUST_ROOTS", "root.der")
+    monkeypatch.setenv("MODELA_REPORT_SIGNATURE_CRLS", "issuer.crl")
+    monkeypatch.setenv("MODELA_REPORT_SIGNATURE_OCSPS", "issuer.ocsp")
+    loaded = {
+        "MODELA_REPORT_SIGNATURE_TRUST_ROOTS": ["root"],
+        "MODELA_REPORT_SIGNATURE_CRLS": ["crl"],
+        "MODELA_REPORT_SIGNATURE_OCSPS": ["ocsp"],
+    }
+    calls = []
+
+    def load(environment_name, *_args, **_kwargs):
+        calls.append(environment_name)
+        return loaded[environment_name]
+
+    monkeypatch.setattr(document_routes, "_load_operator_asn1", load)
+    captured = {}
+    monkeypatch.setattr(
+        pyhanko_certvalidator,
+        "ValidationContext",
+        lambda **kwargs: captured.update(kwargs) or captured,
+    )
+
+    assert document_routes._configured_signature_validation_context() is captured
+    assert calls == [
+        "MODELA_REPORT_SIGNATURE_TRUST_ROOTS",
+        "MODELA_REPORT_SIGNATURE_CRLS",
+        "MODELA_REPORT_SIGNATURE_OCSPS",
+    ]
+    assert captured["crls"] == ["crl"]
+    assert captured["ocsps"] == ["ocsp"]
+    assert captured["revocation_mode"] == "require"
+    assert captured["allow_fetching"] is False
+
+
+def test_signature_import_passes_offline_context_to_worker_thread(monkeypatch):
+    from backend import document_routes
+    from starlette.datastructures import UploadFile
+
+    captured = {}
+
+    class Workflow:
+        class DocumentWorkflowError(Exception):
+            pass
+
+        @staticmethod
+        def import_signed_report(store, job_id, *, signed_pdf, validation_context):
+            captured.update(
+                store=store,
+                job_id=job_id,
+                signed_pdf=signed_pdf,
+                validation_context=validation_context,
+            )
+            return {"status": "received"}
+
+    monkeypatch.setattr(document_routes, "_authorized_store", lambda *_args: "store")
+    monkeypatch.setattr(document_routes, "_document_workflow", lambda: Workflow)
+    monkeypatch.setattr(
+        document_routes, "_configured_signature_validation_context", lambda: "offline-context"
+    )
+    upload = UploadFile(io.BytesIO(b"%PDF-SYNTHETIC"), filename="signed.pdf")
+
+    result = asyncio.run(
+        document_routes.document_signature_import("job", upload, "token")
+    )
+
+    assert result == {"status": "received"}
+    assert captured == {
+        "store": "store",
+        "job_id": "job",
+        "signed_pdf": b"%PDF-SYNTHETIC",
+        "validation_context": "offline-context",
+    }
 
 
 def test_docx_served_with_office_mime_and_attachment(installation):

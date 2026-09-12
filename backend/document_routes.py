@@ -58,34 +58,73 @@ def _error(exc: Any) -> JSONResponse:
 
 
 def _configured_signature_validation_context():
-    """Load operator-configured trust anchors; never accept trust from HTTP."""
-    configured = os.environ.get("MODELA_REPORT_SIGNATURE_TRUST_ROOTS", "").strip()
-    if not configured:
+    """Load offline operator trust and revocation evidence; never use HTTP."""
+    trust_configured = os.environ.get("MODELA_REPORT_SIGNATURE_TRUST_ROOTS", "").strip()
+    crls_configured = os.environ.get("MODELA_REPORT_SIGNATURE_CRLS", "").strip()
+    ocsps_configured = os.environ.get("MODELA_REPORT_SIGNATURE_OCSPS", "").strip()
+    if not (trust_configured or crls_configured or ocsps_configured):
         return None
     try:
-        from asn1crypto import pem, x509
+        from asn1crypto import crl, ocsp, x509
         from pyhanko_certvalidator import ValidationContext
 
-        roots = []
-        for raw_path in configured.split(os.pathsep):
-            path = Path(raw_path).expanduser()
-            data = path.read_bytes()
-            if not data or len(data) > 1024 * 1024:
-                raise ValueError(f"invalid trust-root size: {path}")
-            if pem.detect(data):
-                label, _headers, data = pem.unarmor(data)
-                if label != "CERTIFICATE":
-                    raise ValueError(f"trust root is not a certificate: {path}")
-            roots.append(x509.Certificate.load(data))
+        roots = _load_operator_asn1(
+            "MODELA_REPORT_SIGNATURE_TRUST_ROOTS",
+            x509.Certificate,
+            {"CERTIFICATE"},
+            max_size=1024 * 1024,
+        )
         if not roots:
             raise ValueError("no trust roots configured")
-        return ValidationContext(trust_roots=roots, allow_fetching=False)
+        crls = _load_operator_asn1(
+            "MODELA_REPORT_SIGNATURE_CRLS",
+            crl.CertificateList,
+            {"X509 CRL", "CRL"},
+            max_size=16 * 1024 * 1024,
+        )
+        ocsps = _load_operator_asn1(
+            "MODELA_REPORT_SIGNATURE_OCSPS",
+            ocsp.OCSPResponse,
+            {"OCSP RESPONSE"},
+            max_size=16 * 1024 * 1024,
+        )
+        return ValidationContext(
+            trust_roots=roots,
+            crls=crls,
+            ocsps=ocsps,
+            revocation_mode="require",
+            allow_fetching=False,
+        )
     except Exception as exc:
         raise _document_workflow().DocumentWorkflowError(
             "SIGNATURE_TRUST_CONFIGURATION_INVALID",
-            "configured report-signature trust roots could not be loaded",
+            "configured report-signature trust/revocation material could not be loaded",
             status_code=503,
         ) from exc
+
+
+def _load_operator_asn1(
+    environment_name: str,
+    asn1_type,
+    pem_labels: set[str],
+    *,
+    max_size: int,
+) -> list:
+    from asn1crypto import pem
+
+    configured = os.environ.get(environment_name, "").strip()
+    values = []
+    for raw_path in configured.split(os.pathsep) if configured else ():
+        path = Path(raw_path).expanduser()
+        data = path.read_bytes()
+        if not data or len(data) > max_size:
+            raise ValueError(f"invalid {environment_name} file size: {path}")
+        if pem.detect(data):
+            label, _headers, data = pem.unarmor(data)
+            if label not in pem_labels:
+                raise ValueError(f"unexpected PEM label {label!r} in {path}")
+        values.append(asn1_type.load(data))
+    return values
 
 
 @router.get("/jobs/{job_id}/documents")
@@ -201,12 +240,15 @@ async def document_signature_import(
     store = _authorized_store(job_id, x_job_token)
     workflow = await asyncio.to_thread(_document_workflow)
     try:
+        validation_context = await asyncio.to_thread(
+            _configured_signature_validation_context
+        )
         return await asyncio.to_thread(
             workflow.import_signed_report,
             store,
             job_id,
             signed_pdf=await file.read(),
-            validation_context=_configured_signature_validation_context(),
+            validation_context=validation_context,
         )
     except (workflow.DocumentWorkflowError, ValueError) as exc:
         if isinstance(exc, workflow.DocumentWorkflowError):
