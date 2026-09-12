@@ -47,9 +47,6 @@ def _document_column_map(context: Mapping[str, Any], sample_rows: list[dict]) ->
         values = row.get("values") or {}
         if isinstance(values, Mapping):
             names.update(str(name) for name in values)
-    existing = context.get("sample_evidence_columns") or {}
-    if isinstance(existing, Mapping):
-        names.update(str(name) for name in existing.values() if name)
     return {name: {"original_name": name} for name in sorted(names)}
 
 
@@ -173,6 +170,7 @@ def render_document_workflow(client: JobClient, snapshot: Mapping | None) -> dic
                 column_map=column_map,
                 context=context,
                 excluded_columns=[str(context.get("target_col") or "")],
+                sample_rows=sample_rows,
             )
             professional_fields, field_errors = render_professional_report_fields(
                 namespace=f"{namespace}_report",

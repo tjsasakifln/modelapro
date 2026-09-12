@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import textwrap
 
+import pytest
 from streamlit.testing.v1 import AppTest
+
+from frontend.components.documents import _document_sample_rows
+from frontend.components.forms import _sample_evidence_seed
+from modules.pro_workflow.report_context import complete_report_context
 
 
 def _by_label(elements, label: str):
@@ -12,6 +17,16 @@ def _by_label(elements, label: str):
         if getattr(element, "label", None) == label:
             return element
     raise AssertionError(f"widget not found: {label}")
+
+
+def _select_sample_mapping(at: AppTest) -> None:
+    for label, value in {
+        "Coluna do endereço da amostra": "endereco",
+        "Coluna da latitude da amostra": "latitude",
+        "Coluna da longitude da amostra": "longitude",
+        "Coluna da fonte da amostra": "fonte",
+    }.items():
+        _by_label(at.selectbox, label).select(value)
 
 
 UPLOAD_APP = textwrap.dedent(
@@ -40,7 +55,7 @@ UPLOAD_APP = textwrap.dedent(
             "longitude": {"original_name": "longitude", "kind": "numeric"},
             "fonte": {"original_name": "fonte", "kind": "categorical", "categories": ["Anúncio"]},
         }},
-        "row_ledger": [{"row_id": "row-001"}],
+        "row_ledger": [{"row_id": "R000000"}],
         "sample_preview": [{
             "id": "A1", "area": 73.5, "preco": 735000,
             "endereco": "Rua A", "latitude": -23.5, "longitude": -46.6, "fonte": "Anúncio",
@@ -88,12 +103,13 @@ DOCUMENT_APP = textwrap.dedent(
         "sample_evidence_columns": {
             "address": "endereco", "latitude": "lat", "longitude": "lon", "source": "fonte",
         },
-        "sample_evidence": {
-            "row-001": {"address": "Rua B, 20", "latitude": -23.6, "longitude": -46.7, "source": "anúncio"},
-        },
-        "used_rows": [{"row_id": "row-001", "values": {
+        "used_rows": [{"row_id": "R000000", "values": {
+            "id": "CSV-947",
             "area": 70, "preco": 700000, "endereco": "Rua B, 20",
             "lat": -23.6, "lon": -46.7, "fonte": "anúncio",
+        }, "geolocation": {
+            "address": "Rua B, 20", "latitude": -23.6,
+            "longitude": -46.7, "source": "anúncio", "complete": True, "issues": [],
         }}],
         "excluded_rows": [],
         "target_col": "preco",
@@ -139,14 +155,7 @@ def test_real_upload_fields_build_request_spec_and_keep_metadata_out_of_predicto
     at.run()
     assert not at.exception
 
-    mapping = {
-        "Coluna do endereço da amostra": "endereco",
-        "Coluna da latitude da amostra": "latitude",
-        "Coluna da longitude da amostra": "longitude",
-        "Coluna da fonte da amostra": "fonte",
-    }
-    for label, value in mapping.items():
-        _by_label(at.selectbox, label).select(value)
+    _select_sample_mapping(at)
     _by_label(at.text_input, "Objetivo da avaliação").input("determinar valor de mercado para compra e venda")
     _by_label(at.text_area, "Diagnóstico de mercado").input("oferta regular e liquidez média")
     _by_label(at.text_area, "Justificativa para adoção do Grau I").input("amostra restrita, declarada pelo responsável")
@@ -196,13 +205,62 @@ def test_invalid_subject_coordinates_block_the_real_execute_control():
     assert any("latitude deve estar entre -90 e 90" in error.value for error in at.error)
 
 
+@pytest.mark.parametrize(
+    ("latitude", "expected"),
+    [
+        ("True", "latitude deve ser um número"),
+        ("91", "latitude deve estar entre -90 e 90 graus"),
+    ],
+)
+def test_mapped_preview_rejects_invalid_coordinate_before_execute(latitude, expected):
+    broken = UPLOAD_APP.replace(
+        '"endereco": "Rua A", "latitude": -23.5,',
+        f'"endereco": "Rua A", "latitude": {latitude},',
+    )
+    at = AppTest.from_string(broken, default_timeout=30).run()
+    at.file_uploader(key="p02_uploader").set_value(
+        ("mercado.csv", b"id;area;preco;endereco;latitude;longitude;fonte\n", "text/csv")
+    )
+    at.run()
+    _select_sample_mapping(at)
+    _by_label(at.button, "Executar avaliação").click()
+    at.run()
+
+    assert not at.exception
+    assert at.session_state["captured_execute"] is True
+    blocking = at.session_state["captured_dispatch"]["blocking"]
+    assert any(
+        f"Amostra R000000 (colunas associadas): {expected}" in item["message"]
+        for item in blocking
+    )
+
+
+def test_mapped_preview_accepts_zero_coordinates():
+    zero = UPLOAD_APP.replace(
+        '"endereco": "Rua A", "latitude": -23.5, "longitude": -46.6,',
+        '"endereco": "Rua A", "latitude": 0, "longitude": 0,',
+    )
+    at = AppTest.from_string(zero, default_timeout=30).run()
+    at.file_uploader(key="p02_uploader").set_value(
+        ("mercado.csv", b"id;area;preco;endereco;latitude;longitude;fonte\n", "text/csv")
+    )
+    at.run()
+    _select_sample_mapping(at)
+    at.run()
+
+    assert not at.exception
+    assert not any("colunas associadas" in error.value for error in at.error)
+    context = at.session_state["captured_request_spec"]["report_context"]
+    assert context["sample_evidence_columns"]["latitude"] == "latitude"
+
+
 def test_reopened_document_fields_preserve_structures_and_post_native_edits():
     at = AppTest.from_string(DOCUMENT_APP, default_timeout=30).run()
     assert not at.exception
     assert not any("{'matricula'" in area.value for area in at.text_area)
     sample_table = at.dataframe(key="documents_job-ui_report_sample_evidence_table").value
     assert sample_table.to_dict(orient="records")[0] == {
-        "row_id": "row-001",
+        "row_id": "R000000",
         "address": "Rua B, 20",
         "latitude": "-23.6",
         "longitude": "-46.7",
@@ -225,15 +283,15 @@ def test_reopened_document_fields_preserve_structures_and_post_native_edits():
     }
     assert posted["subject"]["area"] == "73,5"
     assert posted["subject"]["geolocation"]["longitude"] == -46.6
-    assert posted["sample_evidence"]["row-001"]["latitude"] == -23.6
+    assert posted["sample_evidence"]["R000000"]["latitude"] == -23.6
     assert "output_evidence" not in posted
     assert "id" not in posted["variable_classification"]
 
 
 def test_invalid_reopened_sample_coordinates_prevent_document_post():
     broken = DOCUMENT_APP.replace(
-        '"latitude": -23.6, "longitude": -46.7, "source": "anúncio"',
-        '"latitude": "sul", "longitude": -46.7, "source": "anúncio"',
+        '"address": "Rua B, 20", "latitude": -23.6,',
+        '"address": "Rua B, 20", "latitude": "sul",',
     )
     at = AppTest.from_string(broken, default_timeout=30).run()
     assert not at.exception
@@ -242,5 +300,64 @@ def test_invalid_reopened_sample_coordinates_prevent_document_post():
     assert not at.exception
     assert "document_post" not in at.session_state.filtered_state
     errors = "\n".join(error.value for error in at.error)
-    assert "Amostra row-001: latitude deve ser um número" in errors
+    assert "Amostra R000000: latitude deve ser um número" in errors
     assert "Corrija os campos do laudo" in errors
+
+
+def test_reopened_mapping_blocks_column_that_is_no_longer_materialized():
+    stale = DOCUMENT_APP.replace(', "fonte": "anúncio",', ",")
+    at = AppTest.from_string(stale, default_timeout=30).run()
+    assert not at.exception
+    _by_label(at.button, "Gerar PDF, DOCX e dossiê").click()
+    at.run()
+
+    assert not at.exception
+    assert "document_post" not in at.session_state.filtered_state
+    errors = "\n".join(error.value for error in at.error)
+    assert "source → fonte" in errors
+    assert "não estão disponíveis nos dados reabertos" in errors
+
+
+def test_real_report_context_reopens_all_canonical_rows_and_explicit_zero_override():
+    base = {
+        "used_rows": [
+            {
+                "row_id": f"R{index:06d}",
+                "values": {"id": f"CSV-{900 + index}"},
+                "geolocation": {
+                    "address": f"Rua materializada, {index}",
+                    "latitude": -23.0 - index / 100,
+                    "longitude": -46.0 - index / 100,
+                    "source": "planilha",
+                    "complete": True,
+                    "issues": [],
+                },
+            }
+            for index in range(10)
+        ],
+        "excluded_rows": [],
+        "sample_evidence": {
+            "R000009": {
+                "address": "Meridiano de Greenwich",
+                "latitude": 0,
+                "longitude": 0,
+                "source": "vistoria",
+            }
+        },
+    }
+    context = complete_report_context(base, request_spec={}, snapshot={})
+
+    rows = _document_sample_rows(context)
+    seed = _sample_evidence_seed(rows, context)
+
+    assert [row["row_id"] for row in seed] == [f"R{index:06d}" for index in range(10)]
+    assert all(row["row_id"] != f"CSV-{900 + index}" for index, row in enumerate(seed))
+    assert seed[0]["address"] == "Rua materializada, 0"
+    assert seed[9] == {
+        "row_id": "R000009",
+        "address": "Meridiano de Greenwich",
+        "latitude": "0",
+        "longitude": "0",
+        "source": "vistoria",
+        "justification": "",
+    }

@@ -1374,7 +1374,10 @@ def normalize_geolocation(
     """Validate a complete declared location; partial input is a visible error."""
     address_text = str(address or "").strip()
     source_text = str(source or "").strip()
-    supplied = any(str(value or "").strip() for value in (latitude, longitude, address, source))
+    supplied = any(
+        value is not None and str(value).strip()
+        for value in (latitude, longitude, address, source)
+    )
     if not supplied:
         return None, []
 
@@ -1443,6 +1446,8 @@ def render_sample_evidence_column_mapping(
     column_map: Mapping[str, Any],
     context: Optional[Mapping[str, Any]] = None,
     excluded_columns: Sequence[str] = (),
+    sample_rows: Sequence[Mapping[str, Any]] = (),
+    sample_rows_complete: bool = True,
 ) -> tuple[dict, list[str]]:
     """Map already-ingested columns to documentary evidence without re-reading data."""
     stored_mapping = (context or {}).get("sample_evidence_columns") or {}
@@ -1491,6 +1496,61 @@ def render_sample_evidence_column_mapping(
     mapped_required = [mapping[field] for field in required if mapping.get(field)]
     if len(mapped_required) != len(set(mapped_required)):
         errors.append("Mapeamento da amostra: cada campo obrigatório deve usar uma coluna própria.")
+    missing_columns = [
+        f"{field} → {column}"
+        for field, column in mapping.items()
+        if column not in column_map
+    ]
+    if missing_columns:
+        errors.append(
+            "Mapeamento da amostra: colunas não estão disponíveis nos dados reabertos: "
+            + ", ".join(missing_columns)
+            + "."
+        )
+    structurally_valid = (
+        all(mapping.get(field) for field in required)
+        and len(mapped_required) == len(set(mapped_required))
+        and not missing_columns
+    )
+    if structurally_valid:
+        explicit = (context or {}).get("sample_evidence") or {}
+        explicit = explicit if isinstance(explicit, Mapping) else {}
+        for index, row in enumerate(sample_rows):
+            if not isinstance(row, Mapping):
+                continue
+            row_id = str(row.get("row_id") or f"linha {index + 1}")
+            values = row.get("values") or row
+            values = values if isinstance(values, Mapping) else {}
+            mapped = {
+                field: values.get(mapping[field])
+                for field in (*required, "justification")
+                if mapping.get(field)
+            }
+            materialized = row.get("geolocation") or {}
+            if isinstance(materialized, Mapping):
+                mapped.update({
+                    field: materialized[field]
+                    for field in required
+                    if field in materialized
+                })
+            override = explicit.get(row_id) or {}
+            if isinstance(override, Mapping):
+                mapped.update({
+                    field: override[field]
+                    for field in required
+                    if field in override
+                })
+            _location, row_errors = normalize_geolocation(
+                mapped.get("latitude"), mapped.get("longitude"),
+                mapped.get("address"), mapped.get("source"),
+                label=f"Amostra {row_id} (colunas associadas)",
+            )
+            errors.extend(row_errors)
+        if sample_rows and not sample_rows_complete:
+            st.caption(
+                f"Validação imediata aplicada às {len(sample_rows)} linhas disponíveis na prévia. "
+                "As demais linhas serão verificadas no contexto documental materializado."
+            )
     return mapping, errors
 
 
@@ -1498,17 +1558,29 @@ def _sample_evidence_seed(sample_rows: Sequence[Mapping[str, Any]], context: Map
     current = context.get("sample_evidence") or {}
     evidence = {str(key): value for key, value in current.items()} if isinstance(current, Mapping) else {}
     row_ids = []
+    rows_by_id: dict[str, Mapping[str, Any]] = {}
     for row in sample_rows:
         if isinstance(row, Mapping) and row.get("row_id") is not None:
-            row_ids.append(str(row["row_id"]))
+            row_id = str(row["row_id"])
+            row_ids.append(row_id)
+            rows_by_id[row_id] = row
     for row_id in evidence:
         if str(row_id) not in row_ids:
             row_ids.append(str(row_id))
     result = []
     for row_id in row_ids:
-        location = evidence.get(row_id) or {}
-        if not isinstance(location, Mapping):
-            location = {}
+        row = rows_by_id.get(row_id) or {}
+        materialized = row.get("geolocation") or {}
+        if not isinstance(materialized, Mapping):
+            materialized = {}
+        location = {
+            field: materialized.get(field, row.get(field))
+            for field in ("address", "latitude", "longitude", "source", "justification")
+            if materialized.get(field, row.get(field)) is not None
+        }
+        explicit = evidence.get(row_id) or {}
+        if isinstance(explicit, Mapping):
+            location.update(explicit)
         result.append({
             "row_id": row_id,
             "address": _context_text(location.get("address")),
@@ -2367,10 +2439,14 @@ def upload_form(
             st.warning(EMPTY_SELECTION_MESSAGE)
 
     st.markdown("##### Colunas documentais da amostra")
+    preview_sample_rows = sample_rows_with_row_ids(preview)
+    preview_ledger = (preview or {}).get("row_ledger") or []
     sample_evidence_columns, sample_mapping_errors = render_sample_evidence_column_mapping(
         namespace=f"p02_{ns}",
         column_map=model["column_map"],
         excluded_columns=[target_col],
+        sample_rows=preview_sample_rows,
+        sample_rows_complete=len(preview_sample_rows) >= len(preview_ledger),
     )
     documentary_columns = set(sample_evidence_columns.values())
     for column in documentary_columns:
@@ -2583,7 +2659,7 @@ def upload_form(
     report_context, report_field_errors = render_professional_report_fields(
         namespace=f"p02_{ns}_report",
         variable_names=report_variables,
-        sample_rows=sample_rows_with_row_ids(preview),
+        sample_rows=preview_sample_rows,
         context={"purpose": purpose},
         sample_evidence_columns=sample_evidence_columns,
     )
