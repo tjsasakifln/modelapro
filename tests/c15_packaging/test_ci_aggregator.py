@@ -229,9 +229,25 @@ def test_nonzero_returncode_inside_a_run_is_caught(tmp_path):
     assert any("returncode" in p for p in problems), problems
 
 
-def test_skip_xfail_and_findings_are_caught(tmp_path):
+def test_skip_xfail_is_caught(tmp_path):
     assert any("skip/xfail" in p for p in check_p04_run(_write_run(tmp_path, _clean_run(skip_xfail_count=2))))
-    assert any("findings" in p for p in check_p04_run(_write_run(tmp_path, _clean_run(findings=[{"x": 1}]))))
+
+
+def test_failure_shaped_findings_are_caught_but_success_records_are_not(tmp_path):
+    """`findings` is an event log: run.py appends success records too."""
+    success_records = [
+        {"id": "P04-EXT-formula", "present": True, "formula": "preco = -0 + 10000*area"},
+        {"id": "P04-EXT-alias_conflict", "present": True, "http_status": 400},
+    ]
+    assert check_p04_run(_write_run(tmp_path, _clean_run(findings=success_records)), expected_sha=CANDIDATE_SHA) == []
+
+    for bad in (
+        {"suite": "extensions", "nodeid": "t::test_x", "message": "AssertionError: boom"},
+        {"id": "P04-EXT-minimum_grade", "present": False, "requested": 2, "observed": None},
+        {"file": "x.json", "parse": "error"},
+    ):
+        problems = check_p04_run(_write_run(tmp_path, _clean_run(findings=[bad])), expected_sha=CANDIDATE_SHA)
+        assert any("failure findings" in p for p in problems), (bad, problems)
 
 
 def test_junit_clean_is_accepted_and_red_is_caught(tmp_path):

@@ -100,6 +100,25 @@ def _sha_matches(recorded: str, expected: str) -> bool:
     return a[:shortest] == b[:shortest]
 
 
+def _is_failure_finding(entry: object) -> bool:
+    """A finding is a defect only when it carries a failure signal.
+
+    Two shapes reach ``run.json``: entries the runner builds from the JUnit
+    parser (always a failed/errored case, carrying nodeid + message) and
+    entries the extension tests write themselves, which record the observed
+    state whether or not it is good (``present: true`` is a success record).
+    """
+    if not isinstance(entry, Mapping):
+        return True
+    if entry.get("parse") == "error":
+        return True
+    if entry.get("nodeid") and entry.get("message"):
+        return True
+    if entry.get("present") is False:
+        return True
+    return False
+
+
 def check_p04_run(path: Path, expected_sha: str | None = None, mode: str = CANDIDATE_MODE) -> list[str]:
     """The P04 runner artifact must show a real, strict, clean candidate run."""
     problems: list[str] = []
@@ -138,9 +157,14 @@ def check_p04_run(path: Path, expected_sha: str | None = None, mode: str = CANDI
     if payload.get("skip_xfail_count"):
         problems.append(f"p04 run.json: {payload.get('skip_xfail_count')} skip/xfail on applicable tests")
 
-    findings = payload.get("findings")
-    if findings:
-        problems.append(f"p04 run.json: {len(findings)} unresolved findings recorded")
+    # `findings` is an event log, not a defect list: run.py appends every
+    # finding_*.json the extension tests write, including the ones that record
+    # success (present: true). Failing on mere presence would keep even a fully
+    # fixed candidate red. Fail on the entries that carry a failure signal.
+    bad_findings = [f for f in (payload.get("findings") or []) if _is_failure_finding(f)]
+    if bad_findings:
+        ids = [str(f.get("nodeid") or f.get("id") or f) for f in bad_findings[:8]]
+        problems.append(f"p04 run.json: {len(bad_findings)} failure findings recorded, e.g. {ids}")
 
     if expected_sha:
         if not _sha_matches(str(payload.get("sha") or ""), expected_sha):
