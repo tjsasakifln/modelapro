@@ -222,3 +222,16 @@ def test_request_spec_carries_evidenced_profile_requirements_and_professional_fi
     assert "valid" not in validated["professional_findings"][
         "anexoA.2.f.variaveis_relevantes"
     ]
+
+
+def test_request_spec_carries_only_an_explicit_value_policy():
+    value_policy = {
+        "adopted": {"method": "point"},
+        "source": "SYNTHETIC_TEST: política expressamente selecionada",
+    }
+
+    declared = validate_request_spec(_spec(value_policy=value_policy))
+    omitted = validate_request_spec(_spec())
+
+    assert declared["value_policy"] == value_policy
+    assert "value_policy" not in omitted

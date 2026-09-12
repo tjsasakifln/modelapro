@@ -367,6 +367,7 @@ def build_request_spec(
     justified_exclusions: Optional[Sequence[Mapping[str, Any]]] = None,
     profile_evidence: Optional[Mapping[str, Any]] = None,
     professional_findings: Optional[Mapping[str, Any]] = None,
+    value_policy: Optional[Mapping[str, Any]] = None,
 ) -> dict:
     """Monta RequestSpec MP/1. Não presume BRL, BRL/m² nem data de hoje.
 
@@ -464,6 +465,8 @@ def build_request_spec(
             str(rule_id): dict(finding) if isinstance(finding, Mapping) else finding
             for rule_id, finding in professional_findings.items()
         }
+    if value_policy:
+        spec["value_policy"] = dict(value_policy)
     return spec
 
 
@@ -1940,6 +1943,36 @@ def upload_form(
     if evaluation_method == "holdout":
         st.caption(HOLD_OUT_HELP)
 
+    adopted_value_method = st.selectbox(
+        "Política do valor adotado",
+        options=("not_declared", "point"),
+        format_func=lambda value: {
+            "not_declared": "Não declarada — valor adotado permanece pendente",
+            "point": "Adotar a estimativa pontual calculada",
+        }[value],
+        key=f"p02_{ns}_adopted_value_method",
+        help=(
+            "A política é um insumo explícito e reproduzível. Selecioná-la não "
+            "constitui aprovação profissional do conteúdo."
+        ),
+    )
+    value_policy_source = ""
+    if adopted_value_method != "not_declared":
+        value_policy_source = st.text_input(
+            "Fundamento da política do valor adotado",
+            value="",
+            key=f"p02_{ns}_adopted_value_source",
+            help="Identifique a encomenda, procedimento ou decisão que fundamenta a política.",
+        ).strip()
+    value_policy = (
+        {
+            "adopted": {"method": adopted_value_method},
+            "source": value_policy_source,
+        }
+        if adopted_value_method != "not_declared"
+        else None
+    )
+
     missing_predictors = st.selectbox(
         "Política para características ausentes nos preditores",
         options=["complete_case", "declared_method_on_train"],
@@ -1999,6 +2032,7 @@ def upload_form(
         justified_exclusions=exclusions,
         profile_evidence=qualification_evidence["profile_evidence"],
         professional_findings=qualification_evidence["professional_findings"],
+        value_policy=value_policy,
     )
 
     policies = policies_on_the_wire(request_spec)
