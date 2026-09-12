@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import copy
 import io
-import math
 import json
+import math
 import zipfile
 
 import pytest
@@ -16,6 +16,7 @@ from modules.qualification_profile import resolve_profile
 from modules.report_export.workflow import (
     create_signature_request,
     generate_documents,
+    import_signed_report,
     record_review,
     store_document_attachment,
 )
@@ -190,6 +191,7 @@ def test_worker_cost_route_does_not_call_market_peers_and_preserves_honest_revie
         store, created["job_id"], filename="memoria-custo-TESTE.txt", media_type="text/plain",
         content=b"TESTE: memoria documental sintetica", source="ORCAMENTO-SINTETICO-TESTE",
         authorized_for_report=True, category="document", synthetic_test_only=True,
+        requirement_ids=["9.3.1.laudo_completo"],
     )
     generated = generate_documents(store, created["job_id"])
     assert generated["case_release_status"] == "review_required"
@@ -203,3 +205,16 @@ def test_worker_cost_route_does_not_call_market_peers_and_preserves_honest_revie
     signature_request = create_signature_request(store, created["job_id"], revision_id="CUSTO-TESTE-1")
     assert signature_request["profile_id"] == "abnt-14653-2-custo-reedicao"
     assert signature_request["unsigned_pdf_sha256"]
+    from tests.comercial.test_c06_document_flow import _sign_with_test_certificate
+    unsigned = store.get_artifact(created["job_id"], "report.pdf")
+    signed, validation_context = _sign_with_test_certificate(unsigned)
+    imported = import_signed_report(
+        store, created["job_id"], signed_pdf=signed,
+        validation_context=validation_context,
+    )
+    assert imported["document_state"]["case_release_status"] == "signed_integrity_verified"
+    assert imported["signature"]["revision_id"] == "CUSTO-TESTE-1"
+    assert store.get_artifact(created["job_id"], "submission.zip")
+    history = store.get_artifact(created["job_id"], "document_history.zip")
+    with zipfile.ZipFile(io.BytesIO(history)) as archive:
+        assert any(name.endswith("/report.pdf") for name in archive.namelist())

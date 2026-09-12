@@ -1360,6 +1360,44 @@ def _compose_cost_valuation_job(
         "documents/report_context.json": dumps_strict(report_context).encode("utf-8"),
         "metadata/request_spec.json": dumps_strict(request_spec_for_peers(spec)).encode("utf-8"),
         "qualification/context.json": dumps_strict(qc).encode("utf-8"),
+        # The C12 package contract keeps these neutral paths across methods.
+        # Empty CSVs truthfully record that no market sample exists; the
+        # effective cost inputs live in calculation/cost_bom.json instead.
+        "data/source_input.bin": dumps_strict(bom or {}).encode("utf-8"),
+        "data/original_base.csv": b"row_id\r\n",
+        "data/interpreted_base.csv": b"row_id\r\n",
+        "data/used_sample.csv": b"row_id\r\n",
+        "data/excluded_rows.csv": b"row_id\r\n",
+        "data/identifier_map.json": dumps_strict({"applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "data/representation_map.json": dumps_strict({
+            "schema_version": "MP-EVIDENCE-MAP/1",
+            "market_sample": "not_applicable_cost_quantification",
+            "cost_input": "calculation/cost_bom.json",
+            "normalized_cost_result": "calculation/cost_result.json",
+            "row_identity": "item_id",
+        }).encode("utf-8"),
+        "model/coefficients.json": dumps_strict({"values": {}, "applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "model/subject_design.json": dumps_strict({"applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "model/transformations.json": dumps_strict({"applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "model/residual_context.json": dumps_strict({"applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "policies/request_spec.json": dumps_strict(request_spec_for_peers(spec)).encode("utf-8"),
+        "policies/missing_policy.json": dumps_strict(spec.get("missing_policy") or {}).encode("utf-8"),
+        "policies/outlier_policy.json": dumps_strict(spec.get("outlier_policy") or {}).encode("utf-8"),
+        "policies/search_policy.json": dumps_strict(spec.get("search_policy") or {}).encode("utf-8"),
+        "policies/evaluation_policy.json": dumps_strict(spec.get("evaluation_policy") or {}).encode("utf-8"),
+        "policies/value_policy.json": dumps_strict(spec.get("value_policy") or {
+            "applicability": "cost_result_is_directly_calculated",
+        }).encode("utf-8"),
+        "reproduction/spec.json": dumps_strict({
+            "schema_version": "MP-COST-REPRODUCTION/1",
+            "promised": True,
+            "method": "validated_cost_bom_sum",
+            "input": "calculation/cost_bom.json",
+            "result": "calculation/cost_result.json",
+            "expected_point": snapshot.get("value", {}).get("point"),
+            "formula": (cost_result.get("memory") or {}).get("formula"),
+            "market_sample": "not_applicable",
+        }).encode("utf-8"),
     }
     if context["artifact_bytes"].get("report.pdf"):
         evidence_files["documents/report.pdf"] = context["artifact_bytes"]["report.pdf"]
@@ -1398,6 +1436,7 @@ def _compose_cost_valuation_job(
         "completeness_status": "incomplete",
         "completeness_missing": ledger["missing"],
         "completeness_summary": ledger["counts"],
+        "numerical_reproduction_status": "ready",
         "replay": {
             "formula": (cost_result.get("memory") or {}).get("formula"),
             "point": snapshot.get("value", {}).get("point"),
