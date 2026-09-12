@@ -758,6 +758,7 @@ async def create_job(
             "result_url": f"/jobs/{job_id}/result",
             "state": record.get("state") or "queued",
             "idempotent_replay": not record.get("created"),
+            "access_token": record.get("access_token"),
         },
     )
 
@@ -776,7 +777,11 @@ async def get_job(job_id: str):
 
 
 @app.get("/jobs/{job_id}/result")
-async def get_job_result(job_id: str):
+async def get_job_result(
+    job_id: str,
+    access_token: Optional[str] = None,
+    expected_fingerprint: Optional[str] = None,
+):
     job_store, _runner = _require_c11()
     job = job_store.get(job_id)
     if job is None:
@@ -785,6 +790,19 @@ async def get_job_result(job_id: str):
             "job not found",
             [make_issue("JOB_NOT_FOUND", f"job {job_id} not found", origin="c10.api")],
         )
+    if access_token:
+        verify = getattr(job_store, "verify_access", None)
+        if callable(verify) and not verify(job_id, access_token):
+            return _issues_response(
+                403,
+                "invalid access token",
+                [make_issue(
+                    "INVALID_ACCESS_TOKEN",
+                    "access_token does not match the job",
+                    origin="c10.api",
+                    evidence={"job_id": job_id},
+                )],
+            )
     snapshot = job_store.get_snapshot(job_id)
     if snapshot is None:
         return _issues_response(
@@ -805,6 +823,25 @@ async def get_job_result(job_id: str):
                 "result_available": False,
             },
         )
+    if expected_fingerprint:
+        qc = ((snapshot.get("provenance") or {}).get("qualification_context") or {})
+        fp = qc.get("result_fingerprint")
+        if not fp or fp != expected_fingerprint:
+            return _issues_response(
+                409,
+                "fingerprint mismatch",
+                [make_issue(
+                    "FINGERPRINT_MISMATCH",
+                    "expected_fingerprint does not match the frozen result",
+                    origin="c10.api",
+                    evidence={
+                        "job_id": job_id,
+                        "expected": expected_fingerprint,
+                        "observed": fp,
+                    },
+                )],
+                extra={"job_id": job_id, "result_fingerprint": fp},
+            )
     return JSONResponse(status_code=200, content=snapshot)
 
 

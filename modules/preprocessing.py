@@ -554,7 +554,16 @@ def fit_dataset(
         "n_free_with_intercept": accounting.get("n_free_with_intercept"),
         "rank_with_intercept": accounting.get("rank_with_intercept"),
         "schema_version": SCHEMA_VERSION,
+        "stages": {
+            "raw": received,
+            "interpreted": received,
+            "eligible": n_observed,
+            "fitted": n_effective,
+        },
     }
+    if isinstance(feature_schema, dict):
+        feature_schema = dict(feature_schema)
+        feature_schema["feature_lineage"] = _feature_lineage(encoder_state)
 
     return PreparedDataset(
         X=X,
@@ -567,6 +576,42 @@ def fit_dataset(
         dataset_sha256=dataset_sha256(feature_schema, encoder_state, used_ids),
         base_frame=base_frame,
     )
+
+
+def _feature_lineage(encoder_state: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Map each design column back to the source variable that produced it."""
+    state = encoder_state if isinstance(encoder_state, Mapping) else {}
+    bases = list(state.get("base_variables") or [])
+    lineage: List[Dict[str, Any]] = []
+    for column in list(state.get("column_order") or []):
+        source = str(column)
+        transform = "identity"
+        group = None
+        for bv in bases:
+            if not isinstance(bv, Mapping):
+                continue
+            name = str(bv.get("original_name") or "")
+            kind = str(bv.get("kind") or "")
+            if column == name:
+                source = name
+                transform = "identity" if kind == "numeric" else "passthrough"
+                group = bv.get("group_id")
+                break
+            prefix = f"{name}_"
+            if name and str(column).startswith(prefix):
+                source = name
+                transform = "indicator"
+                group = bv.get("group_id") or name
+                break
+        lineage.append(
+            {
+                "feature": str(column),
+                "source_columns": [source],
+                "transform": transform,
+                "group_id": group,
+            }
+        )
+    return lineage
 
 
 def transform_subject(

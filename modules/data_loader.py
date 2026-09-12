@@ -245,8 +245,30 @@ def ingest_market(file_bytes: bytes, filename: str, request_spec: Optional[Dict[
                 "missing_before": list(missing_before_by_row[i]),
                 "changes": list(changes_by_row[i]),
                 "reasons": reasons,
+                "stage": "interpreted" if observed else (
+                    "received" if disposition == "pending_target" else "interpreted"
+                ),
             }
         )
+
+    from modules.valuation_policy.sample_identity import annotate_ingest_identity
+
+    identity = annotate_ingest_identity(
+        parsed_frame=parsed_frame,
+        raw_frame=raw_frame,
+        row_ids=row_ids,
+        roles=roles,
+        spec=spec,
+        issues=issues,
+    )
+    kind_by_id = {
+        rec["row_id"]: rec for rec in (identity.get("records") or [])
+    }
+    for entry in row_ledger:
+        rec = kind_by_id.get(entry["row_id"]) or {}
+        entry["observation_kind"] = rec.get("observation_kind")
+        entry["locality"] = rec.get("locality")
+        entry["reference_date"] = rec.get("reference_date")
 
     n_observed = sum(1 for entry in row_ledger if entry["observed_target"])
     issues.append(
@@ -265,6 +287,9 @@ def ingest_market(file_bytes: bytes, filename: str, request_spec: Optional[Dict[
                 "locale": locale,
                 "filename": filename,
                 "input_sha256": input_sha256,
+                "raw": n_rows,
+                "interpreted": n_rows,
+                "eligible_observed_target": n_observed,
             },
         )
     )

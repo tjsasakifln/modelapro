@@ -1220,6 +1220,20 @@ def compose_valuation_job(
         raise CompositionError("search_models failed", search_issues)
     winner = _get(search_result, "winner")
     if winner is None:
+        for alt in _get(search_result, "alternatives") or []:
+            adm = _as_dict(_get(alt, "admissibility")) or {}
+            if adm.get("numeric_technical") or _get(alt, "status") == "fitted":
+                winner = alt
+                search_issues.append(
+                    make_issue(
+                        "WINNER_PROMOTED_FROM_NUMERIC_ALTERNATIVE",
+                        "Fitted numeric alternative promoted; grade/framing is not a NO_WINNER gate.",
+                        severity="warning",
+                        origin="c10.worker",
+                    )
+                )
+                break
+    if winner is None:
         raise CompositionError(
             "search_models returned no winner",
             search_issues + [make_issue("NO_WINNER", "search_models returned no winner", origin="c10.worker")],
@@ -1324,6 +1338,31 @@ def compose_valuation_job(
     # Map normativa/estatística; do not recompute classifications.
     mapped_validation = _map_validation(normative, assessment, procedure)
 
+    profile = spec.get("qualification_profile") if isinstance(spec.get("qualification_profile"), Mapping) else {}
+    value_basis = str((profile or {}).get("value_basis") or "market")
+    cost_result = None
+    market_value_block = dict(value_block)
+    if value_basis in {"reconstruction_cost", "replacement_cost", "depreciated_cost"}:
+        from modules.cost_valuation import compute_reconstruction_cost
+
+        cost_result = compute_reconstruction_cost(
+            spec.get("cost_bom"),
+            market_point=market_value_block.get("point"),
+            value_basis=value_basis,
+            include_depreciation=value_basis == "depreciated_cost",
+        )
+        snapshot_issues.extend(list(cost_result.get("issues") or []))
+        cost_value = dict(cost_result.get("value") or {})
+        value_block = empty_value_block()
+        for key in empty_value_block():
+            value_block[key] = cost_value.get(key)
+        value_block["basis"] = cost_value.get("basis") or value_basis
+        value_block["estimand"] = cost_value.get("estimand") or "reconstruction_cost_sum"
+        if not cost_result.get("computable"):
+            value_block["point"] = None
+    else:
+        value_block.setdefault("basis", "market")
+
     model_block = _model_identity(winner_fit, prepared, assessment)
     formula = formula_from_coefficients(
         model_block.get("coefficients") or {},
@@ -1387,6 +1426,35 @@ def compose_valuation_job(
     # Restore estimand only on target, not inside value (value shape is exact).
     if "estimand" in value_block and "estimand" in draft["value"]:
         draft["value"] = {k: v for k, v in draft["value"].items() if k != "estimand"}
+        draft["target"]["estimand"] = value_block.get("estimand") or draft["target"].get("estimand")
+
+    from modules.valuation_policy.qualification import (
+        compose_qualification_context,
+        map_issuance_status,
+    )
+
+    qc = compose_qualification_context(
+        request_spec=spec,
+        snapshot_draft=draft,
+        winner=_as_dict(winner) if winner is not None else None,
+        search_audit=search_audit,
+        issues=snapshot_issues,
+        review_events=list(spec.get("review_events") or context.get("review_events") or []),
+        cost_result=cost_result,
+        previous_fingerprint=context.get("previous_fingerprint") or spec.get("previous_fingerprint"),
+    )
+    draft.setdefault("provenance", {})
+    draft["provenance"]["qualification_context"] = qc
+    if value_basis in {"reconstruction_cost", "replacement_cost", "depreciated_cost"}:
+        draft["provenance"]["market_value_not_used_as_cost"] = market_value_block
+    issuance = dict((draft.get("validation") or {}).get("issuance") or {})
+    issuance["status"] = map_issuance_status(qc.get("case_release_status"))
+    issuance["case_release_status"] = qc.get("case_release_status")
+    reasons = list(issuance.get("reasons") or [])
+    if qc.get("case_release_status") == "analysis_only" and "not_qualified_emission" not in reasons:
+        reasons.append("not_qualified_emission")
+    issuance["reasons"] = reasons
+    draft.setdefault("validation", {})["issuance"] = issuance
 
     emit(STAGE_ACTIONS, None)
     actions = peers["recommend_next_actions"](draft, _get(prepared, "feature_schema"))
