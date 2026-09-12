@@ -114,19 +114,47 @@ Subir o piso para 2e-13 faria o teste passar e seria exatamente o que o
 contrato proíbe: ajustar tolerância depois de ver o número. Não fiz, e não
 deve ser feito.
 
-O defeito real é na **regra**, não no número. O piso de `proj_rel_floor` usa
-`A = kappa_eq` para o desvio-padrão residual, mas essa quantidade vem de
-`sse/(n-p)` — uma soma de quadrados, cujo erro relativo não é governado por
-`kappa_eq` com uma casa de margem. Observado 1.9e-13 é ~47× o limite
-`eps*kappa_eq = 4.1e-15`: a regra **sub-prevê** para esta classe de
-quantidade, e Pontius é onde a margem de 1 dígito acabou primeiro.
+**Diagnóstico corrigido — medi, e minha primeira explicação estava errada.**
 
-O conserto honesto é derivar o fator de amplificação correto para quantidades
-do tipo soma-de-quadrados e **rederivar todos os pisos** dessa classe a partir
-da regra corrigida — não só o de Pontius. Isso é análise numérica, não um
-ajuste, e não couberam nesta sessão. Enquanto não for feito, o teste fica
-vermelho e a suíte ampla fica vermelha com ele. Isso é o registro correto do
-estado, não um bloqueio a ser contornado.
+Eu escrevi que o defeito era na **regra**: que `proj_rel_floor` usa
+`A = kappa_eq` para uma quantidade que vem de `sse/(n-p)`, soma de quadrados,
+e que a correção seria derivar o fator de amplificação certo. Medi a hipótese
+antes de mandar alguém derivá-la, e ela **não se sustenta**:
+
+| | piso atual | aqui | regra candidata `A = k + k²ρ` | piso novo |
+|---|---|---|---|---|
+| Pontius | 1.845e-13 | **8.19e-15** | 1.85e+01 | **1.848e-13** |
+
+A regra candidata move o piso de Pontius em **0,2 %**. O CI observou
+**1.919e-13**. Corrigir a regra não fecharia a distância nem de longe.
+
+O número que importa é outro: **aqui o erro é 8.19e-15, no runner do CI é
+1.919e-13 — 23× maior, para o mesmo código determinístico e os mesmos bytes de
+entrada.** O piso tem 22× de margem na minha máquina e é estourado na deles.
+
+Então o problema não é a tolerância nem a regra: é **variância de plataforma**.
+Ordem de redução diferente no BLAS/LAPACK, build de `numpy` diferente, SIMD
+diferente. Uma tolerância derivada só do condicionamento não modela isso, e
+nenhuma das duas regras modela.
+
+O que precisa ser decidido (e **não** decidi, porque decidir sem medir nas duas
+plataformas seria o mesmo erro de novo):
+
+- medir o erro nas duas plataformas para os onze conjuntos, não só Pontius, e
+  ver se a dispersão é sistemática ou só neste;
+- se for sistemática, a tolerância precisa de um termo de plataforma
+  **declarado** — e declarado antes de olhar o resultado, não ajustado a ele;
+- registrar a versão e o build de `numpy`/BLAS junto do resultado, que hoje não
+  são registrados e por isso o run não é reproduzível entre máquinas.
+
+Enquanto isso o teste fica **vermelho**, e o piso fica onde está. Não subi, e o
+`git diff` de `datasets.py` prova que nenhum literal se moveu.
+
+Registro também a forma do meu erro: eu produzi uma explicação plausível,
+escrevi que o conserto era "derivar o fator de amplificação correto", e só
+depois medi. A medição derrubou a explicação em uma linha. A explicação errada
+tinha custo real — mandava a próxima pessoa fazer análise numérica que
+provadamente não ajuda.
 
 ### 2. `p02/test_a01_playwright::test_a01_playwright_real_path_or_record_unavailability` — HANDOFF a C02
 
