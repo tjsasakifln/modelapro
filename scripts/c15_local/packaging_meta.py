@@ -17,6 +17,7 @@ _REQ_NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._\-]*)")
 REQUIRED_RUNTIME_IMPORTS = frozenset(
     {
         "streamlit",
+        "httpx",
         "fastapi",
         "uvicorn",
         "pandas",
@@ -47,7 +48,6 @@ ANNOUNCED_FORMAT_ENGINES = {
 DEV_ONLY = frozenset(
     {
         "pytest",
-        "httpx",
         "black",
         "flake8",
         "mypy",
