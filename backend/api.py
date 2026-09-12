@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from .websocket import router as websocket_router
+from .document_routes import router as document_router
 from .worker import (
     Worker,
     compose_preview,
@@ -648,6 +649,7 @@ app.add_middleware(
 )
 
 app.include_router(websocket_router)
+app.include_router(document_router)
 
 from .local_guard import LocalRequestGuard
 app.add_middleware(LocalRequestGuard)

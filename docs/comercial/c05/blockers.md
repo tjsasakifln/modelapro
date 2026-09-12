@@ -12,8 +12,8 @@ Os blocos estão em ordem de impacto sobre os critérios de aceite.
 |---|---|
 | material exato | Condições gerais, nota técnica ou apólice de um seguro habitacional **efetivamente comercializado**, que declare a base de valor, componentes incluídos e excluídos, índice e periodicidade de atualização, documentação exigida e forma de conclusão do trabalho |
 | emissor | seguradora do ramo habitacional, ou o agente financeiro que intermedia a apólice |
-| também necessário | **Circular SUSEP nº 677/2022**, editada sob o Art. 41 da Res. CNSP 447/2022 e único locus plausível do detalhe operacional; nunca recuperada |
-| rotas tentadas | recuperação do ato regulatório (obtida — ver abaixo); a Circular 677/2022 não foi localizada em rota automatizada |
+| Circular 677/2022 | Recuperada na retomada C06; disciplina CESH e não resolve método/base de avaliação. Não é dependência ausente; ver [conferência e hash](../c06/profile-process-verification-20260912.md) |
+| rotas tentadas | Atos recuperados do próprio emissor. A lacuna restante é o contrato/produto concreto, não um requisito de software presumido |
 | por que bloqueia | A Res. CNSP 447/2022 foi **conferida em texto integral** e é **expressamente silente quanto à base de valor**. Há um teto procedimental (Art. 19, LMG = valor da avaliação inicial indexado) e uma medida indenizatória de sabor reconstrutivo (Art. 30, reposição ao estado imediatamente anterior ao sinistro), **sem a ponte entre as duas**. Essa ponte está no contrato, não no ato |
 | responsável | titular do projeto, por via autorizada |
 
@@ -25,7 +25,7 @@ primária, tensada "conforme publicado no DOU de 14/10/2022".
 
 | campo | conteúdo |
 |---|---|
-| material exato | Texto integral do **Edital de Credenciamento nº 2024/00940(7421)** — instrumento controlador da trilha do MECI corrente; e o **GUIAR 2024/00940(7421) VER_04** (a página oficial lista VER_04; obteve-se VER_02, superada) |
+| material exato | Edital 2024/00940, GUIAR e MECI aplicáveis à ordem concreta, com revisão e hashes. A retomada recuperou GUIAR VER02, mas não confirmou VER04 nem demonstrou qual revisão é corrente; ver [conferência C06](../c06/profile-process-verification-20260912.md) |
 | emissor | Banco do Brasil S.A., DISEC / Cesup Compras e Contratações (SP) |
 | rotas tentadas | `bb.com.br` responde **HTTP 403 a todo cliente não-navegador**. Os PDFs do MECI e das Normas para elaboração de laudos foram obtidos em sessão de navegador real na própria origem; o anexo do edital não foi localizado como URL pública |
 | rota que deve ser tentada primeiro | ler o `href` da âncora "Edital 2024/00940" na página oficial de downloads do BB e buscá-lo na mesma origem, exatamente como os PDFs do MECI foram obtidos |
@@ -34,7 +34,7 @@ primária, tensada "conforme publicado no DOU de 14/10/2022".
 **Efeito delimitado:** A05 está **atendido em força moderada** com o que foi obtido — o
 MECI e as Normas para elaboração de laudos são fonte primária do emissor e trazem método,
 formato e regras. O que fica bloqueado é: (i) asserir qualquer item **GUIAR** como
-requisito vinculante, pois as citações disponíveis vêm de revisão superada; (ii) afirmar
+requisito vinculante atual, pois a vigência das citações disponíveis não foi estabelecida; (ii) afirmar
 que `MECI-202400940-VER01` é a revisão **corrente**. Redação obrigatória: "conforme
 publicado em MECI-202400940-VER01, cuja vigência não foi estabelecida". Vedado: "o MECI
 vigente", "o BB exige hoje".
@@ -86,8 +86,8 @@ Registrados por completude, com o efeito real de cada um:
 
 Registrado porque é a conclusão mais importante desta frente sobre perfis institucionais:
 
-- **Nenhuma das instituições investigadas mantém programa de homologação de software de
-  avaliação.** A varredura de texto integral confirma ausência de qualquer via: a Res.
+- **As fontes examinadas não estabelecem um programa geral de homologação deste software.**
+  Isso não demonstra inexistência universal de programas ou processos. A Res.
   CNSP 447/2022 não contém "homolog\*", "software", "ABNT", "NBR", "engenheiro", "CREA"
   nem "credenciamento"; a Res. CMN 4.676/2018 consolidada não contém "homolog\*",
   "credenci\*", "ABNT", "NBR", "14653", "engenheir\*", "CREA" nem "CAU".
@@ -101,7 +101,7 @@ Registrado porque é a conclusão mais importante desta frente sobre perfis inst
   - no inciso LIV do contrato CAIXA, a vedação a "sistemas não homologados pela CAIXA"
     como **intermediários no envio de dados** é controle de segurança da informação
     imposto à contratada.
-- Conforme o contrato da campanha: não havendo programa de homologação, **não se inventa
+- Conforme o contrato da campanha: sem evidência de um programa aplicável, **não se inventa
   tal certificado**. Documenta-se a regra de aceitação de trabalho da instituição e o
   protocolo de evidência correspondente — que é o que os perfis em
   `profiles/institutions/` fazem.

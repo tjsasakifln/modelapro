@@ -1,6 +1,6 @@
 {
   "id": "bcb-res-4676-garantia-imobiliaria",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "institution",
   "state": "verified",
   "label": "Resolução CMN nº 4.676/2018 — avaliação do imóvel em garantia (moldura regulatória)",
@@ -9,6 +9,7 @@
   "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
   "value_basis": "valor_de_mercado",
   "method": "metodo_comparativo_direto_regressao",
+  "technical_choice_provenance": "Composição de produto com perfil técnico de regressão para valor de mercado. A Resolução CMN 4.676 não prescreve essa base nem esse método; estes campos não são atribuídos ao regulador.",
   "asset_scope": "imovel_urbano",
   "act_type_established": "regra_contratual_ou_regulatoria",
   "sources": [
@@ -17,7 +18,8 @@
       "kind": "ato_regulatorio",
       "title": "Resolução CMN nº 4.676, de 31 de julho de 2018 — texto consolidado oficial",
       "edition_or_version": "Res_4676_v17_P.pdf (consolidação oficial, 28 páginas)",
-      "url": "https://www.bcb.gov.br/",
+      "url": "https://normativos.bcb.gov.br/Lists/Normativos/Attachments/50628/Res_4676_v17_P.pdf",
+      "official_record_url": "https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?numero=4676&tipo=RESOLU%C3%87%C3%83O",
       "md5": "e6da578838796155c6b9f6931f092fd3",
       "consulted_on": "2026-09-11",
       "content_conferred": true,
@@ -60,5 +62,5 @@
     "triage": "decorativo para os critérios desta frente: nenhum aceite depende do campo 'Situação'.",
     "responsible": "titular do projeto, por navegador em bcb.gov.br"
   },
-  "source_set_sha256": "f2dd1581da633d1fe0a4c64425d08e0a75f4343c7208fd64211d9db6850f53af"
+  "source_set_sha256": "9a7e6d0827d5a3d03f5a88eb50bec36e153230829b67cf6690d0bf409601854f"
 }

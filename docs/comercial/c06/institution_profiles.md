@@ -35,9 +35,10 @@ A URL atribuída do BCB é uma casca JavaScript. O texto consolidado foi obtido 
 
 `https://normativos.bcb.gov.br/Lists/Normativos/Attachments/50628/Res_4676_v17_P.pdf`
 
-**Versão consolidada v17.** Evidência de que é a consolidação mais recente
-publicada nesse caminho: as versões `v13`–`v17` retornam HTTP 200 e `v18`, `v19`
-e `v20` retornam HTTP 404 no mesmo padrão de URL (verificado em 2026-09-12T01:5xZ).
+**Snapshot consolidado v17 consultado.** A consulta histórica obteve HTTP 200
+para `v13`–`v17` e 404 para nomes hipotéticos `v18`–`v20`; isso **não prova** que
+v17 seja a consolidação mais recente. A vigência deve ser conferida pela ficha
+oficial e seus atos alteradores. Ver a [conferência C06 de processos e fontes](profile-process-verification-20260912.md).
 A primeira extração desta sessão foi feita sobre a **v12** e foi **descartada**:
 o PDF consolidado empilha a redação revogada imediatamente acima da redação
 vigente, e citar a v12 publicaria como atual um texto já superado.
@@ -499,7 +500,7 @@ O que **falta**, e que só um ato externo pode produzir:
 | E2 | Autorização do responsável pelo projeto para abrir contato institucional — **não concedida nesta sessão** | Direção do projeto |
 | E3 | Levantamento das exigências de credenciamento profissional e de regime de assinatura aplicáveis (escopo 3 da §3), a partir de fontes primárias ainda não consultadas | Responsável técnico, com consulta às fontes dos conselhos |
 | E4 | Esclarecimento, junto à CAIXA, sobre credenciamento de profissionais/empresas de avaliação — questão não respondida pela página atribuída | Canal institucional da CAIXA |
-| E5 | Parecer jurídico sobre a redação comercial permitida, dada a inexistência de programa de homologação | Assessoria jurídica |
+| E5 | Revisão da redação comercial e condições concretas de destinatário; as fontes examinadas não comprovam programa geral nem sua inexistência universal | Responsável pela oferta / assessoria designada |
 
 Até que E1–E5 existam, o material comercial deve afirmar apenas o que é
 verificável: que o produto **produz documentação, memória de cálculo e

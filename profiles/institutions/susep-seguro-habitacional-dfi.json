@@ -1,6 +1,6 @@
 {
   "id": "susep-seguro-habitacional-dfi",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "kind": "institution",
   "state": "pending",
   "label": "Seguro habitacional — cobertura DFI (danos físicos ao imóvel), conforme Res. CNSP 447/2022",
@@ -14,6 +14,17 @@
   "asset_scope": "imovel_urbano_residencial_financiado",
   "act_type_established": "regra_contratual_ou_regulatoria",
   "sources": [
+    {
+      "id": "circular-susep-677-2022",
+      "kind": "ato_regulatorio",
+      "title": "Circular SUSEP nº 677/2022 — Custo Efetivo do Seguro Habitacional",
+      "edition_or_version": "677/2022, texto oficial recuperado em 2026-09-12",
+      "url": "https://www2.susep.gov.br/safe/scripts/bnweb/bnmapi.exe?router=upload/26573",
+      "sha256": "6850feecf2d6562643a877982107bdb069e1a0ba3a775b382106549ec5a6a110",
+      "consulted_on": "2026-09-12",
+      "content_conferred": true,
+      "conferred_scope": "CESH; não estabelece método nem base técnica de avaliação imobiliária"
+    },
     {
       "id": "resolucao-cnsp-447-2022",
       "kind": "ato_regulatorio",
@@ -147,7 +158,6 @@
   "blocked_external_evidence": {
     "exact_material": [
       "Condições gerais, nota técnica ou apólice de um produto de seguro habitacional efetivamente comercializado — define a base de valor, componentes incluídos/excluídos, índice e documentação. É o item que bloqueia A06.",
-      "Circular SUSEP nº 677/2022 — instrumento editado sob o Art. 41 e locus plausível do detalhe operacional; nunca recuperada nesta campanha.",
       "Texto CONSOLIDADO da Res. CNSP 447/2022 com os campos 'Alterada por' / 'Revogada por', para certificar ausência de alteração entre 01/11/2022 e 2026-09-11 (a base normativa da SUSEP respondeu HTTP 503)."
     ],
     "responsible": "titular do projeto, por via autorizada. Nenhuma compra, contato institucional ou envio de dados foi realizado nesta campanha.",
@@ -162,5 +172,5 @@
     "state='pending' impede ready_for_professional_signoff para este perfil, por construção.",
     "Ausência de aceite de seguradora não é aprovação implícita nem proibição de vender com alegação mais restrita: é a alegação 'aceito pela instituição' que fica bloqueada."
   ],
-  "source_set_sha256": "22c6b591e6f4effaae3ed1de76c0fec4eb77b63ea1638ab408210fce613bc894"
+  "source_set_sha256": "03362233787dd2336939546d0e7eddd8cfe63a4704943ce798682c6dbba64b6d"
 }
