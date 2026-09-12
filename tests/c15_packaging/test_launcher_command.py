@@ -21,6 +21,7 @@ from c15_local.launcher import (
     frontend_app_path,
     frontend_command,
     health_url,
+    service_environment,
     wait_for_health,
 )
 
@@ -51,6 +52,17 @@ def test_backend_command_is_uvicorn_on_loopback():
     assert "backend.api:app" in cmd
     assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
     assert "0.0.0.0" not in cmd
+
+
+def test_service_environment_binds_frontend_client_to_selected_api(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.delenv("MODELA_API_URL", raising=False)
+    cfg = SimpleNamespace(API_PUBLIC_URL="http://127.0.0.1:18765")
+    assert service_environment(cfg)["MODELA_API_URL"] == cfg.API_PUBLIC_URL
+
+    monkeypatch.setenv("MODELA_API_URL", "http://127.0.0.1:19999")
+    assert service_environment(cfg)["MODELA_API_URL"] == "http://127.0.0.1:19999"
 
 
 def test_internal_api_disables_uvicorn_console_formatter(monkeypatch):
