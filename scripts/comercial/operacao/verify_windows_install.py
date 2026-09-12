@@ -13,6 +13,8 @@ import hashlib
 import hmac
 import json
 import os
+import platform
+import re
 import secrets
 import signal
 import subprocess
@@ -20,10 +22,13 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_INNO_RUNTIME_FILE_RE = re.compile(r"^unins[^/]*\.(?:exe|dat|log)$", re.IGNORECASE)
 PROFILE = {
     "id": "abnt-14653-2-regressao-mercado",
     "version": "1.0.0",
@@ -54,6 +59,158 @@ class VerificationError(RuntimeError):
     pass
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _host_identity() -> dict[str, Any]:
+    """Record non-identifying OS/build facts for the scope of this evidence."""
+    identity: dict[str, Any] = {
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "python_architecture": platform.architecture()[0],
+    }
+    if os.name == "nt":
+        release, version, service_pack, product_type = platform.win32_ver()
+        windows = sys.getwindowsversion()
+        identity.update(
+            {
+                "windows_release": release,
+                "windows_version": version,
+                "windows_edition": platform.win32_edition(),
+                "windows_build": windows.build,
+                "windows_platform_version": windows.platform_version,
+                "windows_service_pack": service_pack,
+                "windows_product_type": product_type,
+            }
+        )
+    return identity
+
+
+def _verify_installed_bundle(
+    install_dir: Path, inventory_path: Path, evidence_path: Path
+) -> dict[str, Any]:
+    """Match the complete installed file tree to its pre-installer inventory."""
+    result: dict[str, Any] = {
+        "schema_version": "MP-COM-WINDOWS-INSTALLED-BUNDLE/1",
+        "status": "RUNNING",
+        "install_dir": str(install_dir),
+        "inventory": str(inventory_path),
+        "host": _host_identity(),
+    }
+    try:
+        payload = json.loads(inventory_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(payload, dict):
+            raise VerificationError("bundle inventory must be a JSON object")
+        if payload.get("schema_version") != "MP-COM-WINDOWS-BUNDLE-INVENTORY/1":
+            raise VerificationError("bundle inventory schema is unsupported")
+        files = payload.get("files")
+        if not isinstance(files, list) or not files:
+            raise VerificationError("bundle inventory files must be a non-empty list")
+
+        normalized: list[dict[str, Any]] = []
+        for index, item in enumerate(files):
+            if not isinstance(item, dict):
+                raise VerificationError(f"bundle inventory file {index} is not an object")
+            raw_path = item.get("path")
+            size = item.get("size")
+            digest = item.get("sha256")
+            if not isinstance(raw_path, str):
+                raise VerificationError(f"bundle inventory file {index} has no path")
+            relative = PurePosixPath(raw_path)
+            if (
+                relative.is_absolute()
+                or raw_path != relative.as_posix()
+                or not relative.parts
+                or any(part in {"", ".", ".."} for part in relative.parts)
+            ):
+                raise VerificationError(f"bundle inventory path is unsafe: {raw_path!r}")
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+                raise VerificationError(f"bundle inventory size is invalid: {raw_path}")
+            if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
+                raise VerificationError(f"bundle inventory hash is invalid: {raw_path}")
+            normalized.append({"path": raw_path, "size": size, "sha256": digest})
+
+        paths = [item["path"] for item in normalized]
+        if paths != sorted(paths) or len(paths) != len(set(paths)):
+            raise VerificationError("bundle inventory paths must be unique and sorted")
+        encoded = json.dumps(
+            normalized, sort_keys=True, separators=(",", ":")
+        ).encode()
+        inventory_digest = hashlib.sha256(encoded).hexdigest()
+        if payload.get("file_count") != len(normalized):
+            raise VerificationError("bundle inventory file_count does not match files")
+        if payload.get("total_size") != sum(item["size"] for item in normalized):
+            raise VerificationError("bundle inventory total_size does not match files")
+        if payload.get("inventory_sha256") != inventory_digest:
+            raise VerificationError("bundle inventory digest does not match files")
+
+        missing: list[str] = []
+        mismatched: list[dict[str, Any]] = []
+        expected_paths = set(paths)
+        for item in normalized:
+            target = install_dir.joinpath(*PurePosixPath(item["path"]).parts)
+            if not target.is_file():
+                missing.append(item["path"])
+                continue
+            actual_size = target.stat().st_size
+            actual_digest = _sha256_file(target)
+            if actual_size != item["size"] or actual_digest != item["sha256"]:
+                mismatched.append(
+                    {
+                        "path": item["path"],
+                        "expected_size": item["size"],
+                        "actual_size": actual_size,
+                        "expected_sha256": item["sha256"],
+                        "actual_sha256": actual_digest,
+                    }
+                )
+        actual_paths = {
+            path.relative_to(install_dir).as_posix()
+            for path in install_dir.rglob("*")
+            if path.is_file()
+        }
+        allowed_inno_files = sorted(
+            path
+            for path in actual_paths - expected_paths
+            if "/" not in path and _INNO_RUNTIME_FILE_RE.fullmatch(path)
+        )
+        unexpected = sorted(actual_paths - expected_paths - set(allowed_inno_files))
+        result.update(
+            {
+                "declared_file_count": len(normalized),
+                "declared_total_size": payload["total_size"],
+                "inventory_sha256": inventory_digest,
+                "missing": missing,
+                "mismatched": mismatched,
+                "unexpected": unexpected,
+                "allowed_inno_runtime_files": allowed_inno_files,
+            }
+        )
+        if missing or mismatched or unexpected:
+            raise VerificationError(
+                "installed bundle differs from inventory: "
+                f"missing={len(missing)}, mismatched={len(mismatched)}, "
+                f"unexpected={len(unexpected)}"
+            )
+        result["status"] = "PASSED"
+        return result
+    except BaseException as exc:
+        result["status"] = "FAILED"
+        result["error"] = {"type": type(exc).__name__, "detail": str(exc)}
+        raise
+    finally:
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path.write_text(
+            json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+
 def _b64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
@@ -74,7 +231,12 @@ def _provision_ephemeral_test_controls(evidence_dir: Path) -> None:
         raise VerificationError("runtime public-key environment override must not be present")
 
 
-def _headers(*, mutate: bool = False, content_type: str | None = None) -> dict[str, str]:
+def _headers(
+    *,
+    mutate: bool = False,
+    content_type: str | None = None,
+    job_token: str | None = None,
+) -> dict[str, str]:
     bearer = os.environ["LOCAL_AUTH_TOKEN"]
     headers = {
         "Authorization": f"Bearer {bearer}",
@@ -87,6 +249,8 @@ def _headers(*, mutate: bool = False, content_type: str | None = None) -> dict[s
         )
     if content_type:
         headers["Content-Type"] = content_type
+    if job_token:
+        headers["X-Job-Token"] = job_token
     return headers
 
 
@@ -98,15 +262,19 @@ def _request(
     mutate: bool = False,
     content_type: str | None = None,
     expected: int = 200,
+    job_token: str | None = None,
+    timeout: float = 30,
 ) -> bytes:
     request = urllib.request.Request(
         url,
         data=body,
         method=method,
-        headers=_headers(mutate=mutate, content_type=content_type),
+        headers=_headers(
+            mutate=mutate, content_type=content_type, job_token=job_token
+        ),
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = response.read()
             if response.status != expected:
                 raise VerificationError(f"{method} {url} returned HTTP {response.status}")
@@ -116,7 +284,15 @@ def _request(
         raise VerificationError(f"{method} {url} returned HTTP {exc.code}: {detail}") from exc
 
 
-def _json_request(url: str, *, method: str = "GET", payload: Any = None, expected: int = 200) -> dict:
+def _json_request(
+    url: str,
+    *,
+    method: str = "GET",
+    payload: Any = None,
+    expected: int = 200,
+    job_token: str | None = None,
+    timeout: float = 30,
+) -> dict:
     body = None
     content_type = None
     if payload is not None:
@@ -129,6 +305,8 @@ def _json_request(url: str, *, method: str = "GET", payload: Any = None, expecte
         mutate=method not in {"GET", "HEAD", "OPTIONS"},
         content_type=content_type,
         expected=expected,
+        job_token=job_token,
+        timeout=timeout,
     )
     try:
         value = json.loads(raw)
@@ -342,8 +520,9 @@ def _run_job(
     created_raw = _request(api + "/jobs", method="POST", body=body, mutate=True, content_type=media, expected=202)
     created = json.loads(created_raw)
     job_id = created.get("job_id")
-    if not job_id:
-        raise VerificationError("POST /jobs did not return job_id")
+    job_token = created.get("access_token")
+    if not job_id or not job_token:
+        raise VerificationError("POST /jobs did not return job_id and access_token")
     deadline = time.time() + 300
     status = {}
     while time.time() < deadline:
@@ -358,6 +537,43 @@ def _run_job(
     profile = qualification.get("profile") or qualification.get("qualification_profile") or {}
     if profile.get("id") != PROFILE["id"] and qualification.get("profile_id") != PROFILE["id"]:
         raise VerificationError("installed calculation did not preserve the requested packaged profile")
+    report_context = {
+        "synthetic_test_only": True,
+        "applicant": "CASO SINTÉTICO C06 — SEM VALIDADE EXTERNA",
+        "rights": "TESTE — plena propriedade sintética",
+        "inspection_date": "2026-09-02",
+        "asset_identification": {
+            "address": "Rua de Teste, 1",
+            "registration": "TESTE-C06-001",
+        },
+        "region_characterization": "TESTE: região urbana sintética",
+        "property_characterization": "TESTE: imóvel sintético com 73,5 m²",
+        "methodology_justification": "TESTE: método comparativo por regressão",
+        "assumptions": ["TESTE: dados exclusivamente sintéticos"],
+        "professional_identity": {
+            "name": "PROFISSIONAL TESTE",
+            "registration": "CREA-TESTE-000",
+            "responsibility_document": "ART-TESTE-000",
+        },
+    }
+    generated = _json_request(
+        f"{api}/jobs/{job_id}/documents",
+        method="POST",
+        payload={"report_context": report_context},
+        job_token=str(job_token),
+        timeout=240,
+    )
+    generated_artifacts = generated.get("artifacts") or {}
+    if not set(REQUIRED_ARTIFACTS[1:]).issubset(generated_artifacts):
+        raise VerificationError(
+            f"explicit document generation did not emit required artifacts: {generated_artifacts}"
+        )
+    (evidence_dir / f"{namespace}-job-{variant}-documents.json").write_text(
+        json.dumps(generated, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    # Document composition reassesses and persists qualification/document state.
+    snapshot = _json_request(f"{api}/jobs/{job_id}/result")
     for name in REQUIRED_ARTIFACTS:
         payload = _request(f"{api}/jobs/{job_id}/artifacts/{name}")
         if not payload:
@@ -430,6 +646,7 @@ def verify(args: argparse.Namespace) -> dict:
         "phase": args.phase,
         "synthetic_test_data": True,
         "external_acceptance": False,
+        "host": _host_identity(),
         "status": "RUNNING",
         "checks": {},
     }
@@ -446,6 +663,11 @@ def verify(args: argparse.Namespace) -> dict:
             "size": len(executable_bytes),
             "sha256": hashlib.sha256(executable_bytes).hexdigest(),
         }
+        result["checks"]["installed_bundle_verification"] = _verify_installed_bundle(
+            executable.parent,
+            args.bundle_inventory.resolve(),
+            evidence_dir / f"{args.phase}-installed-bundle.json",
+        )
         process, log = _start(executable, evidence_dir / f"{args.phase}-product.log")
         health, ui_size = _wait_ready(api, ui)
         result["checks"]["backend_and_ui"] = {"status": "PASSED", "health": health, "ui_bytes": ui_size}
@@ -514,6 +736,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--backup", type=Path, required=True)
     parser.add_argument("--browser-python", type=Path, required=True)
+    parser.add_argument("--bundle-inventory", type=Path, required=True)
     parser.add_argument("--phase", choices=("initial", "upgrade", "restore"), required=True)
     args = parser.parse_args(argv)
     verify(args)

@@ -467,6 +467,9 @@ def test_windows_bundle_requires_native_runtime_and_hardens_distribution_evidenc
     assert "installed A cannot render PDF" in workflow
     assert '"playwright==1.62.0"' in workflow
     assert "--browser-python $env:C06_BROWSER_PYTHON" in workflow
+    assert workflow.count("--bundle-inventory") == 3
+    assert "C06_PRIOR_BUNDLE_INVENTORY" in workflow
+    assert "qualification-evidence/bundle-file-inventory.json" in workflow
     assert "Start-Process -FilePath $env:C06_PRIOR_INSTALLER" in workflow
     assert "initial-installed-preflight.json" in workflow
 
@@ -485,6 +488,7 @@ def test_windows_verifier_preserves_evidence_when_installed_executable_is_absent
         evidence=evidence,
         backup=evidence / "backup.zip",
         browser_python=tmp_path / "browser-python.exe",
+        bundle_inventory=tmp_path / "bundle-file-inventory.json",
         phase="initial",
     )
     with pytest.raises(
@@ -504,6 +508,119 @@ def test_installed_ui_probe_uses_six_profiles_and_labels_only_synthetic_data() -
     assert len(csv_bytes.splitlines()) == 37
     assert len(verify_installed_ui.EXPECTED_PROFILE_LABELS) == 6
     assert verify_installed_ui.TEST_BUILD_LABEL == "BUILD SINTÉTICO DE TESTE — NÃO COMERCIAL"
+
+
+def test_installed_bundle_verifier_matches_bytes_and_allows_only_inno_files(
+    tmp_path: Path,
+) -> None:
+    installed = tmp_path / "installed"
+    (installed / "nested").mkdir(parents=True)
+    (installed / "MODELA-PRO.exe").write_bytes(b"exe")
+    (installed / "nested" / "runtime.dll").write_bytes(b"dll")
+    inventory = tmp_path / "bundle-file-inventory.json"
+    build_windows._write_bundle_inventory(installed, inventory)
+    (installed / "unins000.exe").write_bytes(b"inno-exe")
+    (installed / "unins000.dat").write_bytes(b"inno-dat")
+    evidence = tmp_path / "installed-bundle.json"
+
+    result = verify_windows_install._verify_installed_bundle(
+        installed, inventory, evidence
+    )
+
+    assert result["status"] == "PASSED"
+    assert result["declared_file_count"] == 2
+    assert result["allowed_inno_runtime_files"] == ["unins000.dat", "unins000.exe"]
+    assert json.loads(evidence.read_text(encoding="utf-8"))["status"] == "PASSED"
+
+
+@pytest.mark.parametrize("failure", ["missing", "mismatch", "unexpected"])
+def test_installed_bundle_verifier_rejects_tree_differences(
+    tmp_path: Path, failure: str
+) -> None:
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    target = installed / "MODELA-PRO.exe"
+    target.write_bytes(b"expected")
+    inventory = tmp_path / "bundle-file-inventory.json"
+    build_windows._write_bundle_inventory(installed, inventory)
+    if failure == "missing":
+        target.unlink()
+    elif failure == "mismatch":
+        target.write_bytes(b"modified")
+    else:
+        (installed / "undeclared.dll").write_bytes(b"unexpected")
+    evidence = tmp_path / "installed-bundle.json"
+
+    with pytest.raises(
+        verify_windows_install.VerificationError,
+        match="installed bundle differs from inventory",
+    ):
+        verify_windows_install._verify_installed_bundle(installed, inventory, evidence)
+
+    result = json.loads(evidence.read_text(encoding="utf-8"))
+    assert result["status"] == "FAILED"
+    assert result[failure if failure != "mismatch" else "mismatched"]
+
+
+def test_windows_job_verifier_explicitly_generates_documents_with_job_token(
+    tmp_path: Path, monkeypatch
+) -> None:
+    document_calls = []
+    result_reads = []
+    snapshot = {
+        "provenance": {
+            "qualification_context": {"profile": {"id": verify_windows_install.PROFILE["id"]}}
+        },
+        "value": {"point": 123.0},
+    }
+
+    def request(url: str, **kwargs) -> bytes:
+        if url.endswith("/jobs"):
+            return json.dumps(
+                {"job_id": "job-test", "access_token": "job-secret"}
+            ).encode()
+        name = url.rsplit("/", 1)[-1]
+        if name == "frozen_project.json":
+            return b"{}"
+        if name == "report.pdf":
+            return b"%PDF-test"
+        if name in {"report.docx", "evidence_bundle.zip"}:
+            return b"PK-test"
+        raise AssertionError((url, kwargs))
+
+    def json_request(url: str, **kwargs) -> dict:
+        if url.endswith("/documents"):
+            document_calls.append(kwargs)
+            return {
+                "artifacts": {
+                    "report.pdf": {},
+                    "report.docx": {},
+                    "evidence_bundle.zip": {},
+                }
+            }
+        if url.endswith("/result"):
+            result_reads.append(url)
+            return snapshot
+        if url.endswith("/jobs/job-test"):
+            return {"state": "succeeded"}
+        if url.endswith("/revisions"):
+            return {"revision_id": "revision-test"}
+        if url.endswith("/projects/TESTE-C06-PROJETO"):
+            return {"revision": {"revision_id": "revision-test"}}
+        raise AssertionError((url, kwargs))
+
+    monkeypatch.setattr(verify_windows_install, "_request", request)
+    monkeypatch.setattr(verify_windows_install, "_json_request", json_request)
+
+    verify_windows_install._run_job("http://127.0.0.1:1", tmp_path, 0, "initial")
+
+    assert len(document_calls) == 1
+    assert document_calls[0]["method"] == "POST"
+    assert document_calls[0]["job_token"] == "job-secret"
+    assert document_calls[0]["timeout"] == 240
+    assert document_calls[0]["payload"]["report_context"]["synthetic_test_only"] is True
+    assert len(result_reads) == 2
+    assert (tmp_path / "initial-job-0-documents.json").is_file()
 
 
 def test_windows_update_semantic_comparison_ignores_only_execution_identity(tmp_path: Path) -> None:

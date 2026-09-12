@@ -225,6 +225,7 @@ jobs:
           $installer = Join-Path $build $installerEntries[0].path
           if (-not (Test-Path $installer)) { throw "current installer absent from release manifest path" }
           "C06_CURRENT_INSTALLER=$installer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C06_CURRENT_BUNDLE_INVENTORY=$build\qualification-evidence\bundle-file-inventory.json" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Resolve a previous successful candidate from the same PR cohort
         shell: pwsh
@@ -310,11 +311,13 @@ jobs:
             $licenses = @(Get-ChildItem $download -Filter synthetic-test-entitlement.json -File -Recurse)
             $anchors = @(Get-ChildItem $download -Filter trusted_vendor_anchor.json -File -Recurse)
             $testManifests = @(Get-ChildItem $download -Filter test-entitlement-manifest.json -File -Recurse)
+            $bundleInventories = @(Get-ChildItem $download -Filter bundle-file-inventory.json -File -Recurse)
             if (
               $identities.Count -ne 1 -or $manifests.Count -ne 1 -or $installers.Count -ne 1 -or
-              $licenses.Count -ne 1 -or $anchors.Count -ne 1 -or $testManifests.Count -ne 1
+              $licenses.Count -ne 1 -or $anchors.Count -ne 1 -or $testManifests.Count -ne 1 -or
+              $bundleInventories.Count -ne 1
             ) {
-              throw "previous candidate must contain exactly one identity, release, installer and TEST entitlement"
+              throw "previous candidate must contain one identity, release, installer, inventory and TEST entitlement"
             }
             $priorIdentity = Get-Content $identities[0].FullName -Raw | ConvertFrom-Json
             $priorManifest = Get-Content $manifests[0].FullName -Raw | ConvertFrom-Json
@@ -346,6 +349,7 @@ jobs:
             $priorLicense = $licenses[0].FullName
             $priorVersion = $priorManifest.version
             $priorTree = $priorIdentity.tree_sha
+            $priorBundleInventory = $bundleInventories[0].FullName
           } else {
             $priorVersion = "$env:C06_VERSION-mechanics-a"
             iscc.exe "/O$prior" "/DAppVersion=$priorVersion" "/DBundleDir=$env:C06_BUILD\MODELA-PRO" "packaging\comercial\modelapro.iss"
@@ -353,6 +357,7 @@ jobs:
             $selected = Join-Path $prior "MODELA-PRO-$priorVersion-win64.exe"
             $priorLicense = $env:C06_CURRENT_LICENSE
             $priorTree = $currentIdentity.tree_sha
+            $priorBundleInventory = $env:C06_CURRENT_BUNDLE_INVENTORY
           }
           if (-not (Test-Path $selected)) { throw "selected A installer absent" }
           [ordered]@{
@@ -370,6 +375,7 @@ jobs:
           "C06_PRIOR_LICENSE=$priorLicense" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "C06_DISTINCT_PRIOR=$($distinct.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "C06_PRIOR=$prior" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C06_PRIOR_BUNDLE_INVENTORY=$priorBundleInventory" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Isolate installed verification from the build-host native stack
         shell: pwsh
@@ -446,6 +452,7 @@ jobs:
             --evidence $env:C06_EVIDENCE `
             --backup $backup `
             --browser-python $env:C06_BROWSER_PYTHON `
+            --bundle-inventory $env:C06_PRIOR_BUNDLE_INVENTORY `
             --phase initial
 
       - name: Update installed product to B and verify saved state
@@ -468,6 +475,7 @@ jobs:
             --evidence $env:C06_EVIDENCE `
             --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
             --browser-python $env:C06_BROWSER_PYTHON `
+            --bundle-inventory $env:C06_CURRENT_BUNDLE_INVENTORY `
             --phase upgrade
 
       - name: Return to A and restore the verified backup in a clean profile
@@ -490,6 +498,7 @@ jobs:
             --evidence $env:C06_EVIDENCE `
             --backup "$env:C06_EVIDENCE\modelapro-backup.zip" `
             --browser-python $env:C06_BROWSER_PYTHON `
+            --bundle-inventory $env:C06_PRIOR_BUNDLE_INVENTORY `
             --phase restore
 
       - name: Verify Windows ACLs on private runtime and entitlement paths
@@ -685,6 +694,7 @@ jobs:
             ${{ runner.temp }}/c06-windows-evidence
             ${{ runner.temp }}/modelapro-build-b/release-manifest.json
             ${{ runner.temp }}/modelapro-build-b/MODELA-PRO-*-win64.exe
+            ${{ runner.temp }}/modelapro-build-b/qualification-evidence/bundle-file-inventory.json
             ${{ runner.temp }}/c06-test-license
             ${{ runner.temp }}/modelapro-installer-a/MODELA-PRO-*-win64.exe
           if-no-files-found: error
@@ -699,6 +709,7 @@ jobs:
             ${{ runner.temp }}/c06-windows-evidence/candidate-identity.json
             ${{ runner.temp }}/modelapro-build-b/release-manifest.json
             ${{ runner.temp }}/modelapro-build-b/MODELA-PRO-*-win64.exe
+            ${{ runner.temp }}/modelapro-build-b/qualification-evidence/bundle-file-inventory.json
             ${{ runner.temp }}/c06-test-license/trusted_vendor_anchor.json
             ${{ runner.temp }}/c06-test-license/synthetic-test-entitlement.json
             ${{ runner.temp }}/c06-test-license/test-entitlement-manifest.json
