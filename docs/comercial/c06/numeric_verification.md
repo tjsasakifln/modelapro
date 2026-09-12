@@ -62,3 +62,21 @@ Acceptance criteria for the subsequent validation are:
 4. a deliberate 1% error in every applicable sigma/coefficient-sd comparison is still
    rejected;
 5. the full `test_nist_strd.py` suite passes under the candidate environment.
+
+## Subsequent local validation
+
+The rule above was committed first as `6ec9dec`; only then were the comparisons changed
+and executed. The independent command reported all eleven datasets passing at 100-digit
+precision, with worst checked relative errors from `1.15e-15` through `4.50e-15` on the
+non-exact datasets:
+
+```
+python3 scripts/comercial/numeric/verify_nist_high_precision.py
+verified=11 precision=100 result=PASS
+```
+
+The focused suite then passed 96 tests, including the uniform budget derivation,
+one-percent negative mutations and invocation of the Decimal checker from an arbitrary
+working directory. A new candidate CI run is still required to turn the retained
+GitHub-run failure into cross-platform execution evidence; local success is not recorded
+as a hosted-run success.

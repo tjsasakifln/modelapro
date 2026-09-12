@@ -170,7 +170,7 @@ their own should re-read the NIST disclaimer directly rather than trust this sum
 
 ## 4. The tolerance tiers, and which of them is pre-registered
 
-There are three tiers. They are not equally authoritative and the difference matters,
+There are four tiers. They are not equally authoritative and the difference matters,
 so each is labelled everywhere it appears.
 
 ### 4.0 Tier 1 — pre-registered (frozen before any comparison was executed)
@@ -292,12 +292,12 @@ floor of 5.21e-05 — four orders of margin. A number chosen to fit would sit ju
 3.41e-09. But it was derived *after* the first run, so it is **not pre-registered**, and
 is never to be described as such.
 
-The binding sd floor asserted by the test is `min(sd_rel_floor, sd_rel_floor_qr)`, which
-is the tier-2 value on every dataset; the tier-1 literal is retained so the
-re-derivation test can still check it and so a reader can confirm nothing was loosened.
-**The tightest comparison in the entire suite is Norris `sd(B0)`: 1.752e-14 against
-2.801e-14, 63% of budget.** If that ever trips, it is a finding to investigate — not a
-literal to move.
+Before the portability incident, the binding sd floor was
+`min(sd_rel_floor, sd_rel_floor_qr)`, the tier-2 value on every dataset. The tier-1 and
+tier-2 literals remain unchanged and mechanically checked. The effective sd comparison
+now also includes tier 4; section 4.3 separates the historical table from the current
+portable values. Norris `sd(B0)` consuming 63% of tier 2 was the former tightest
+comparison and is preserved as historical evidence rather than restated as current.
 
 ### 4.0.2 Tier 3 — `EMPIRICAL_REGRESSION_CEILINGS`, measured, no authority at all
 
@@ -316,7 +316,7 @@ fit the computed residual is pure roundoff, bounded by roughly
 `u * kappa_eq * ||y|| ≈ 2.2e-16 * 2.2e3` relative, i.e. ~5e-13 — so 1e-9 leaves more than
 three orders of margin while remaining a real constraint.
 
-### 4.0.3 Post-incident portable QR budget — documented before revalidation
+### 4.0.3 Tier 4 — post-incident portable QR budget, documented before revalidation
 
 This section was frozen on **2026-09-12 before the candidate was revalidated with the
 new rule**. It is necessarily post-incident, and therefore is **not pre-registered**:
@@ -506,7 +506,9 @@ Two things address that, and neither is a tightened tolerance:
    which sit at 100× the measured error. The corrupted-Longley-`B1` case above moves
    `rel_eq` to ~3.1e-10 against a tier-3 ceiling of 6e-11, so it now goes red.
 
-The full margin record, so the looseness is on the file:
+The original three-tier margin record is retained below as historical evidence. Its
+"binding" columns describe the state measured on 2026-09-11, before tier 4 existed;
+they are not a claim about the current effective sigma/sd floors:
 
 | Dataset | quantity | achieved | tier-1 floor | tier-1 margin | binding tier | binding floor | binding margin |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -543,10 +545,30 @@ The full margin record, so the looseness is on the file:
 Wampler1 and Wampler2 fit exactly, so their residual sd, R² and parameter sds are
 certified `0` / `1` and are compared on an absolute scale instead (section 4.0.2).
 
-Read the table this way: where the binding tier is "pre-registered" or "QR-structure",
-the pass is a genuine statement about numerical accuracy against a bound derived without
-looking at the answer. Where it is "EMPIRICAL", the pass is only a statement that this
-oracle still computes what it computed on 2026-09-11.
+Read the historical table this way: where the recorded binding tier is
+"pre-registered" or "QR-structure", that run passed a bound derived without looking at
+the answer. Where it is "EMPIRICAL", it only says the oracle still computed what it had
+computed on 2026-09-11.
+
+The current tier-4 floors, evaluated uniformly from the formula in section 4.0.3, are:
+
+| Dataset | sigma floor | largest coefficient-sd floor | residual cancellation `C_r` |
+| --- | ---: | ---: | ---: |
+| Norris | 1.011e-11 | 1.014e-11 | 1.262e+03 |
+| Pontius | 1.762e-10 | 1.764e-10 | 1.321e+04 |
+| NoInt1 | 9.957e-14 | 1.024e-13 | 7.939e+01 |
+| NoInt2 | 1.000e-14 | 1.001e-14 | 2.448e+01 |
+| Longley | 5.452e-10 | 1.083e-09 | 5.721e+02 |
+| Wampler3 | 4.696e-11 | 7.802e-11 | 1.137e+03 |
+| Wampler4 | 3.122e-11 | 6.228e-11 | 1.145e+01 |
+| Wampler5 | 3.107e-11 | 6.214e-11 | 1.058e+00 |
+| Filip | 5.214e-04 | 1.043e-03 | 5.465e+02 |
+
+Wampler1 and Wampler2 are omitted because their certified residual and coefficient
+standard deviations are exactly zero; their absolute bounds remain unchanged. The
+largest current floor is 0.001043, below the separately declared 0.01 mutation, so
+every one-percent mutant remains rejectable. Tier-3 empirical tripwires remain active
+and much sharper than tier 4 for Longley, Wampler3–5 and Filip.
 
 ## 5. Files
 

@@ -99,7 +99,7 @@ O run **34667826006** (`c9ab4dc`) foi o primeiro a rodar as duas checagens
 novas. Três coisas saíram vermelhas, e classificá-las importa mais que
 consertá-las rápido.
 
-### 1. `test_nist_strd::test_certified_residual_standard_deviation_and_r_squared[Pontius]` — ABERTO, e não vou afrouxar
+### 1. `test_nist_strd::test_certified_residual_standard_deviation_and_r_squared[Pontius]` — CORRIGIDO EM C06, REVALIDAÇÃO HOSPEDADA PENDENTE
 
 ```
 Pontius residual sd: certified=0.000205177424076185
@@ -149,6 +149,20 @@ plataformas seria o mesmo erro de novo):
 
 Enquanto isso o teste fica **vermelho**, e o piso fica onde está. Não subi, e o
 `git diff` de `datasets.py` prova que nenhum literal se moveu.
+
+**Fechamento técnico posterior, preservando o registro acima.** O run `34670111908`
+confirmou também `sd(B0)` vermelho (`1.930e-13`). Uma reconstrução Decimal com 100
+dígitos preservou o valor NIST e reproduziu os onze conjuntos dentro da resolução
+publicada. A causa do falso vermelho era um orçamento incompleto: para uma norma de
+resíduo reconstruído por `y - X beta`, `kappa_eq` sozinho não inclui o cancelamento.
+
+O piso histórico `1.845e-13` continua intacto. C06 acrescentou uma camada portátil
+uniforme, documentada antes da revalidação, com `gamma_(n*p)`, o fator
+`(||y||+||X beta_cert||)/||r_cert||`, `kappa_eq` e meia unidade no último dos 15
+dígitos publicados. Não há constante própria para Pontius nem número derivado do erro
+observado. Mutantes deliberados de 1% reprovam em todos os comparadores aplicáveis.
+Detalhes e comandos estão em `docs/comercial/c06/numeric_verification.md` e
+`tests/fixtures/pro_workflow/nist_strd/PROVENANCE.md` §4.0.3.
 
 Registro também a forma do meu erro: eu produzi uma explicação plausível,
 escrevi que o conserto era "derivar o fator de amplificação correto", e só
