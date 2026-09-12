@@ -16,6 +16,7 @@ import uvicorn
 from c15_local import launcher as launcher_module
 from c15_local.launcher import (
     _entrypoint,
+    _log_frozen_child_diagnostics,
     backend_command,
     frontend_app_path,
     frontend_command,
@@ -181,9 +182,48 @@ def test_health_wait_fails_immediately_when_product_child_exits(monkeypatch):
         )
 
 
-def test_entrypoint_reports_child_failure_without_unhandled_window(capsys):
+def test_entrypoint_reports_child_failure_without_unhandled_window(
+    capsys, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MODELA_RUNTIME_ROOT", str(tmp_path))
+
     def fail():
         raise RuntimeError("concrete child failure")
 
     assert _entrypoint(fail) == 1
     assert "RuntimeError: concrete child failure" in capsys.readouterr().err
+    diagnostic = next((tmp_path / "logs").glob("frozen-child-error-*.log"))
+    assert "RuntimeError: concrete child failure" in diagnostic.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_entrypoint_persists_traceback_when_windowed_stderr_is_absent(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MODELA_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setattr(launcher_module.sys, "stderr", None)
+
+    def fail():
+        raise RuntimeError("windowed child failure")
+
+    assert _entrypoint(fail) == 1
+    diagnostic = next((tmp_path / "logs").glob("frozen-child-error-*.log"))
+    detail = diagnostic.read_text(encoding="utf-8")
+    assert "command=" in detail
+    assert "RuntimeError: windowed child failure" in detail
+
+
+def test_parent_copies_frozen_child_diagnostic_into_product_log(tmp_path):
+    from unittest.mock import Mock
+
+    diagnostic = tmp_path / "frozen-child-error-42.log"
+    diagnostic.write_text("Traceback\nRuntimeError: child failed", encoding="utf-8")
+    logger = Mock()
+
+    _log_frozen_child_diagnostics(logger, tmp_path)
+
+    logger.error.assert_called_once()
+    args = logger.error.call_args.args
+    assert diagnostic == args[1]
+    assert "RuntimeError: child failed" in args[2]
