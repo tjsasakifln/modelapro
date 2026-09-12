@@ -8,6 +8,7 @@ import sys
 import zipfile
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -529,8 +530,37 @@ def test_installed_bundle_verifier_matches_bytes_and_allows_only_inno_files(
 
     assert result["status"] == "PASSED"
     assert result["declared_file_count"] == 2
-    assert result["allowed_inno_runtime_files"] == ["unins000.dat", "unins000.exe"]
+    assert [item["path"] for item in result["allowed_inno_runtime_files"]] == [
+        "unins000.dat",
+        "unins000.exe",
+    ]
+    assert all(item["sha256"] for item in result["allowed_inno_runtime_files"])
     assert json.loads(evidence.read_text(encoding="utf-8"))["status"] == "PASSED"
+
+
+def test_windows_host_identity_records_exact_non_identifying_build(monkeypatch) -> None:
+    monkeypatch.setattr(verify_windows_install.os, "name", "nt")
+    monkeypatch.setattr(
+        verify_windows_install.platform,
+        "win32_ver",
+        lambda: ("11", "10.0.26200", "", "Multiprocessor Free"),
+    )
+    monkeypatch.setattr(
+        verify_windows_install.platform, "win32_edition", lambda: "Professional"
+    )
+    monkeypatch.setattr(
+        verify_windows_install.sys,
+        "getwindowsversion",
+        lambda: SimpleNamespace(build=26200, platform_version=(10, 0, 26200)),
+        raising=False,
+    )
+
+    identity = verify_windows_install._host_identity()
+
+    assert identity["windows_release"] == "11"
+    assert identity["windows_edition"] == "Professional"
+    assert identity["windows_build"] == 26200
+    assert identity["windows_platform_version"] == (10, 0, 26200)
 
 
 @pytest.mark.parametrize("failure", ["missing", "mismatch", "unexpected"])
@@ -560,6 +590,64 @@ def test_installed_bundle_verifier_rejects_tree_differences(
     result = json.loads(evidence.read_text(encoding="utf-8"))
     assert result["status"] == "FAILED"
     assert result[failure if failure != "mismatch" else "mismatched"]
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    ["../outside", "..\\outside", "C:\\outside", "MODELA-PRO.exe:stream"],
+)
+def test_installed_bundle_verifier_rejects_windows_path_escape_forms(
+    tmp_path: Path, unsafe_path: str
+) -> None:
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    (installed / "MODELA-PRO.exe").write_bytes(b"expected")
+    inventory = tmp_path / "bundle-file-inventory.json"
+    payload = build_windows._write_bundle_inventory(installed, inventory)
+    payload["files"][0]["path"] = unsafe_path
+    payload["inventory_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload["files"], sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    inventory.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(verify_windows_install.VerificationError, match="path is unsafe"):
+        verify_windows_install._verify_installed_bundle(
+            installed, inventory, tmp_path / "installed-bundle.json"
+        )
+
+
+def test_installed_bundle_verifier_rejects_casefold_collision(tmp_path: Path) -> None:
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    (installed / "FILE.dll").write_bytes(b"upper")
+    (installed / "file.dll").write_bytes(b"lower")
+    inventory = tmp_path / "bundle-file-inventory.json"
+    build_windows._write_bundle_inventory(installed, inventory)
+
+    with pytest.raises(
+        verify_windows_install.VerificationError,
+        match="case-insensitively unique",
+    ):
+        verify_windows_install._verify_installed_bundle(
+            installed, inventory, tmp_path / "installed-bundle.json"
+        )
+
+
+def test_installed_bundle_verifier_rejects_symlink_escaping_root(tmp_path: Path) -> None:
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    outside = tmp_path / "outside.dll"
+    outside.write_bytes(b"outside")
+    (installed / "runtime.dll").symlink_to(outside)
+    inventory = tmp_path / "bundle-file-inventory.json"
+    build_windows._write_bundle_inventory(installed, inventory)
+
+    with pytest.raises(verify_windows_install.VerificationError, match="escapes its root"):
+        verify_windows_install._verify_installed_bundle(
+            installed, inventory, tmp_path / "installed-bundle.json"
+        )
 
 
 def test_windows_job_verifier_explicitly_generates_documents_with_job_token(

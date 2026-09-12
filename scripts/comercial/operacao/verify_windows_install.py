@@ -18,6 +18,7 @@ import re
 import secrets
 import signal
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -28,7 +29,9 @@ from typing import Any
 
 TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_INNO_RUNTIME_FILE_RE = re.compile(r"^unins[^/]*\.(?:exe|dat|log)$", re.IGNORECASE)
+_INNO_RUNTIME_FILE_RE = re.compile(
+    r"^unins[0-9]{3}\.(?:exe|dat|log)$", re.IGNORECASE
+)
 PROFILE = {
     "id": "abnt-14653-2-regressao-mercado",
     "version": "1.0.0",
@@ -112,6 +115,7 @@ def _verify_installed_bundle(
         if not isinstance(files, list) or not files:
             raise VerificationError("bundle inventory files must be a non-empty list")
 
+        install_root = install_dir.resolve(strict=True)
         normalized: list[dict[str, Any]] = []
         for index, item in enumerate(files):
             if not isinstance(item, dict):
@@ -124,6 +128,8 @@ def _verify_installed_bundle(
             relative = PurePosixPath(raw_path)
             if (
                 relative.is_absolute()
+                or ":" in raw_path
+                or "\\" in raw_path
                 or raw_path != relative.as_posix()
                 or not relative.parts
                 or any(part in {"", ".", ".."} for part in relative.parts)
@@ -136,8 +142,10 @@ def _verify_installed_bundle(
             normalized.append({"path": raw_path, "size": size, "sha256": digest})
 
         paths = [item["path"] for item in normalized]
-        if paths != sorted(paths) or len(paths) != len(set(paths)):
-            raise VerificationError("bundle inventory paths must be unique and sorted")
+        if paths != sorted(paths) or len(paths) != len({path.casefold() for path in paths}):
+            raise VerificationError(
+                "bundle inventory paths must be case-insensitively unique and sorted"
+            )
         encoded = json.dumps(
             normalized, sort_keys=True, separators=(",", ":")
         ).encode()
@@ -153,10 +161,19 @@ def _verify_installed_bundle(
         mismatched: list[dict[str, Any]] = []
         expected_paths = set(paths)
         for item in normalized:
-            target = install_dir.joinpath(*PurePosixPath(item["path"]).parts)
+            target = install_root.joinpath(*PurePosixPath(item["path"]).parts)
             if not target.is_file():
                 missing.append(item["path"])
                 continue
+            try:
+                resolved_target = target.resolve(strict=True)
+            except OSError:
+                missing.append(item["path"])
+                continue
+            if not resolved_target.is_relative_to(install_root):
+                raise VerificationError(
+                    f"installed bundle path escapes its root: {item['path']}"
+                )
             actual_size = target.stat().st_size
             actual_digest = _sha256_file(target)
             if actual_size != item["size"] or actual_digest != item["sha256"]:
@@ -169,17 +186,42 @@ def _verify_installed_bundle(
                         "actual_sha256": actual_digest,
                     }
                 )
-        actual_paths = {
-            path.relative_to(install_dir).as_posix()
-            for path in install_dir.rglob("*")
-            if path.is_file()
-        }
-        allowed_inno_files = sorted(
+        actual_paths: set[str] = set()
+        escaped_entries: list[str] = []
+        for path in install_root.rglob("*"):
+            relative_path = path.relative_to(install_root).as_posix()
+            is_reparse = path.is_symlink() or (
+                hasattr(path, "is_junction") and path.is_junction()
+            )
+            if is_reparse:
+                try:
+                    resolved = path.resolve(strict=True)
+                except OSError:
+                    escaped_entries.append(relative_path)
+                    continue
+                if not resolved.is_relative_to(install_root):
+                    escaped_entries.append(relative_path)
+                    continue
+            if path.is_file():
+                actual_paths.add(relative_path)
+        if escaped_entries:
+            raise VerificationError(
+                f"installed bundle contains escaping reparse entries: {escaped_entries}"
+            )
+        allowed_inno_paths = sorted(
             path
             for path in actual_paths - expected_paths
             if "/" not in path and _INNO_RUNTIME_FILE_RE.fullmatch(path)
         )
-        unexpected = sorted(actual_paths - expected_paths - set(allowed_inno_files))
+        allowed_inno_files = [
+            {
+                "path": path,
+                "size": (install_root / path).stat().st_size,
+                "sha256": _sha256_file(install_root / path),
+            }
+            for path in allowed_inno_paths
+        ]
+        unexpected = sorted(actual_paths - expected_paths - set(allowed_inno_paths))
         result.update(
             {
                 "declared_file_count": len(normalized),
