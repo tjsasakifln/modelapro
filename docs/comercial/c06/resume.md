@@ -9,11 +9,13 @@ Matriz de consumidores, testes, execuções, artefatos e dependências externas:
 não commitado abaixo para recomeçar as frentes: são histórico anterior à composição.
 
 C05 real é consumida pelo cálculo e pela emissão; os defaults documentais foram
-removidos. C16/P04 e wheel instalado passaram no run 34711657293, mas lint falhou
-e a suíte ampla ainda estava em curso nesta redação. Windows 34711657330 falhou
-no caminho do launcher antes de instalar; correção incorporada, nova prova pendente.
-Custo, navegador até assinatura e revisão do artefato final continuam como trabalho
-técnico C06. Não encerrar a integração por ausência de casos/revisores externos.
+removidos. Candidata publicada: `6867f310cb56f454fee62e83d61e6a897b73a343`.
+Runs C15 PR 34714577751 e Windows 34714577745 em execução. O run histórico
+34711657293 falhou no lint e em três testes da suíte ampla; as causas foram
+corrigidas, sem reutilizar seu resultado como aprovação atual. Custo integral
+até assinatura TESTE e navegador de mercado até assinatura passaram localmente.
+Windows instalado, navegador de custo e revisão do artefato final continuam como
+trabalho técnico C06. Não encerrar por ausência de casos/revisores externos.
 
 O objetivo segue sendo produto profissional comercializável nos perfis anunciados.
 `COMMERCIAL_RELEASE_READY=false`; não houve merge, deploy ou submissão institucional.

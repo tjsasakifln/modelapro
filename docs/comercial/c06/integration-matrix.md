@@ -1,7 +1,7 @@
 # C06 — matriz da composição, não dos componentes isolados
 
 Atualização em trabalho em 2026-09-12. Referência publicada desta execução:
-`a2f094f9f848aadb56d580f30eed4a52aa7606cf`. Os commits posteriores da mesma PR
+`6867f310cb56f454fee62e83d61e6a897b73a343`. Os commits posteriores da mesma PR
 precisam de execução própria antes de serem aprovados. Os oito aceites de cada
 produtor permanecem nos arquivos originais como histórico do componente; esta
 matriz identifica seus consumidores na composição. Não declara conclusão pelo
@@ -11,11 +11,13 @@ número de testes.
 
 | Referência | Execução e evidência exigida | Situação registrada |
 |---|---|---|
-| E1 | [C15 PR 34711657293](https://github.com/tjsasakifln/modelapro/actions/runs/34711657293): JUnit, collection.json, status, identity.json e inventário de bytes por namespace | C15 Linux/Windows, C16, P04 e wheel instalado passaram; lint falhou; suíte ampla/agregador pendentes nesta redação |
-| E2 | [Windows 34711657330](https://github.com/tjsasakifln/modelapro/actions/runs/34711657330): lock resolvido no Windows, fechamento de DLLs, hashes, manifesto de falha | Falhou antes da instalação: caminho do launcher relativo ao .spec. Correção incorporada, ainda sem nova prova instalada |
+| E1 | [C15 PR 34714577751](https://github.com/tjsasakifln/modelapro/actions/runs/34714577751): JUnit, collection.json, status, identity.json e inventário de bytes por namespace | EM EXECUÇÃO; lint, C15 Linux e build passaram; não aprova os jobs restantes. Histórico 34711657293 falhou: lint e suíte ampla (3 failed, 1640 passed, 1 skipped); causas corrigidas na candidata atual |
+| E2 | [Windows 34714577745](https://github.com/tjsasakifln/modelapro/actions/runs/34714577745): lock resolvido no Windows, fechamento de DLLs, hashes, manifesto de falha | EM EXECUÇÃO. Histórico 34711657330 falhou antes de instalar; caminhos PyInstaller corrigidos, ainda sem nova prova instalada |
 | E3 | Serviço C03 e rotas reais: `pytest tests/comercial/test_c06_document_flow.py tests/comercial/test_c06_security_routes.py` | 28 passed local; ambiente diagnóstico com pacotes de sistema, não substitui E1/E2 |
 | E4 | Catálogo C05 e distribuição: `pytest tests/comercial/c05 tests/comercial/c06/test_catalog_distribution.py` | 553 passed local após fontes versionadas; wheel ampliado precisa nova execução candidata |
 | E5 | NIST e qualificação integrada + coleção: `pytest` respectivos arquivos | 122 passed local, incluindo Decimal independente e mutantes materiais; orçamento em numeric_verification.md |
+| E6 | `test_c06_cost_flow.py`, `test_c06_document_flow.py`, `test_c06_recipient_return.py` sobre 6867f31 | 27 passed local, incluindo assinatura TESTE real de custo/mercado e importação de comprovante não verificado; C15 precisa confirmar ambiente candidato |
+| E7 | `test_c06_browser_document_flow.py`: Streamlit + uvicorn + Chromium, guardas habilitadas | 1 passed local; upload integral, cálculo, revisão, exportação PDF, assinatura TESTE/importação, dossiê e histórico. Incluído na coleta obrigatória E1 |
 
 Cada identidade deve distinguir pr_head_sha, base_sha, tested_commit_sha, tree_sha,
 pais, evento, run_id, tentativa, checkout limpo e hashes dos pacotes. Um número de
@@ -30,12 +32,12 @@ Build/testes falhos continuam a produzir evidência; artefatos não se sobrepõe
 | C01-A02, A05; C06-A02 | regressão, seleção, escala e intervalos; orçamento prévio + oráculo Decimal | c01/test_a02_a05_fit_selection.py; p04/test_nist_strd.py; numeric_verification.md | E1/E5 |
 | C01-A03, A07; C05-A03, A04, A07; C06-A03 | resolver real C05 + assess_qualification com contexto; C05 mantém decisão/bloqueios/história; revalidação preserva graus/proveniência | test_c06_qualification_integration.py, c05; snapshot/normative_assessment/document_state | E1/E3/E4 |
 | C01-A04 | estado congelado, lote e reprodução independente do processo | c01/test_a04_a07_parity.py e testes P04/C03 de reprodução; frozen_project/evidence_bundle | E1/E3 |
-| C01-A06; C05-A06 | BOM de custo e Tabelas 6/7 com fonte, BDI e depreciação; mesmo /jobs, sem regressão fictícia | test_c06_cost_consumer.py + testes do motor de custo em fechamento; memória cost_result | PENDENTE — integração técnica em andamento |
+| C01-A06; C05-A06 | BOM de custo e Tabelas 6/7 com fonte, BDI e depreciação; mesmo /jobs, sem regressão fictícia | test_c06_cost_consumer.py, test_c06_cost_flow.py; MP-COST/1, dossiê/reprodução e assinatura TESTE | E6; navegador de custo em validação |
 | C01-A08; C02-A01, A02, A03 | UI encomenda/perfil → API → cálculo; evidência documental sem defaults atestadores | c01/test_a08*, c02/test_a01_a02*, c02/test_a03*; request_spec/response persistidos | E1; novo formulário requer nova execução |
 | C02-A04, A07 | snapshot único em tela, projeto, revisão, lote e recuperação; valor/política sem cópia aprovadora | c02, c17, p04; projetos/revisões + comparação com snapshot | E1 |
-| C02-A05; C03-A01, A06 | /documents/review → exportação dos bytes PDF → importação/verificação pyHanko com trust roots do servidor | test_c06_document_flow.py; assinatura TESTE, assinatura antiga e PDF adulterado | E3; UI integral pendente |
+| C02-A05; C03-A01, A06 | /documents/review → exportação dos bytes PDF → importação/verificação pyHanko com trust roots do servidor | test_c06_document_flow.py; assinatura TESTE, assinatura antiga e PDF adulterado | E3/E6/E7; confirmação candidata em E1 |
 | C02-A06; C03-A07; C06-A05 | pacote de submissão local, mapa de requisitos/saída C05; nenhum envio externo | submission.zip, output_manifest; negativos de campos sem bytes e perfil desconhecido | E3; ato institucional NOT_RUN |
-| C02-A08 | Streamlit real + navegador lançado, autenticação HTTP/WS habilitada | c02/test_playwright_path.py; falha/NOT_RUN bloqueante se navegador não inicia | E1; extensão até assinatura em andamento |
+| C02-A08 | Streamlit real + navegador lançado, autenticação HTTP/WS habilitada | c02/test_playwright_path.py e test_c06_browser_document_flow.py; falha/NOT_RUN bloqueante se navegador não inicia | E1/E7 |
 | C03-A02, A05 | presenter único → PDF/DOCX; comparação substantiva de valores/intervalos/política/perfil | test_c06_document_flow.py e c03; report.pdf/report.docx | E3/E1 |
 | C03-A03, A04 | anexos integrais autorizados, registro hash, dossiê/reprodução; completude separada de integridade | upload de bytes, adulteração, inventário de representações; evidence_bundle.zip | E3 |
 | C03-A08; C06-A07 | verificadores de saída e guardas ligados às rotas, não campo inventado pelo teste | c03/p04 mutation tests + test_c06_security_routes.py | E1/E3 |
@@ -72,7 +74,8 @@ Build/testes falhos continuam a produzir evidência; artefatos não se sobrepõe
 
 ## Impedimentos internos ainda abertos nesta redação
 
-Percurso custo integral; navegador até assinatura; revisão adversarial C03 final;
-nova suíte ampla/agregador sem falhas; Windows instalado e ciclo entre versões
-realmente distintas; inventário/revisão do artefato final. Esses itens continuam
+Navegador de custo e recibo institucional no documento regenerado; confirmação
+da revisão adversarial final na candidata; nova suíte ampla/agregador sem falhas;
+Windows instalado e ciclo entre versões realmente distintas; inventário/revisão
+do artefato final. Esses itens continuam
 sendo trabalho C06, não handoffs sem consumidores nem dependências humanas.
