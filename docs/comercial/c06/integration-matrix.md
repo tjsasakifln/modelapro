@@ -21,6 +21,14 @@ número de testes.
 | E8 | Navegador mercado + custo juntos, incluindo coletor de artefatos reais sem chaves privadas | 2 passed local em 236,88 s sobre a coorte c60fbeb; custo 920,00 BRL salvo/reaberto; PDF/DOCX/dossiê/assinatura TESTE por namespace |
 | E9 | Retorno BB real worker → registro não verificado → duas gerações documentais → dossiê/histórico → adulteração | 1 passed em 318,64 s; não é aceite institucional. Integridade dos metadados do registro em endurecimento adicional |
 
+O artefato histórico de E1 foi baixado e aberto nesta retomada: PR HEAD
+`c60fbeb`, merge testado `151d63b648d0aab08afce8eb79a21d266477fbfb`, árvore
+`f8cfc683daf029b93493c9771119f8d81c9f45b3`. Dez arquivos do navegador mercado
+e dois do custo conferiram seus hashes/tamanhos. As capas PDF foram rasterizadas
+e inspecionadas (mercado 21 páginas; custo 10 páginas, minuta com pendências).
+Identidades/bytes: [evidence-run-34716312436.json](evidence-run-34716312436.json).
+Isso preserva evidência da candidata reprovada; não aprova a árvore posterior.
+
 Cada identidade deve distinguir pr_head_sha, base_sha, tested_commit_sha, tree_sha,
 pais, evento, run_id, tentativa, checkout limpo e hashes dos pacotes. Um número de
 run nesta tabela não aprova seu conteúdo: o agregador lê e verifica os arquivos.
