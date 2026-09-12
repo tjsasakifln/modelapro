@@ -249,3 +249,20 @@ def test_install_smoke_flag_is_actually_set_by_a_job():
         if "C15_INSTALL_SMOKE" in str(step.get("env") or "")
     ]
     assert setters, "no job sets C15_INSTALL_SMOKE; the smoke test can only skip"
+
+
+def test_wide_test_floor_only_ratchets_upward():
+    """The floor is a ratchet, not a target.
+
+    Lowering it is how a truncated suite gets waved through, so the value in
+    the workflow is pinned here and this constant may only ever be raised.
+    Raise it after a green run, to that run's count rounded down to the
+    nearest hundred; never to make a red build pass.
+    """
+    RATCHET = 800  # run 34667257642, be464a2: 808 testcases, 0 failures
+    step = next(
+        s for s in _jobs()["acceptance"]["steps"] if "--min-wide-tests" in str(s.get("run", ""))
+    )
+    body = str(step["run"])
+    value = int(body.split("--min-wide-tests", 1)[1].split()[0])
+    assert value >= RATCHET, f"wide-suite floor lowered to {value}, ratchet is {RATCHET}"

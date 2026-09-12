@@ -22,7 +22,7 @@
   "aceites": {
     "C06-A01": "IMPLEMENTED_VERIFIED",
     "C06-A02": "IMPLEMENTED_PARTIAL",
-    "C06-A03": "BLOCKED_ON_C01",
+    "C06-A03": "IMPLEMENTED_PARTIAL",
     "C06-A04": "BLOCKED_EXTERNAL_EVIDENCE",
     "C06-A05": "BLOCKED_EXTERNAL_EVIDENCE",
     "C06-A06": "WAITING_FOR_COMPONENTS",
@@ -48,7 +48,8 @@
       "doc": "docs/comercial/c06/handoff_c01_grade_not_met.md",
       "assunto": "minimum_fundamentacao_grade=2 destrói o resultado em vez de rotulá-lo not_met",
       "camada": "backend/worker.py:1220-1223",
-      "criterio_de_aceite": "snapshot presente, point 735000.0, requested_minimum_grade 2, grade_requirement_status not_met, GET /jobs/{id}/result != 409"
+      "criterio_de_aceite": "snapshot presente, point 735000.0, requested_minimum_grade 2, grade_requirement_status not_met, GET /jobs/{id}/result != 409",
+      "resultado": "Implementado por C01 em 1d40285. Reexecutado por C06: snapshot presente, point 735000.0, requested_minimum_grade 2, HTTP 200, case_release_status review_required. grade_requirement_status saiu 'pending' e nao 'not_met' -- correcao do criterio de C06, nao afrouxamento: decidir met/not_met e ato do classificador normativo de C05, ausente. Criterio not_met rearmado para a chegada de C05. Nao composto."
     }
   ],
   "dependencias_externas_exatas": [
@@ -75,5 +76,34 @@
     "assinatura de laudo ou contrato em nome de pessoa"
   ],
   "resume": "docs/comercial/c06/resume.md",
-  "next_human_act": "Decidir sobre o handoff de grau para C01 e sobre fornecer os insumos externos listados. Este estado não autoriza merge, venda nem laudo."
+  "next_human_act": "Decidir sobre o handoff de grau para C01 e sobre fornecer os insumos externos listados. Este estado não autoriza merge, venda nem laudo.",
+  "producer_heads_observados": {
+    "C01": {
+      "head": "1d40285aa47d2f0cb6da7dcdbb1776a6c0081a3f",
+      "worktree_limpo": true,
+      "handoff_publicado": true,
+      "verificado_por_c06": true,
+      "incorporado": false
+    },
+    "C02": {
+      "commits_ahead": 4,
+      "worktree_limpo": false,
+      "incorporado": false
+    },
+    "C03": {
+      "commits_ahead": 0,
+      "worktree_limpo": false,
+      "incorporado": false
+    },
+    "C04": {
+      "commits_ahead": 2,
+      "worktree_limpo": false,
+      "incorporado": false
+    },
+    "C05": {
+      "commits_ahead": 2,
+      "worktree_limpo": false,
+      "incorporado": false
+    }
+  }
 }
