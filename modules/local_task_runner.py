@@ -7,7 +7,9 @@ no mid-search resume: an abandoned ``running`` job becomes ``interrupted``.
 from __future__ import annotations
 
 import inspect
+import shutil
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Optional, Set
 
@@ -34,6 +36,18 @@ def _accepts_cancel_requested(fn: WorkFn) -> bool:
     return "cancel_requested" in signature.parameters
 
 
+def _accepts_argument(fn: WorkFn, name: str) -> bool:
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    accepts_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    return accepts_kwargs or name in signature.parameters
+
+
 class RunnerClosed(RuntimeError):
     pass
 
@@ -49,12 +63,22 @@ class LocalTaskRunner:
         job_store: Optional[JobStore] = None,
         *,
         max_workers: int = 1,
+        max_queue: int = 8,
+        timeout_seconds: Optional[float] = None,
+        min_free_disk_bytes: int = 64 * 1024 * 1024,
         recover_abandoned: bool = True,
     ) -> None:
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1")
+        if max_queue < 0 or min_free_disk_bytes < 0:
+            raise ValueError("max_queue and min_free_disk_bytes must be non-negative")
+        if timeout_seconds is not None and timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive or None")
         self.store = job_store if job_store is not None else JobStore.default()
         self._max_workers = max_workers
+        self._max_queue = max_queue
+        self._timeout_seconds = timeout_seconds
+        self._min_free_disk_bytes = min_free_disk_bytes
         self._lock = threading.RLock()
         self._accepting = True
         self._flags: Dict[str, threading.Event] = {}
@@ -89,6 +113,10 @@ class LocalTaskRunner:
                 )
             if job_id in self._submitted:
                 raise InvalidTransition(f"job {job_id} is already submitted")
+            if len(self._submitted) >= self._max_workers + self._max_queue:
+                raise RuntimeError("local job queue is full")
+            if shutil.disk_usage(self.store.root).free < self._min_free_disk_bytes:
+                raise RuntimeError("insufficient free disk space for a new local job")
             flag = self._flags.setdefault(job_id, threading.Event())
             if flag.is_set():
                 try:
@@ -181,6 +209,10 @@ class LocalTaskRunner:
             kwargs = {}
             if _accepts_cancel_requested(fn):
                 kwargs["cancel_requested"] = lambda: self.cancel_requested(job_id)
+            started = time.monotonic()
+            deadline = started + self._timeout_seconds if self._timeout_seconds else None
+            if deadline is not None and _accepts_argument(fn, "deadline_monotonic"):
+                kwargs["deadline_monotonic"] = deadline
             try:
                 result = fn(**kwargs) if kwargs else fn()
             except Exception as exc:
@@ -201,6 +233,22 @@ class LocalTaskRunner:
                             )
                         ],
                     )
+                return
+            if deadline is not None and time.monotonic() > deadline:
+                # Python cannot safely kill a running worker thread.  A callable
+                # accepting deadline_monotonic can stop itself; otherwise record a
+                # bounded failure once it returns, preserving persisted evidence.
+                self._try_transition(
+                    job_id, "running", "failed",
+                    issues=[make_issue(
+                        code="job_timeout",
+                        severity="error",
+                        origin="c11.runner",
+                        affected_ids=[job_id],
+                        message="Job exceeded its configured cooperative timeout.",
+                        evidence={"timeout_seconds": self._timeout_seconds},
+                    )],
+                )
                 return
             self._finish_from_result(job_id, result)
         finally:

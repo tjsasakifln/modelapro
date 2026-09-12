@@ -1,0 +1,58 @@
+{
+  "budget_path": "docs/comercial/c04/performance_budget.json",
+  "budget_status": "THRESHOLDS_DEFINED_NOT_YET_MEASURED_ON_TARGET_WINDOWS",
+  "checks": {
+    "backup_restore": {
+      "backup": "/tmp/modelapro-c04-operational-3pgl31m2/backup",
+      "elapsed_seconds": 0.09077,
+      "evidence_parity": true,
+      "restored_job_id": "job_c27739adb48541b9b946f5dea6adcbf0",
+      "status": "PASSED"
+    },
+    "disk_refusal": {
+      "elapsed_seconds": 0.022639,
+      "refusal": "insufficient free disk space for a new local job",
+      "status": "PASSED"
+    },
+    "pdf_probe": {
+      "available": true,
+      "detail": "WeasyPrint rendered a PDF; native libraries are present.",
+      "elapsed_seconds": 2.462028,
+      "status": "PASSED"
+    },
+    "queue_cancel": {
+      "cancelled_job_state": "cancelled",
+      "completed_job_state": "succeeded",
+      "elapsed_seconds": 0.197855,
+      "status": "PASSED"
+    },
+    "technical_corpus": {
+      "command": [
+        "python3",
+        "scripts/pro_workflow/run.py",
+        "--mode",
+        "accept-candidate",
+        "--output",
+        "/tmp/modelapro-c04-p04",
+        "--repeat",
+        "1"
+      ],
+      "elapsed_seconds": 206.641122,
+      "exit_code": 1,
+      "status": "FAILED"
+    }
+  },
+  "environment": {
+    "free_disk_bytes": 973300576256,
+    "pid": 332479,
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]"
+  },
+  "resource": {
+    "elapsed_seconds": 209.421528,
+    "exit_code": 1,
+    "free_disk_bytes": 973300576256,
+    "max_rss_kib": 309744
+  },
+  "schema_version": "MP-COM-OPERATIONS/1"
+}

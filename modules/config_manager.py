@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import warnings
+import platform
 from dataclasses import dataclass, field
 from typing import Tuple
 
@@ -20,6 +20,22 @@ _DEFAULT_CORS = (
     "http://127.0.0.1:8000",
     "http://localhost:8000",
 )
+
+
+def default_runtime_root() -> str:
+    """Return a per-user runtime location, never a directory in the checkout."""
+    configured = os.getenv("MODELA_RUNTIME_ROOT", "").strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+    if platform.system().lower().startswith("win"):
+        base = os.getenv("LOCALAPPDATA") or os.path.join(
+            os.path.expanduser("~"), "AppData", "Local"
+        )
+        return os.path.join(base, "MODELAPro")
+    base = os.getenv("XDG_DATA_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "share"
+    )
+    return os.path.join(base, "modelapro")
 
 
 def load_dotenv_files() -> None:
@@ -126,16 +142,19 @@ class Config:
     REDIS_HOST: str = "127.0.0.1"
     REDIS_PORT: int = 6379
     LOG_LEVEL: str = "INFO"
-    LOG_DIR: str = "./logs"
-    DATA_DIR: str = "./data"
-    UPLOAD_DIR: str = "./uploads"
-    REPORTS_DIR: str = "./reports"
-    JOBS_DIR: str = "./data/jobs"
-    PROJECTS_DIR: str = "./data/projects"
+    RUNTIME_ROOT: str = ""
+    LOG_DIR: str = ""
+    DATA_DIR: str = ""
+    UPLOAD_DIR: str = ""
+    REPORTS_DIR: str = ""
+    JOBS_DIR: str = ""
+    PROJECTS_DIR: str = ""
     MAX_UPLOAD_MB: int = 25
     MAX_CONCURRENT_JOBS: int = 1
     JOB_TIMEOUT_SECONDS: int = 3600
     LOCAL_AUTH_TOKEN: str = ""
+    # Shared/network serving is deliberately not a product mode yet.
+    LOCAL_SHARED_MODE: bool = False
 
     # NBR 14653-2 Defaults
     # MIN_SAMPLES_GRAU_1/2/3 are informational references only - they are NOT
@@ -210,16 +229,19 @@ def validate_config(cfg: Config) -> None:
     if "*" in cfg.CORS_ORIGINS:
         raise ValueError("CORS_ORIGINS must not include '*'")
     _validate_local_token(cfg.LOCAL_AUTH_TOKEN)
-    if not is_loopback_host(cfg.API_HOST) and cfg.API_HOST not in UNSAFE_BIND_HOSTS:
-        warnings.warn(
-            f"API_HOST={cfg.API_HOST!r} is not loopback. Local default is 127.0.0.1.",
-            stacklevel=2,
+    if cfg.LOCAL_SHARED_MODE:
+        raise ValueError(
+            "LOCAL_SHARED_MODE is not qualified for this release and remains disabled"
         )
-    if cfg.API_HOST in UNSAFE_BIND_HOSTS:
-        warnings.warn(
-            "API_HOST binds all interfaces (0.0.0.0/[::]). "
-            "This exposes the API beyond localhost; the shipped default is 127.0.0.1.",
-            stacklevel=2,
+    if not is_loopback_host(cfg.API_HOST):
+        raise ValueError(
+            "Non-loopback API_HOST is disabled until shared-mode authentication, "
+            "RBAC and transport qualification are implemented."
+        )
+    if not is_loopback_host(cfg.FRONTEND_HOST):
+        raise ValueError(
+            "Non-loopback FRONTEND_HOST is disabled until shared-mode authentication, "
+            "RBAC and transport qualification are implemented."
         )
 
 
@@ -230,7 +252,23 @@ def build_config() -> Config:
     frontend_host = _env_str("FRONTEND_HOST", "127.0.0.1") or "127.0.0.1"
     frontend_port = _env_int("FRONTEND_PORT", 8501, minimum=1, maximum=65535)
     public_default = f"http://{_display_host(api_host)}:{api_port}"
-    data_dir = _env_str("DATA_DIR", "./data", allow_empty=False)
+    runtime_root = default_runtime_root()
+    raw_store_override = os.getenv("MODELA_STORE_ROOT")
+    raw_data_override = os.getenv("DATA_DIR")
+    if raw_store_override is not None and not raw_store_override.strip():
+        raise ValueError("MODELA_STORE_ROOT must not be blank when explicitly set")
+    if raw_data_override is not None and not raw_data_override.strip():
+        raise ValueError("DATA_DIR must not be blank when explicitly set")
+    store_override = (raw_store_override or "").strip()
+    data_override = (raw_data_override or "").strip()
+    if store_override and data_override:
+        if os.path.abspath(os.path.expanduser(store_override)) != os.path.abspath(
+            os.path.expanduser(data_override)
+        ):
+            raise ValueError(
+                "MODELA_STORE_ROOT and DATA_DIR must identify the same canonical store root"
+            )
+    data_dir = store_override or data_override or os.path.join(runtime_root, "store")
     jobs_dir = _nested_dir("JOBS_DIR", data_dir, "jobs")
     projects_dir = _nested_dir("PROJECTS_DIR", data_dir, "projects")
     cfg = Config(
@@ -246,10 +284,11 @@ def build_config() -> Config:
         REDIS_HOST=_env_str("REDIS_HOST", "127.0.0.1") or "127.0.0.1",
         REDIS_PORT=_env_int("REDIS_PORT", 6379, minimum=1, maximum=65535),
         LOG_LEVEL=(_env_str("LOG_LEVEL", "INFO") or "INFO").upper(),
-        LOG_DIR=_env_str("LOG_DIR", "./logs", allow_empty=False),
+        RUNTIME_ROOT=runtime_root,
+        LOG_DIR=_env_str("LOG_DIR", os.path.join(runtime_root, "logs"), allow_empty=False),
         DATA_DIR=data_dir,
-        UPLOAD_DIR=_env_str("UPLOAD_DIR", "./uploads", allow_empty=False),
-        REPORTS_DIR=_env_str("REPORTS_DIR", "./reports", allow_empty=False),
+        UPLOAD_DIR=_env_str("UPLOAD_DIR", os.path.join(runtime_root, "uploads"), allow_empty=False),
+        REPORTS_DIR=_env_str("REPORTS_DIR", os.path.join(runtime_root, "reports"), allow_empty=False),
         JOBS_DIR=jobs_dir,
         PROJECTS_DIR=projects_dir,
         MAX_UPLOAD_MB=_env_int("MAX_UPLOAD_MB", 25, minimum=1, maximum=1024),
@@ -258,6 +297,7 @@ def build_config() -> Config:
             "JOB_TIMEOUT_SECONDS", 3600, minimum=1, maximum=86400
         ),
         LOCAL_AUTH_TOKEN=(os.getenv("LOCAL_AUTH_TOKEN") or "").strip(),
+        LOCAL_SHARED_MODE=_env_bool("LOCAL_SHARED_MODE", False),
         MAX_ONE_HOT_CATEGORIES=_env_int(
             "MAX_ONE_HOT_CATEGORIES", 50, minimum=1, maximum=10_000
         ),

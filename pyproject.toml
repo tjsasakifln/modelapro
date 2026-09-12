@@ -11,7 +11,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Intended Audience :: Financial and Insurance Industry",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
@@ -37,6 +36,7 @@ dependencies = [
     "requests>=2.31.0",
     "openpyxl>=3.1.2",
     "xlrd>=2.0.1",
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]
@@ -56,6 +56,12 @@ dev = [
     "pypdf>=5.0.0",
     "playwright>=1.40.0",
 ]
+# Tools used only by the controlled release build.  They are intentionally not
+# runtime dependencies and are pinned by constraints/commercial-build.txt.
+commercial-build = [
+    "pyinstaller==6.22.2",
+    "pip-audit==2.10.1",
+]
 
 [project.scripts]
 modelapro = "c15_local.launcher:main"
@@ -70,6 +76,8 @@ packages = [
     "frontend",
     "frontend.components",
     "c15_local",
+    "modules.operacao_local",
+    "modules.commercial_license",
 ]
 
 [tool.setuptools.package-dir]

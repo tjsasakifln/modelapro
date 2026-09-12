@@ -1,0 +1,30 @@
+{
+  "schema_version": "MP-COM-PERF/1",
+  "status": "THRESHOLDS_DEFINED_NOT_YET_MEASURED_ON_TARGET_WINDOWS",
+  "target": {
+    "os": "Windows 11 x64",
+    "cpu_cores_min": 4,
+    "ram_gib_min": 8,
+    "free_disk_gib_min": 5
+  },
+  "budgets": {
+    "max_upload_mib": 25,
+    "max_concurrent_jobs": 1,
+    "max_queued_jobs": 8,
+    "job_timeout_seconds": 3600,
+    "diagnostic_bundle_mib": 2,
+    "backup_overhead_ratio": 1.15
+  },
+  "representative_corpus": {
+    "rows": [30, 200, 1000, 5000],
+    "candidate_variables": [3, 8, 15],
+    "search_modes": ["limited", "exact_when_space_fits_budget"]
+  },
+  "rules": [
+    "search budget is reported and never silently reduced",
+    "validation data does not select the winner",
+    "cancel is observed between safe units",
+    "resource refusal preserves prior snapshots and revisions",
+    "disk/native PDF failure does not fabricate a successful artifact"
+  ]
+}
