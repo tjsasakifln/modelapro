@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import types
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -268,13 +269,29 @@ def _rich_case():
     return snapshot, context
 
 
-def test_real_pdf_docx_xlsx_and_manifest_cover_every_applicable_bb_item_except_signature():
+def test_real_pdf_docx_xlsx_and_manifest_cover_every_applicable_bb_item_except_signature(
+    monkeypatch,
+):
+    import openpyxl.writer.excel as openpyxl_excel
+
+    class ControlledDateTime(datetime):
+        current = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current
+
+    monkeypatch.setattr(openpyxl_excel, "datetime", types.SimpleNamespace(
+        datetime=ControlledDateTime,
+        timezone=timezone,
+    ))
     snapshot, context = _rich_case()
     xlsx = build_sample_xlsx(snapshot, context)
     xlsx_check = verify_sample_xlsx(xlsx, snapshot, context)
     assert xlsx_check["ok"] is True
     assert xlsx_check["row_count"] == 3
     assert xlsx_check["geolocation_complete"] is True
+    ControlledDateTime.current = datetime(2037, 8, 9, 10, 11, 12, tzinfo=timezone.utc)
     assert xlsx == build_sample_xlsx(snapshot, context)
     workbook = load_workbook(io.BytesIO(xlsx), read_only=True)
     rows = list(workbook["amostra_efetiva"].iter_rows(values_only=True))

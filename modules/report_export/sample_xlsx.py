@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 import zipfile
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from ..results_generator import build_report_view
 
 _FIXED_TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 _FIXED_ZIP_TIME = (2020, 1, 1, 0, 0, 0)
+_FIXED_W3CDTF = b"2020-01-01T00:00:00Z"
 
 
 def _cell(value: Any) -> Any:
@@ -46,7 +48,20 @@ def _deterministic_zip(data: bytes) -> bytes:
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = original.external_attr
             info.create_system = original.create_system
-            target.writestr(info, source.read(name))
+            payload = source.read(name)
+            if name == "docProps/core.xml":
+                # openpyxl overwrites workbook.properties.modified with the
+                # wall clock at save time.  ZIP metadata normalization alone
+                # therefore cannot make repeated builds byte-identical.
+                payload, replacements = re.subn(
+                    rb"(<dcterms:modified\b[^>]*>)[^<]*(</dcterms:modified>)",
+                    rb"\g<1>" + _FIXED_W3CDTF + rb"\g<2>",
+                    payload,
+                    count=1,
+                )
+                if replacements != 1:
+                    raise ValueError("OOXML core properties lack one modified timestamp")
+            target.writestr(info, payload)
     return output.getvalue()
 
 
