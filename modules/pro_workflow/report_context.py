@@ -359,6 +359,24 @@ def _normalize_rows(
     return normalized
 
 
+def _merge_sample_evidence(*sources: Any) -> Dict[str, Dict[str, Any]]:
+    """Overlay persisted and newly supplied evidence by canonical row id.
+
+    Reopened projects already carry professional corrections in
+    ``base_context.sample_evidence``.  A later request may update only one
+    field of one row, so merging the outer mapping alone would either discard
+    that persisted correction or discard its untouched fields.
+    """
+    merged: Dict[str, Dict[str, Any]] = {}
+    for source in sources:
+        for row_id, raw in _mapping(source).items():
+            if not isinstance(raw, ABCMapping):
+                continue
+            key = str(row_id)
+            merged[key] = {**merged.get(key, {}), **dict(raw)}
+    return merged
+
+
 def complete_report_context(
     base_context: Optional[Mapping[str, Any]],
     *,
@@ -405,6 +423,16 @@ def complete_report_context(
     input_sha = str(
         snap.get("input_sha256") or _mapping(base.get("sources")).get("input_sha256") or ""
     ) or None
+    sample_evidence = _merge_sample_evidence(
+        base.get("sample_evidence"),
+        supplied.get("sample_evidence"),
+        spec.get("sample_evidence"),
+    )
+    sample_evidence_columns = {
+        **_mapping(base.get("sample_evidence_columns")),
+        **_mapping(supplied.get("sample_evidence_columns")),
+        **_mapping(spec.get("sample_evidence_columns")),
+    }
     resolved = dict(base)
     resolved.update(
         {
@@ -481,25 +509,15 @@ def complete_report_context(
     )
     resolved["used_rows"] = _normalize_rows(
         base.get("used_rows"), input_sha256=input_sha,
-        row_evidence=_mapping(_first(
-            spec.get("sample_evidence"), supplied.get("sample_evidence")
-        )),
-        evidence_columns=_mapping(_first(
-            spec.get("sample_evidence_columns"), supplied.get("sample_evidence_columns")
-        )),
+        row_evidence=sample_evidence,
+        evidence_columns=sample_evidence_columns,
     )
     resolved["excluded_rows"] = _normalize_rows(
         base.get("excluded_rows"), input_sha256=input_sha, exclusions=exclusions,
-        row_evidence=_mapping(_first(
-            spec.get("sample_evidence"), supplied.get("sample_evidence")
-        )),
-        evidence_columns=_mapping(_first(
-            spec.get("sample_evidence_columns"), supplied.get("sample_evidence_columns")
-        )),
+        row_evidence=sample_evidence,
+        evidence_columns=sample_evidence_columns,
     )
-    resolved["sample_evidence_columns"] = _json_value(_mapping(_first(
-        spec.get("sample_evidence_columns"), supplied.get("sample_evidence_columns")
-    )))
+    resolved["sample_evidence_columns"] = _json_value(sample_evidence_columns)
     resolved["sample_evidence"] = {
         str(row.get("row_id") or row.get("id")): {
             key: value
@@ -721,14 +739,15 @@ def build_output_manifest(
     if grade != 1 or ctx.get("grade_i_justification"):
         if grade == 1:
             evidence("meci.3.4.1.justificativa_grau_i", "justificativa-grau-i")
-    if grade != 3 or (
+    if (
         elasticities.get("available") is True and not elasticities.get("reason")
         and elasticities.get("items") and elasticities.get("method")
         and _mapping(elasticities.get("coverage")).get("complete") is True
         and not _mapping(elasticities.get("coverage")).get("missing_variables")
     ):
-        if grade == 3:
-            evidence("abnt.9.2.1.1.elasticidades", "elasticidades-ponto-estimacao")
+        # The section can be represented for every fitted case.  The profile's
+        # applies_when rule still decides whether grade III makes it mandatory.
+        evidence("abnt.9.2.1.1.elasticidades", "elasticidades-ponto-estimacao")
     row_geolocation_complete = bool(used_rows) and all(
         _mapping(row.get("geolocation")).get("complete") is True
         and row.get("source_is_documentary") is True
