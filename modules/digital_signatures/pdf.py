@@ -66,6 +66,7 @@ def prepare_signature_request(
         "profile_id": str(profile_id),
         "private_key_handling": "external_to_modelapro",
         "technical_content_approval": False,
+        "synthetic_test_only": bool((report_context or {}).get("synthetic_test_only")),
     }
 
 
@@ -290,6 +291,7 @@ def record_external_signature(
         "external_evidence": external_result or None,
         "findings": findings,
         "technical_content_approval": False,
+        "synthetic_test_only": bool(request.get("synthetic_test_only")),
     }
 
 

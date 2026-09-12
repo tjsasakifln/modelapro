@@ -9,6 +9,7 @@ must be checked again and is otherwise a work document.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import io
 import zipfile
@@ -244,6 +245,10 @@ def _document_body(
         [
             _paragraph("Revisão e rastreabilidade", style="Heading1"),
             _paragraph(
+                "Profissional responsável / qualificação legal: "
+                f"{view.get('professional_identity_display')}"
+            ),
+            _paragraph(
                 f"Revisão profissional: {view.get('professional_review_display')}"
             ),
             _paragraph(
@@ -379,7 +384,32 @@ def verify_docx_equivalence(
     report_context: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Confirm that bytes are exactly the DOCX generated from this snapshot."""
-    expected = build_docx(snapshot, report_context)
+    comparison_snapshot = snapshot
+    comparison_context = report_context
+    qualification = (
+        ((snapshot.get("provenance") or {}).get("qualification_context") or {})
+        if isinstance(snapshot, Mapping)
+        else {}
+    )
+    if qualification.get("case_release_status") == "signed_integrity_verified":
+        # DOCX is frozen before external signing.  Verify it against the exact
+        # pre-signing state; do not rerender or pretend an editable document is
+        # itself signed.
+        comparison_snapshot = copy.deepcopy(dict(snapshot))
+        qctx = comparison_snapshot.setdefault("provenance", {}).setdefault(
+            "qualification_context", {}
+        )
+        qctx["case_release_status"] = "ready_for_professional_signoff"
+        qctx.pop("digital_signature", None)
+        comparison_context = dict(report_context or {})
+        for field in (
+            "digital_signature",
+            "signed_pdf_bytes",
+            "unsigned_pdf_bytes",
+            "signature_validation_context",
+        ):
+            comparison_context.pop(field, None)
+    expected = build_docx(comparison_snapshot, comparison_context)
     observed_sha = hashlib.sha256(docx_bytes).hexdigest()
     expected_sha = hashlib.sha256(expected).hexdigest()
     try:

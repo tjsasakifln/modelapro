@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import copy
 import hashlib
 import io
 import json
@@ -257,12 +258,32 @@ def build_submission_package(
     docx_bytes: Optional[bytes] = None,
     dossier_bytes: Optional[bytes] = None,
     requirement_map: Optional[Mapping[str, Any]] = None,
+    signed_pdf_bytes: Optional[bytes] = None,
 ) -> bytes:
     """Create a reproducible package containing neutral evidence and mapping."""
     state = assess_document_state(snapshot, report_context)
     if not bytes(pdf_bytes).startswith(b"%PDF"):
         raise ValueError("pdf_bytes is not a PDF")
-    pdf_check = verify_report_consistency(pdf_bytes, snapshot, report_context)
+    comparison_snapshot = snapshot
+    comparison_context = report_context
+    if state.get("case_release_status") == "signed_integrity_verified":
+        comparison_snapshot = copy.deepcopy(dict(snapshot))
+        qctx = comparison_snapshot.setdefault("provenance", {}).setdefault(
+            "qualification_context", {}
+        )
+        qctx["case_release_status"] = "ready_for_professional_signoff"
+        qctx.pop("digital_signature", None)
+        comparison_context = dict(report_context or {})
+        for field in (
+            "digital_signature",
+            "signed_pdf_bytes",
+            "unsigned_pdf_bytes",
+            "signature_validation_context",
+        ):
+            comparison_context.pop(field, None)
+    pdf_check = verify_report_consistency(
+        pdf_bytes, comparison_snapshot, comparison_context
+    )
     if not pdf_check.get("ok"):
         codes = ", ".join(
             item.get("code", "UNKNOWN") for item in pdf_check.get("findings") or []
@@ -279,7 +300,26 @@ def build_submission_package(
             require_complete=bool(state.get("is_final")),
         )
         if not dossier_check.get("ok"):
-            raise ValueError("dossier ZIP failed internal integrity verification")
+            codes = ", ".join(
+                str(item.get("code")) for item in dossier_check.get("findings") or []
+            )
+            raise ValueError(
+                "dossier ZIP failed internal integrity verification"
+                + (f": {codes}; {dossier_check.get('findings')}" if codes else "")
+            )
+    signature = dict(
+        (report_context or {}).get("digital_signature") or {}
+    ) if isinstance(report_context, Mapping) else {}
+    if signed_pdf_bytes is not None:
+        signed = bytes(signed_pdf_bytes)
+        if not signed.startswith(bytes(pdf_bytes)):
+            raise ValueError("signed PDF is not an incremental revision of report.pdf")
+        if hashlib.sha256(signed).hexdigest() != signature.get("signed_pdf_sha256"):
+            raise ValueError("signed PDF does not match the verified signature record")
+        if hashlib.sha256(bytes(pdf_bytes)).hexdigest() != signature.get("unsigned_pdf_sha256"):
+            raise ValueError("report.pdf does not match the signature request")
+    elif state.get("case_release_status") == "signed_integrity_verified":
+        raise ValueError("signed document state requires signed_pdf_bytes")
     req = dict(requirement_map or {})
     profile_id = str(state.get("profile", {}).get("id") or "")
     if req and str(req.get("profile_id") or "") != profile_id:
@@ -307,6 +347,8 @@ def build_submission_package(
         files["document/report.docx"] = bytes(docx_bytes)
     if dossier_bytes is not None:
         files["evidence/dossier.zip"] = bytes(dossier_bytes)
+    if signed_pdf_bytes is not None:
+        files["document/report.signed.pdf"] = bytes(signed_pdf_bytes)
     metadata = {
         "schema_version": "MP-SUBMISSION/1",
         "profile_id": profile_id or None,
@@ -324,6 +366,7 @@ def build_submission_package(
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "editable_report",
         ),
+        "document/report.signed.pdf": ("application/pdf", "cryptographically_signed_report"),
         "evidence/dossier.zip": ("application/zip", "audit_dossier"),
         "requirements/map.json": ("application/json", "institution_requirement_map"),
         "qualification/document_state.json": (
@@ -375,6 +418,11 @@ def verify_submission_package(package_bytes: bytes) -> Dict[str, Any]:
                 "document/report.pdf"
             ).startswith(b"%PDF"):
                 findings.append({"code": "SUBMISSION_REPORT_NOT_PDF"})
+            if "document/report.signed.pdf" in names:
+                signed = archive.read("document/report.signed.pdf")
+                unsigned = archive.read("document/report.pdf") if "document/report.pdf" in names else b""
+                if not signed.startswith(unsigned):
+                    findings.append({"code": "SUBMISSION_SIGNED_REPORT_BASE_MISMATCH"})
             if "document/report.docx" in names:
                 try:
                     with zipfile.ZipFile(

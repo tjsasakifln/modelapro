@@ -1132,6 +1132,27 @@ def build_report_view(
         or ""
     )
     approved_reviews = document_state.get("approved_review_events") or []
+    professional_identity = _as_mapping(ctx.get("professional_identity"))
+    professional_identity_display = " — ".join(
+        part
+        for part in (
+            _safe_text(professional_identity.get("name") or ""),
+            _safe_text(professional_identity.get("council") or ""),
+            _safe_text(professional_identity.get("registration") or ""),
+            (
+                "ART/RRT "
+                + _safe_text(
+                    professional_identity.get("art_rrt")
+                    or professional_identity.get("responsibility_document")
+                )
+                if professional_identity.get("art_rrt")
+                or professional_identity.get("responsibility_document")
+                else ""
+            ),
+            _safe_text(professional_identity.get("documentary_reference") or ""),
+        )
+        if part
+    )
     if approved_reviews:
         review = approved_reviews[-1]
         professional = _as_mapping(review.get("professional") or review.get("reviewer"))
@@ -1307,6 +1328,9 @@ def build_report_view(
         "methodology_display": _safe_text(methodology) or _pending("justificativa metodológica não informada"),
         "assumptions": [_safe_text(x) for x in _as_list(ctx.get("assumptions"))],
         "professional_review_display": professional_review_display,
+        "professional_identity": _redact_mapping(professional_identity),
+        "professional_identity_display": professional_identity_display
+        or "PENDENTE — qualificação legal do responsável não informada",
         "qualification_profile": qualification_profile,
         "qualification_profile_display": (
             " / ".join(

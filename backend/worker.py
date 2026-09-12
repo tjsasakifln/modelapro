@@ -36,7 +36,11 @@ from modules.result_contract import (
     request_spec_for_peers,
     validate_job_status_progress,
 )
-from modules.pro_workflow.report_context import aligned_fit_series, formula_from_coefficients
+from modules.pro_workflow.report_context import (
+    aligned_fit_series,
+    complete_report_context,
+    formula_from_coefficients,
+)
 from modules.pro_workflow.residual_state import (
     CALCULATION_VERSION,
     complete_residual_state_for_persist,
@@ -1396,6 +1400,11 @@ def compose_valuation_job(
         used_row_ids=used_row_ids,
         excluded_row_ids=excluded_row_ids,
         winner_fit=winner_fit,
+    )
+    report_context = complete_report_context(
+        report_context,
+        request_spec=spec,
+        subject_raw=context.get("subject_raw"),
     )
 
     snapshot_issues: List[dict] = []

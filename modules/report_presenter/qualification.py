@@ -59,7 +59,6 @@ PROFILE_FIELDS = (
     "value_basis",
     "method",
     "asset_scope",
-    "recipient_id",
 )
 RULE_FIELDS = (
     "rule_id",
@@ -149,14 +148,31 @@ def report_content_fingerprint(
     qctx = _mapping(provenance.get("qualification_context"))
     for field in (
         "review_events",
+        "stale_review_events",
         "digital_signature",
+        "report_content_fingerprint",
+        "signed_bytes_sha256",
         "institution_acceptance",
         "case_release_status",
+        "release_blockers",
+        "pending_manual_rules",
+        "claims",
     ):
         qctx.pop(field, None)
     if qctx:
         provenance["qualification_context"] = qctx
     snap["provenance"] = provenance
+    validation = _mapping(snap.get("validation"))
+    issuance = _mapping(validation.get("issuance"))
+    # These are derived lifecycle labels. Including them would make the act of
+    # recording a review change the content identity that the review binds.
+    issuance.pop("status", None)
+    issuance.pop("case_release_status", None)
+    if issuance:
+        validation["issuance"] = issuance
+    else:
+        validation.pop("issuance", None)
+    snap["validation"] = validation
     ctx = _mapping(_fingerprint_value(report_context or {}))
     for field in (
         "digital_signature",
@@ -178,11 +194,26 @@ def signable_snapshot_sha256(snapshot: Mapping[str, Any]) -> str:
     snap = _fingerprint_value(snapshot)
     provenance = _mapping(snap.get("provenance"))
     qctx = _mapping(provenance.get("qualification_context"))
-    for field in ("digital_signature", "institution_acceptance", "case_release_status"):
+    for field in (
+        "digital_signature",
+        "institution_acceptance",
+        "case_release_status",
+        "signed_bytes_sha256",
+        "claims",
+    ):
         qctx.pop(field, None)
     if qctx:
         provenance["qualification_context"] = qctx
     snap["provenance"] = provenance
+    validation = _mapping(snap.get("validation"))
+    issuance = _mapping(validation.get("issuance"))
+    issuance.pop("status", None)
+    issuance.pop("case_release_status", None)
+    if issuance:
+        validation["issuance"] = issuance
+    else:
+        validation.pop("issuance", None)
+    snap["validation"] = validation
     return hashlib.sha256(canonical_json(snap).encode("utf-8")).hexdigest()
 
 
@@ -419,7 +450,19 @@ def assess_document_state(
         rule = _mapping(raw)
         status = _text(rule.get("status")).lower()
         rule_results.append(rule)
-        missing_rule_fields = [name for name in RULE_FIELDS if _empty(rule.get(name))]
+        material_optional_fields = {"observed", "criterion_ref", "evidence_refs"}
+        missing_rule_fields = [
+            name
+            for name in RULE_FIELDS
+            if (
+                name not in rule
+                or (name not in material_optional_fields and _empty(rule.get(name)))
+                or (
+                    name == "evidence_refs"
+                    and not isinstance(rule.get(name), (list, tuple))
+                )
+            )
+        ]
         if missing_rule_fields:
             blockers.append(
                 {
@@ -441,11 +484,14 @@ def assess_document_state(
                 }
             )
         elif status in BLOCKING_RULE_STATUSES:
-            blockers.append(
+            # C05 is the release authority.  A non-passing rule remains fully
+            # visible here, but C03 must not silently broaden the catalogue's
+            # decisive set or contradict C05's release decision.
+            warnings.append(
                 {
-                    "code": "QUALIFICATION_RULE_BLOCKING",
+                    "code": "QUALIFICATION_RULE_NONPASS",
                     "path": f"provenance.qualification_context.rule_results[{index}]",
-                    "message": f"Regra {rule.get('rule_id') or index} está {status}.",
+                    "message": f"Regra {rule.get('rule_id') or index} permanece {status}.",
                     "rule_id": rule.get("rule_id"),
                     "status": status,
                 }
@@ -466,6 +512,28 @@ def assess_document_state(
                 "code": "QUALIFICATION_RULES_MISSING",
                 "path": "provenance.qualification_context.rule_results",
                 "message": "Nenhum resultado de regra foi fornecido pelo classificador canônico.",
+            }
+        )
+
+    for producer_blocker in _list(qctx.get("release_blockers")):
+        row = _mapping(producer_blocker)
+        blockers.append(
+            {
+                "code": _text(row.get("code")) or "QUALIFICATION_RELEASE_BLOCKED",
+                "path": "provenance.qualification_context.release_blockers",
+                "message": _text(row.get("detail") or row.get("message"))
+                or "C05 registrou impedimento de liberação.",
+                **{key: value for key, value in row.items() if key not in {"code", "detail", "message"}},
+            }
+        )
+    pending_manual = [str(item) for item in _list(qctx.get("pending_manual_rules"))]
+    if pending_manual and _text(qctx.get("case_release_status")).lower() in FINAL_RELEASE_STATES:
+        blockers.append(
+            {
+                "code": "PENDING_MANUAL_RULES_IN_FINAL_STATE",
+                "path": "provenance.qualification_context.pending_manual_rules",
+                "message": "Estado final contradiz regras manuais pendentes preservadas por C05.",
+                "rule_ids": pending_manual,
             }
         )
 
@@ -552,6 +620,29 @@ def assess_document_state(
                 }
             )
         blockers.extend(_row_evidence_blockers(sample, ctx))
+        attachment_issues = []
+        for item in _list(ctx.get("documentary_files")):
+            attachment = _mapping(item)
+            if not attachment.get("authorized_for_report"):
+                attachment_issues.append(
+                    {"filename": attachment.get("filename"), "state": "not_authorized_for_report"}
+                )
+            elif _text(attachment.get("attachment_state")) != "available":
+                attachment_issues.append(
+                    {
+                        "filename": attachment.get("filename"),
+                        "state": _text(attachment.get("attachment_state")) or "bytes_not_available",
+                    }
+                )
+        if attachment_issues:
+            blockers.append(
+                {
+                    "code": "DOCUMENTARY_ATTACHMENT_UNAVAILABLE",
+                    "path": "report_context.documentary_files",
+                    "message": "Anexo documental sem autorização ou sem bytes íntegros no armazenamento.",
+                    "attachments": attachment_issues,
+                }
+            )
 
     review_events = [_mapping(item) for item in _list(qctx.get("review_events"))]
     expected_fingerprint = _text(qctx.get("result_fingerprint"))
@@ -623,6 +714,9 @@ def assess_document_state(
         document_kind = "Minuta técnica — emissão profissional bloqueada"
     else:
         document_kind = "Minuta de análise técnica — qualificação não fornecida"
+    synthetic_test_only = bool(ctx.get("synthetic_test_only"))
+    if synthetic_test_only:
+        document_kind = "TESTE — " + document_kind
 
     return {
         "is_final": is_final,
@@ -633,6 +727,9 @@ def assess_document_state(
         "profile": profile,
         "rule_results": rule_results,
         "review_events": review_events,
+        "stale_review_events": [
+            _mapping(item) for item in _list(qctx.get("stale_review_events"))
+        ],
         "approved_review_events": approved_reviews,
         "institution_acceptance": _mapping(qctx.get("institution_acceptance")),
         "result_fingerprint": _text(qctx.get("result_fingerprint")),
@@ -640,4 +737,5 @@ def assess_document_state(
         "blockers": blockers,
         "warnings": warnings,
         "signature": signature,
+        "synthetic_test_only": synthetic_test_only,
     }

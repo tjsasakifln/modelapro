@@ -42,7 +42,12 @@ def test_a01_final_requires_qualified_state_and_real_review_event():
     assert pending_state["is_final"] is False
     pending_text = extract_pdf_text(render_report(pending, context))
     assert "emissão profissional bloqueada" in pending_text
-    assert "QUALIFICATION_RULE_BLOCKING" in pending_text
+    # C03 reports the changed rule but does not invent a decisive-set policy
+    # that belongs to C05. The material mutation still invalidates the bound
+    # review/report fingerprint and therefore cannot remain final.
+    assert "QUALIFICATION_RULE_NONPASS" in {
+        warning["code"] for warning in pending_state["warnings"]
+    }
 
 
 def test_a01_review_is_bound_to_result_and_full_report_content():

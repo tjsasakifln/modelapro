@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 import math
+import posixpath
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -52,6 +55,7 @@ from .provenance import (
 from .report_presenter.qualification import signable_snapshot_sha256
 
 MANIFEST_NAME = "MANIFEST.json"
+_ZIP_TIME = (2020, 1, 1, 0, 0, 0)
 CSV_DELIMITER = ","
 CSV_QUOTECHAR = '"'
 CSV_LINETERMINATOR = "\n"
@@ -883,6 +887,251 @@ def build_evidence_bundle(
     return manifest
 
 
+def refresh_evidence_bundle_archive(
+    bundle_bytes: bytes,
+    *,
+    snapshot: Mapping[str, Any],
+    report_pdf: bytes,
+    report_docx: bytes,
+    signature_record: Optional[Mapping[str, Any]] = None,
+    signed_report_pdf: Optional[bytes] = None,
+    documentary_files: Sequence[Mapping[str, Any]] = (),
+) -> bytes:
+    """Refresh document/review/signature evidence in an existing C12 archive.
+
+    The worker is the only component that still has the parsed/raw tables and
+    fitted encoder in memory, so post-review document operations must update
+    its already-built dossier instead of reconstructing those facts.  Every
+    replaced member is re-hashed in ``MANIFEST.json`` and the original tables,
+    policies and reproduction inputs remain byte-identical.
+    """
+    if not bytes(report_pdf).startswith(b"%PDF"):
+        raise ValueError("report_pdf is not a PDF")
+    if signed_report_pdf is not None and signature_record is None:
+        raise ValueError("signed_report_pdf requires signature_record")
+    if signature_record is not None and signed_report_pdf is None:
+        raise ValueError("signature_record requires signed_report_pdf")
+
+    members: Dict[str, bytes] = {}
+    try:
+        with zipfile.ZipFile(io.BytesIO(bundle_bytes), "r") as archive:
+            if archive.testzip() is not None:
+                raise ValueError("evidence bundle has a CRC error")
+            for info in archive.infolist():
+                name = info.filename.replace("\\", "/")
+                if (
+                    not name
+                    or name.startswith("/")
+                    or posixpath.normpath(name) != name
+                    or name.startswith("../")
+                    or "/../" in name
+                    or info.is_dir()
+                ):
+                    raise ValueError(f"unsafe evidence bundle member: {info.filename!r}")
+                members[name] = archive.read(info)
+    except zipfile.BadZipFile as exc:
+        raise ValueError("evidence bundle is not a ZIP archive") from exc
+
+    if MANIFEST_NAME not in members:
+        raise ValueError("evidence bundle MANIFEST.json missing")
+    try:
+        manifest = json.loads(members[MANIFEST_NAME].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("evidence bundle manifest is invalid") from exc
+    if manifest.get("schema_version") != SCHEMA_VERSION_MP or not str(
+        manifest.get("bundle_version") or ""
+    ).startswith("C12/"):
+        raise ValueError("unsupported evidence bundle schema")
+
+    qctx = _as_mapping(_as_mapping(snapshot.get("provenance")).get("qualification_context"))
+    review_events = list(qctx.get("review_events") or [])
+    replacements: Dict[str, Tuple[bytes, str, str, str]] = {
+        "snapshot/result_snapshot.json": (
+            canonical_json(dict(snapshot)).encode("utf-8"),
+            "application/json",
+            str(snapshot.get("schema_version") or SCHEMA_VERSION_MP),
+            "frozen_result_snapshot",
+        ),
+        "qualification/context.json": (
+            canonical_json(qctx).encode("utf-8"),
+            "application/json",
+            str(qctx.get("schema_version") or "MP-QUAL/1"),
+            "qualification_context",
+        ),
+        "review/history.json": (
+            canonical_json({"events": review_events}).encode("utf-8"),
+            "application/json",
+            "MP-QUAL/1",
+            "review_history",
+        ),
+        "artifacts/report.pdf": (
+            bytes(report_pdf),
+            "application/pdf",
+            SCHEMA_VERSION_MP,
+            "c08_report_pdf",
+        ),
+        "artifacts/report.docx": (
+            bytes(report_docx),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            SCHEMA_VERSION_MP,
+            "editable_report_same_snapshot",
+        ),
+    }
+    if signature_record is not None and signed_report_pdf is not None:
+        replacements.update(
+            {
+                "signature/verification.json": (
+                    canonical_json(dict(signature_record)).encode("utf-8"),
+                    "application/json",
+                    str(signature_record.get("schema_version") or "MP-SIGN/1"),
+                    "signature_record",
+                ),
+                "artifacts/signed_report.pdf": (
+                    bytes(signed_report_pdf),
+                    "application/pdf",
+                    SCHEMA_VERSION_MP,
+                    "signed_report_exact_bytes",
+                ),
+            }
+        )
+    else:
+        members.pop("signature/verification.json", None)
+        members.pop("artifacts/signed_report.pdf", None)
+
+    # Attachments are accepted only when the document workflow has loaded the
+    # exact bytes back from JobStore and their declared digest still matches.
+    # Existing worker-owned input evidence remains untouched.
+    attachment_paths: List[str] = []
+    for index, raw_file in enumerate(documentary_files):
+        item = _as_mapping(raw_file)
+        data = item.get("bytes")
+        if not isinstance(data, (bytes, bytearray)):
+            continue
+        payload = bytes(data)
+        digest = hashlib.sha256(payload).hexdigest()
+        declared_digest = str(item.get("sha256") or "")
+        if declared_digest and declared_digest != digest:
+            raise ValueError("documentary attachment hash mismatch")
+        filename = sanitize_internal_name(
+            str(item.get("filename") or f"document_{index + 1}.bin")
+        )
+        path = f"artifacts/documents/{index + 1:03d}-{filename}"
+        attachment_paths.append(path)
+        replacements[path] = (
+            payload,
+            str(item.get("media_type") or item.get("type") or "application/octet-stream"),
+            SCHEMA_VERSION_MP,
+            "authorized_documentary_attachment",
+        )
+
+    listed = {
+        str(item.get("path")): dict(item)
+        for item in manifest.get("files") or []
+        if isinstance(item, Mapping) and item.get("path")
+    }
+    for path, (data, media_type, version, function) in replacements.items():
+        members[path] = data
+        listed[path] = {
+            "path": path,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
+            "type": media_type,
+            "version": version,
+            "function": function,
+        }
+    for path in ("signature/verification.json", "artifacts/signed_report.pdf"):
+        if path not in members:
+            listed.pop(path, None)
+
+    ledger_path = "completeness/ledger.json"
+    if ledger_path not in members:
+        raise ValueError("evidence bundle completeness ledger missing")
+    try:
+        ledger = json.loads(members[ledger_path].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("evidence bundle completeness ledger is invalid") from exc
+    by_component = {
+        str(item.get("component")): dict(item)
+        for item in ledger.get("items") or []
+        if isinstance(item, Mapping) and item.get("component")
+    }
+
+    def mark(component: str, status: str, source: str, notes: str = "") -> None:
+        row = by_component.get(component, {"component": component})
+        row.update(
+            {
+                "status": status,
+                "declared": True,
+                "source": source,
+                "notes": notes,
+                "evidence": {},
+            }
+        )
+        row.pop("absence_kind", None)
+        by_component[component] = row
+
+    mark("frozen_snapshot", COMPLETENESS_VERIFIED, "snapshot.schema_version")
+    mark("qualification_context", COMPLETENESS_PRESENT, "snapshot.provenance.qualification_context")
+    mark("report_artifact", COMPLETENESS_PRESENT, "artifacts.report_pdf")
+    mark("docx_artifact", COMPLETENESS_PRESENT, "artifacts.report_docx")
+    if review_events:
+        mark("review_history", COMPLETENESS_PRESENT, "qualification.review_events")
+    if signature_record is not None:
+        mark("signature_record", COMPLETENESS_PRESENT, "signature/verification.json")
+    if attachment_paths:
+        mark(
+            "photos_documents",
+            COMPLETENESS_PRESENT,
+            ",".join(attachment_paths),
+            "Arquivos documentais autorizados e vinculados por SHA-256.",
+        )
+    ledger["items"] = sorted(by_component.values(), key=lambda item: str(item.get("component")))
+    statuses = [item.get("status") for item in ledger["items"]]
+    ledger["counts"] = {
+        status: statuses.count(status)
+        for status in (
+            COMPLETENESS_DECLARED,
+            COMPLETENESS_MISSING,
+            COMPLETENESS_PRESENT,
+            COMPLETENESS_VERIFIED,
+        )
+    }
+    ledger["missing"] = [
+        item.get("component")
+        for item in ledger["items"]
+        if item.get("status") == COMPLETENESS_MISSING
+    ]
+    ledger_bytes = canonical_json(ledger).encode("utf-8")
+    members[ledger_path] = ledger_bytes
+    old_ledger = listed.get(ledger_path, {})
+    listed[ledger_path] = {
+        "path": ledger_path,
+        "sha256": hashlib.sha256(ledger_bytes).hexdigest(),
+        "size": len(ledger_bytes),
+        "type": old_ledger.get("type") or "application/json",
+        "version": old_ledger.get("version") or BUNDLE_VERSION,
+        "function": old_ledger.get("function") or "completeness_ledger",
+    }
+
+    manifest["files"] = sorted(listed.values(), key=lambda item: item["path"])
+    manifest["snapshot_sha256"] = hashlib.sha256(
+        members["snapshot/result_snapshot.json"]
+    ).hexdigest()
+    manifest["completeness_status"] = "complete" if not ledger["missing"] else "incomplete"
+    manifest["completeness_missing"] = ledger["missing"]
+    manifest["completeness_summary"] = ledger["counts"]
+    members[MANIFEST_NAME] = canonical_json(manifest).encode("utf-8")
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        for name in sorted(members):
+            info = zipfile.ZipInfo(name, _ZIP_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            archive.writestr(info, members[name])
+    return out.getvalue()
+
+
 def verify_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
     """Verify on-disk integrity. Never executes package content."""
     root = Path(bundle_dir).resolve()
@@ -1555,6 +1804,14 @@ def _as_mapping(value: Any) -> Dict[str, Any]:
         return {}
     if isinstance(value, Mapping):
         return dict(value)
+    # InputBundle predates the Mapping subclass used by PreparedDataset but
+    # deliberately exposes a side-effect-free to_dict()/keys()/get protocol.
+    # Reject arbitrary objects; accept only this explicit producer contract.
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        converted = to_dict()
+        if isinstance(converted, Mapping):
+            return dict(converted)
     return {}
 
 
