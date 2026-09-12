@@ -116,6 +116,31 @@ def test_docx_served_with_office_mime_and_attachment(installation):
     assert response.headers["content-disposition"] == 'attachment; filename="report.docx"'
 
 
+def test_saved_revision_uses_linked_job_not_edited_form_or_other_snapshot(installation):
+    from backend import api
+    client, headers, _ = installation
+    jobs = api.get_job_store()
+    job = jobs.create(payload={"synthetic_test_only": True})
+    jid = job["job_id"]
+    frozen = {"schema_version": "MP/1", "request_spec": {"reference_date": "2026-09-12"},
+              "model_state": {"coefficients": [1, 2]}, "value": {"point": 920}}
+    snapshot = {"schema_version": "MP/1", "job_id": jid, "value": {"point": 920}}
+    jobs.save_snapshot(jid, snapshot)
+    jobs.save_artifact(jid, "frozen_project.json", json.dumps(frozen).encode())
+    url = "/projects/SYNTHETIC_TEST/revisions"
+    for delta in ({"request_spec": {"reference_date": "2020-01-01"}},
+                  {"value": {"point": 999}}, {"model_state": {"coefficients": [9, 9]}},
+                  {"snapshot_ref": {"job_id": "other"}}):
+        assert client.post(url, headers=headers, json={"job_id": jid, **delta}).status_code == 409
+    result = client.post(url, headers=headers, json={"job_id": jid, "snapshot_ref": {"job_id": jid}})
+    assert result.status_code == 201, result.text
+    revision = api.get_project_store().load_revision("SYNTHETIC_TEST", result.json()["revision_id"])
+    assert revision["request_spec"] == frozen["request_spec"]
+    assert revision["value"] == snapshot["value"]
+    assert revision["model_state"] == frozen["model_state"]
+    assert len(revision["frozen_project_sha256"]) == len(revision["snapshot_sha256"]) == 64
+
+
 def test_license_body_cap_precedes_parser_with_length_and_chunked(installation):
     client, headers, _ = installation
     assert client.post("/operations/license", content=b"x" * 65537, headers=headers).status_code == 413

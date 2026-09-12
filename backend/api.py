@@ -809,7 +809,7 @@ async def preview(
 
 @app.post("/jobs")
 async def create_job(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
     request_json: str = Form(...),
     subject_json: Optional[str] = Form(None),
     project_id: Optional[str] = Form(None),
@@ -820,8 +820,16 @@ async def create_job(
     ok, issues = subject_numeric_values_finite(subject)
     if not ok:
         return _issues_response(400, "subject contains non-finite numbers", issues)
-    file_bytes = await read_upload_limited(file, _max_upload_bytes())
-    filename = file.filename or "upload.bin"
+    is_cost = (spec.get("qualification_profile") or {}).get("id") == "abnt-14653-2-custo-reedicao"
+    if file is None:
+        if not is_cost or not isinstance(spec.get("cost_bom"), Mapping):
+            raise HTTPException(400, "market sample is required outside the cost workflow")
+        file_bytes, filename = b"", "cost-bom.json"
+    else:
+        if is_cost:
+            raise HTTPException(400, "cost inputs belong in cost_bom, not a regression sample")
+        file_bytes = await read_upload_limited(file, _max_upload_bytes())
+        filename = file.filename or "upload.bin"
     job_store, runner = _require_c11()
     key = submission_key(file_bytes, spec, subject)
     payload = {
@@ -1103,6 +1111,33 @@ async def save_project_revision(project_id: str, request: Request):
             "revision payload must be a mapping",
             [make_issue("TYPE_ERROR", "revision payload must be a mapping", origin="c10.api")],
         )
+    payload = dict(payload)
+    snapshot_ref = payload.get("snapshot_ref") or {}
+    if not isinstance(snapshot_ref, Mapping):
+        raise HTTPException(400, "snapshot_ref must be an object")
+    linked_job = payload.get("job_id") or snapshot_ref.get("job_id")
+    if payload.get("job_id") and snapshot_ref.get("job_id") not in (None, payload["job_id"]):
+        raise HTTPException(409, "revision refers to different jobs")
+    if linked_job:
+        jobs = get_job_store()
+        record = jobs.get(linked_job) if jobs is not None else None
+        frozen_bytes = jobs.get_artifact(linked_job, "frozen_project.json") if record else None
+        snapshot = jobs.get_snapshot(linked_job) if record else None
+        if frozen_bytes is None or snapshot is None:
+            raise HTTPException(409, "linked job needs a persisted snapshot and frozen project")
+        frozen = json.loads(frozen_bytes)
+        canonical = dict(frozen)
+        canonical["job_id"] = linked_job
+        canonical["snapshot_ref"] = {"job_id": linked_job}
+        canonical["frozen_project_sha256"] = sha256_bytes(frozen_bytes)
+        canonical["snapshot_sha256"] = sha256_bytes(dumps_strict(snapshot).encode("utf-8"))
+        for key in ("request_spec", "model_state", "encoder_state", "feature_schema", "provenance", "value"):
+            if key in payload and payload[key] != canonical.get(key):
+                raise HTTPException(409, f"revision {key} differs from the linked calculation")
+        for key in ("note", "revision_id", "project_id"):
+            if key in payload:
+                canonical[key] = payload[key]
+        payload = canonical
     saver = getattr(store, "save_revision", None)
     if not callable(saver):
         return _issues_response(

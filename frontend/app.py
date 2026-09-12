@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 def _import_components():
     try:
+        from components.cost import cost_form
         from components.documents import render_document_workflow
         from components.charts import render_charts, render_snapshot_charts
         from components.forms import (
@@ -70,6 +71,7 @@ def _import_components():
         )
         return locals()
     except ImportError:
+        from frontend.components.cost import cost_form
         from frontend.components.documents import render_document_workflow
         from frontend.components.charts import render_charts, render_snapshot_charts
         from frontend.components.forms import (
@@ -274,7 +276,9 @@ def main() -> None:
         persist_client_to_session(st.session_state, client)
         return
 
-    form = upload_form(preview_provider=_preview_provider_for(client))
+    cost_mode = st.radio("Percurso de cálculo", ["Amostra de mercado", "Quantificação de custo"],
+                         horizontal=True, key="c06_calculation_path") == "Quantificação de custo"
+    form = _COMP["cost_form"]() if cost_mode else upload_form(preview_provider=_preview_provider_for(client))
     persist_client_to_session(st.session_state, client)
     if form.get("stale_reason"):
         st.session_state["p02_result_stale_reason"] = form["stale_reason"]
@@ -335,7 +339,7 @@ def main() -> None:
         elif not dispatch.get("ok"):
             for item in dispatch.get("blocking") or []:
                 st.error(item.get("message") or "Disparo recusado.")
-        elif uploaded is None or spec is None:
+        elif (uploaded is None and not form.get("cost_mode")) or spec is None:
             st.error("Arquivo e especificação são necessários para executar.")
         elif should_block_duplicate_submit(
             current_fingerprint=form.get("fingerprint"),
@@ -353,8 +357,8 @@ def main() -> None:
         else:
             try:
                 response = client.submit_job(
-                    uploaded.getvalue(),
-                    uploaded.name,
+                    uploaded.getvalue() if uploaded is not None else None,
+                    uploaded.name if uploaded is not None else "",
                     spec,
                     subject=subject,
                     content_type=getattr(uploaded, "type", None) or "application/octet-stream",
@@ -526,10 +530,6 @@ def main() -> None:
                         "schema_version": "MP/1",
                         "job_id": client.job_id,
                         "snapshot_ref": {"job_id": client.job_id},
-                        "request_spec": form.get("request_spec") or client.last_request_spec,
-                        "justified_exclusions": form.get("justified_exclusions") or [],
-                        "inspection": form.get("inspection"),
-                        "professional_identity": form.get("professional_identity"),
                     },
                 )
                 st.success(f"Nova revisão registrada: {saved.get('revision_id') or saved} (a anterior permanece).")
