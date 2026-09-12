@@ -11,7 +11,9 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import uvicorn
 
+from c15_local import launcher as launcher_module
 from c15_local.launcher import (
     _entrypoint,
     backend_command,
@@ -48,6 +50,26 @@ def test_backend_command_is_uvicorn_on_loopback():
     assert "backend.api:app" in cmd
     assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
     assert "0.0.0.0" not in cmd
+
+
+def test_internal_api_disables_uvicorn_console_formatter(monkeypatch):
+    from types import SimpleNamespace
+
+    captured = {}
+    monkeypatch.setattr(
+        launcher_module,
+        "_config",
+        lambda: SimpleNamespace(API_HOST="127.0.0.1", API_PORT=8000),
+    )
+    monkeypatch.setattr(launcher_module, "ensure_local_directories", lambda _cfg: None)
+    monkeypatch.setattr(
+        "modules.operacao_local.runtime.get_security_policy", lambda: object()
+    )
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: captured.update(kwargs))
+
+    assert launcher_module.main_api([]) == 0
+    assert captured["access_log"] is False
+    assert captured["log_config"] is None
 
 
 def test_print_commands_json_matches_helpers():
