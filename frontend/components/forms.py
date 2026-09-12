@@ -68,6 +68,14 @@ VALID_LOCALES = ("auto", "pt-BR", "en-US")
 ACTIVE_JOB_STATES = frozenset({"queued", "running"})
 TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "cancelled", "interrupted"})
 
+PROFESSIONAL_FINDING_RULES = (
+    ("anexoA.2.f.variaveis_relevantes", "Variáveis relevantes e interações"),
+    ("anexoA.2.g.multicolinearidade", "Coerência do avaliando com a multicolinearidade"),
+    ("anexoA.2.h.residuos_vs_independentes", "Resíduos versus variáveis independentes"),
+    ("anexoA.2.i.pontos_influenciantes", "Pontos influenciantes"),
+    ("anexoA.8.agrupamentos", "Agrupamentos e interações"),
+)
+
 PREVIEW_CONNECTION_ERROR = (
     "Erro de conexão: não foi possível obter a prévia da interpretação. "
     "A interface não inventa uma leitura local alternativa, porque ela "
@@ -357,6 +365,8 @@ def build_request_spec(
     asset_scope: Optional[str] = None,
     qualification_profile: Optional[Mapping[str, Any]] = None,
     justified_exclusions: Optional[Sequence[Mapping[str, Any]]] = None,
+    profile_evidence: Optional[Mapping[str, Any]] = None,
+    professional_findings: Optional[Mapping[str, Any]] = None,
 ) -> dict:
     """Monta RequestSpec MP/1. Não presume BRL, BRL/m² nem data de hoje.
 
@@ -447,6 +457,13 @@ def build_request_spec(
         spec["qualification_profile"] = qualification_profile_wire(qualification_profile)
     if justified_exclusions:
         spec["justified_exclusions"] = [dict(item) for item in justified_exclusions]
+    if profile_evidence:
+        spec["profile_evidence"] = dict(profile_evidence)
+    if professional_findings:
+        spec["professional_findings"] = {
+            str(rule_id): dict(finding) if isinstance(finding, Mapping) else finding
+            for rule_id, finding in professional_findings.items()
+        }
     return spec
 
 
@@ -1467,6 +1484,66 @@ def _vistoria_and_identity_widgets(*, ns: str, inspection_date: Optional[str]) -
     return {"inspection": inspection, "identity": identity}
 
 
+def _qualification_evidence_widgets(*, ns: str, profile: Mapping[str, Any]) -> dict:
+    """Collect C05 evidence and professional findings without asserting validity.
+
+    Profile evidence is an auditable reference supplied by the professional. It
+    is not a boolean approval. Non-automatable assumptions carry an explicit
+    satisfied/violated decision and a justification; blank/pending entries stay
+    absent and therefore remain pending in C05.
+    """
+    profile_evidence: dict[str, str] = {}
+    professional_findings: dict[str, dict[str, Any]] = {}
+    with st.expander("Evidências do perfil e achados profissionais", expanded=False):
+        st.caption(
+            "Referências vazias não cumprem requisitos. Identifique o arquivo ou "
+            "registro íntegro; a emissão posterior deve carregar os bytes autorizados."
+        )
+        for requirement in profile.get("requirements") or []:
+            if not isinstance(requirement, Mapping) or not requirement.get("id"):
+                continue
+            requirement_id = str(requirement["id"])
+            evidence_ref = st.text_input(
+                f"Referência de evidência — {requirement_id}",
+                value="",
+                key=f"p02_{ns}_profile_evidence_{requirement_id}",
+                help=str(requirement.get("requirement") or ""),
+            ).strip()
+            if evidence_ref:
+                profile_evidence[requirement_id] = evidence_ref
+
+        st.markdown("##### Exames profissionais dos pressupostos")
+        st.caption(
+            "A conclusão é um ato informado pelo profissional, não inferido pelo software. "
+            "Sem justificativa registrada, a regra permanece pendente."
+        )
+        for rule_id, label in PROFESSIONAL_FINDING_RULES:
+            decision = st.selectbox(
+                f"Conclusão profissional — {label}",
+                options=("pending", "satisfied", "violated"),
+                format_func=lambda value: {
+                    "pending": "Pendente — nenhuma conclusão registrada",
+                    "satisfied": "Satisfeito — conclusão do profissional",
+                    "violated": "Violado — conclusão do profissional",
+                }[value],
+                key=f"p02_{ns}_professional_finding_{rule_id}",
+            )
+            justification = st.text_area(
+                f"Justificativa profissional — {label}",
+                value="",
+                key=f"p02_{ns}_professional_justification_{rule_id}",
+            ).strip()
+            if decision != "pending":
+                professional_findings[rule_id] = {
+                    "satisfied": decision == "satisfied",
+                    "justification": justification,
+                }
+    return {
+        "profile_evidence": profile_evidence,
+        "professional_findings": professional_findings,
+    }
+
+
 def upload_form(
     preview_provider: Optional[Callable[..., dict]] = None,
     cached_preview: Optional[Mapping[str, Any]] = None,
@@ -1889,6 +1966,10 @@ def upload_form(
 
     item1_ref = st.text_input("Evidência da caracterização do avaliando", key=f"p02_{ns}_item1_ref")
     item3_ref = st.text_input("Evidência da identificação dos dados de mercado", key=f"p02_{ns}_item3_ref")
+    qualification_evidence = _qualification_evidence_widgets(
+        ns=ns,
+        profile=encomenda_state.get("profile") or {},
+    )
     request_spec = build_request_spec(
         target_col=target_col,
         candidate_cols=candidate_cols,
@@ -1916,6 +1997,8 @@ def upload_form(
         asset_scope=encomenda_state.get("asset_scope"),
         qualification_profile=encomenda_state.get("profile"),
         justified_exclusions=exclusions,
+        profile_evidence=qualification_evidence["profile_evidence"],
+        professional_findings=qualification_evidence["professional_findings"],
     )
 
     policies = policies_on_the_wire(request_spec)

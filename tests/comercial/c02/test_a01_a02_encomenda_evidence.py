@@ -196,3 +196,29 @@ def test_recipient_neutral_profile_does_not_emit_an_empty_recipient_id():
     assert wire["recipient_id"] is None
     validated = validate_request_spec(_spec(qualification_profile=selected))
     assert validated["qualification_profile"]["recipient_id"] is None
+
+
+def test_request_spec_carries_evidenced_profile_requirements_and_professional_findings():
+    """The UI transports C05 inputs without manufacturing a generic valid flag."""
+    profile_evidence = {
+        "parte1.6.3.vistoria": "SYNTHETIC_TEST_vistoria.pdf#sha256=abc",
+    }
+    professional_findings = {
+        "anexoA.2.f.variaveis_relevantes": {
+            "satisfied": True,
+            "justification": "SYNTHETIC_TEST: exame registrado no laudo de teste",
+        },
+    }
+
+    validated = validate_request_spec(
+        _spec(
+            profile_evidence=profile_evidence,
+            professional_findings=professional_findings,
+        )
+    )
+
+    assert validated["profile_evidence"] == profile_evidence
+    assert validated["professional_findings"] == professional_findings
+    assert "valid" not in validated["professional_findings"][
+        "anexoA.2.f.variaveis_relevantes"
+    ]
