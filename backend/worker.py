@@ -41,6 +41,7 @@ from modules.pro_workflow.report_context import (
     complete_report_context,
     formula_from_coefficients,
 )
+from modules.pro_workflow.numeric_disclosure import build_numeric_disclosure
 from modules.pro_workflow.residual_state import (
     CALCULATION_VERSION,
     complete_residual_state_for_persist,
@@ -1042,6 +1043,7 @@ def _normative_context_from_fit(
     spec: Mapping[str, Any],
     subject_raw: Optional[Mapping[str, Any]],
     predict_original: Callable[[Any], Any],
+    numeric_disclosure: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build a C03 context from the live CandidateFit + prepared sample.
 
@@ -1087,6 +1089,12 @@ def _normative_context_from_fit(
             amplitude = None
     statistical = _as_dict(_get(assessment, "statistical")) or {}
     statistical = dict(statistical)
+    numeric_statistical = _as_dict(
+        _get(numeric_disclosure, "normative_statistical")
+    ) or {}
+    for key, value in numeric_statistical.items():
+        if value is not None:
+            statistical[key] = value
     statistical.setdefault("n", n)
     statistical.setdefault("k", k)
     statistical.setdefault("automatic_selection", False)
@@ -1677,6 +1685,13 @@ def compose_valuation_job(
         result = evaluate(winner_fit, design, spec)
         return {"point": _point_from(result)}
 
+    numeric_disclosure = build_numeric_disclosure(
+        winner_fit,
+        prepared,
+        subject_raw=context.get("subject_raw"),
+        predict_original=predict_original,
+    )
+
     emit(STAGE_NORMATIVE, None)
     # Always feed C03 from the live CandidateFit + prepared sample. Nested
     # assessment.normative from a partial search record is not sufficient.
@@ -1689,6 +1704,7 @@ def compose_valuation_job(
                 spec,
                 context.get("subject_raw"),
                 predict_original,
+                numeric_disclosure,
             )
         )
     else:
@@ -1750,7 +1766,12 @@ def compose_valuation_job(
 
     value_block = _value_from_assessment(assessment, snapshot_issues)
     # Map normativa/estatística; do not recompute classifications.
-    mapped_validation = _map_validation(normative, assessment, procedure)
+    mapped_validation = _map_validation(
+        normative,
+        assessment,
+        procedure,
+        numeric_disclosure=numeric_disclosure,
+    )
 
     profile = spec.get("qualification_profile") if isinstance(spec.get("qualification_profile"), Mapping) else {}
     value_basis = str((profile or {}).get("value_basis") or "market")
@@ -1795,6 +1816,7 @@ def compose_valuation_job(
     diagnostics_fit = _as_dict(_get(winner_fit, "diagnostics")) or {}
     if diagnostics_fit:
         model_block["diagnostics"] = diagnostics_fit
+    model_block.update(_as_dict(numeric_disclosure.get("model")) or {})
     search_audit = _as_dict(_get(search_result, "search_audit")) or {}
     alternatives = _json_safe_alternatives(_get(search_result, "alternatives") or [])
 
@@ -2104,7 +2126,13 @@ def compose_valuation_job(
     return context
 
 
-def _map_validation(normative: Any, assessment: Any, procedure: Any = None) -> dict:
+def _map_validation(
+    normative: Any,
+    assessment: Any,
+    procedure: Any = None,
+    *,
+    numeric_disclosure: Optional[Mapping[str, Any]] = None,
+) -> dict:
     """Copy C03/C04 validation fields; do not recompute grades."""
     n = _as_dict(normative) or {}
     a = _as_dict(assessment) or {}
@@ -2130,6 +2158,9 @@ def _map_validation(normative: Any, assessment: Any, procedure: Any = None) -> d
         statistical.setdefault("k", n.get("k"))
     if n.get("intercept") is not None:
         statistical.setdefault("intercept", n.get("intercept"))
+    numeric_diagnostics = _as_dict(_get(numeric_disclosure, "diagnostics")) or {}
+    if numeric_diagnostics:
+        statistical["diagnostics"] = numeric_diagnostics
     if procedure is not None:
         proc = _as_dict(procedure) or {}
         provenance = _as_dict(proc.get("procedure_provenance")) or {}
