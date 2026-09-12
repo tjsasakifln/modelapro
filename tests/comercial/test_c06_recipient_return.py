@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -12,9 +13,11 @@ from fastapi.testclient import TestClient
 from backend.api import RuntimeBindings, bind_runtime
 from backend.recipient_routes import router
 from modules.job_store import JobStore
+from modules.provenance import canonical_json
 from modules.qualification_profile import resolve_profile
 from modules.qualification_profile.assessment import normalize_institution_receipt
 from modules.report_export.recipient import (
+    REGISTRY_ARTIFACT,
     RecipientReturnError,
     get_recipient_return_status,
     store_recipient_return,
@@ -101,6 +104,15 @@ def test_persists_original_bytes_hash_profile_and_unverified_status(tmp_path):
     assert record["institution_acceptance"] is False
     assert record["authenticity_verified"] is False
     assert record["bytes_integrity"] == "verified"
+    immutable_record = {
+        key: value
+        for key, value in record.items()
+        if key not in {"record_id", "bytes_integrity"}
+    }
+    assert record["record_id"] == hashlib.sha256(
+        canonical_json(immutable_record).encode("utf-8")
+    ).hexdigest()
+    assert len(record["idempotency_key"]) == 64
     assert record["recipient_id"] == "banco-do-brasil"
     assert record["profile_id"] == "bb-meci-avaliacao-imovel-pf"
     assert record["protocol"] == "PROTOCOLO-TESTE-001"
@@ -196,6 +208,63 @@ def test_idempotent_retry_refuses_missing_or_tampered_original_bytes(tmp_path):
     with pytest.raises(RecipientReturnError) as tampered:
         _store_return(store, job["job_id"])
     assert tampered.value.code == "RECIPIENT_RETURN_INTEGRITY_FAILED"
+
+
+@pytest.mark.parametrize(
+    ("field", "changed"),
+    [
+        ("filename", "changed-name.pdf"),
+        ("media_type", "application/pdf"),
+        ("size", 999),
+        ("recorded_at", "2026-09-12T23:59:00+00:00"),
+        ("status", "accepted"),
+    ],
+)
+def test_registry_metadata_tampering_invalidates_immutable_record(
+    tmp_path, field, changed
+):
+    store, job, _snapshot = _case(tmp_path)
+    _store_return(store, job["job_id"])
+    registry = json.loads(
+        store.get_artifact(job["job_id"], REGISTRY_ARTIFACT).decode("utf-8")
+    )
+    registry["records"][0][field] = changed
+    store.save_artifact(
+        job["job_id"],
+        REGISTRY_ARTIFACT,
+        canonical_json(registry).encode("utf-8"),
+    )
+
+    with pytest.raises(RecipientReturnError) as corrupted:
+        get_recipient_return_status(store, job["job_id"])
+    assert corrupted.value.code == "RECIPIENT_RETURN_RECORD_INVALID"
+
+
+def test_rehashed_size_claim_still_must_match_original_bytes(tmp_path):
+    store, job, _snapshot = _case(tmp_path)
+    _store_return(store, job["job_id"])
+    registry = json.loads(
+        store.get_artifact(job["job_id"], REGISTRY_ARTIFACT).decode("utf-8")
+    )
+    record = registry["records"][0]
+    record["size"] += 1
+    immutable = {
+        key: value
+        for key, value in record.items()
+        if key not in {"record_id", "bytes_integrity"}
+    }
+    record["record_id"] = hashlib.sha256(
+        canonical_json(immutable).encode("utf-8")
+    ).hexdigest()
+    store.save_artifact(
+        job["job_id"],
+        REGISTRY_ARTIFACT,
+        canonical_json(registry).encode("utf-8"),
+    )
+
+    with pytest.raises(RecipientReturnError) as corrupted:
+        get_recipient_return_status(store, job["job_id"])
+    assert corrupted.value.code == "RECIPIENT_RETURN_INTEGRITY_FAILED"
 
 
 def test_authenticated_http_roundtrip_returns_exact_original_bytes(tmp_path):

@@ -761,29 +761,23 @@ def test_submission_and_acceptance_are_not_members_of_case_flow():
 
 
 def _unverified_recipient_receipt(profile):
-    identity = {
+    idempotency_material = {
         "proof_sha256": "d" * 64,
         "recipient_id": profile["recipient_id"],
         "profile_id": profile["id"],
         "protocol": "PROTOCOLO-TESTE-C05-001",
         "received_at": "2026-09-12T16:00:00-03:00",
         "source": "TESTE: retorno sintético autorizado para a regressão",
+        "filename": "SYNTHETIC_TEST_retorno.txt",
+        "media_type": "text/plain",
         "synthetic_test_only": True,
         "authorized_for_report": True,
-        "case_state_at_import": {
-            "result_fingerprint": None,
-            "report_content_fingerprint": None,
-            "artifact_sha256": {
-                "report.pdf": None,
-                "signed_report.pdf": None,
-                "submission.zip": None,
-            },
-            "association_to_sent_version_verified": False,
-        },
     }
     record = {
-        **identity,
-        "record_id": hashlib.sha256(canonical_json(identity).encode("utf-8")).hexdigest(),
+        **idempotency_material,
+        "idempotency_key": hashlib.sha256(
+            canonical_json(idempotency_material).encode("utf-8")
+        ).hexdigest(),
         "event": "recipient_return",
         "decision": "received_declared_unverified",
         "status": "received_declared_unverified",
@@ -795,12 +789,23 @@ def _unverified_recipient_receipt(profile):
         "operator_declaration": (
             "RECEIVED_DOCUMENT_RECORDED_WITHOUT_AUTHENTICITY_OR_ACCEPTANCE_VERIFICATION"
         ),
-        "filename": "SYNTHETIC_TEST_retorno.txt",
         "stored_name": "recipient-return-" + "d" * 20 + "-SYNTHETIC_TEST_retorno.txt",
-        "media_type": "text/plain",
         "size": 42,
-        "bytes_integrity": "verified",
+        "case_state_at_import": {
+            "result_fingerprint": None,
+            "report_content_fingerprint": None,
+            "artifact_sha256": {
+                "report.pdf": None,
+                "signed_report.pdf": None,
+                "submission.zip": None,
+            },
+            "association_to_sent_version_verified": False,
+        },
     }
+    record["record_id"] = hashlib.sha256(
+        canonical_json(record).encode("utf-8")
+    ).hexdigest()
+    record["bytes_integrity"] = "verified"
     return {"recorded": True, "record": record, "detail": "caller text is not trusted"}
 
 
@@ -879,6 +884,9 @@ def test_recipient_receipt_is_unverified_evidence_not_acceptance_or_release_stat
         ("profile_source_set_sha256", "e" * 64),
         ("proof_sha256", "e" * 64),
         ("bytes_integrity", "missing_or_hash_mismatch"),
+        ("filename", "tampered.pdf"),
+        ("media_type", "application/pdf"),
+        ("size", 999),
         ("authorized_for_report", "true"),
         ("recorded_at", "not-an-iso-timestamp"),
     ],

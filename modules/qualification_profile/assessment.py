@@ -87,6 +87,7 @@ def normalize_institution_receipt(
     )
     required_text = (
         "record_id",
+        "idempotency_key",
         "event",
         "decision",
         "recipient_id",
@@ -128,19 +129,13 @@ def normalize_institution_receipt(
     except (TypeError, ValueError):
         timestamps_valid = False
         size_valid = False
-    identity = {
-        "proof_sha256": digest,
-        "recipient_id": record["recipient_id"],
-        "profile_id": record["profile_id"],
-        "protocol": record["protocol"],
-        "received_at": record["received_at"],
-        "source": record["source"],
-        "synthetic_test_only": record.get("synthetic_test_only"),
-        "authorized_for_report": record.get("authorized_for_report"),
-        "case_state_at_import": record.get("case_state_at_import"),
+    immutable_record = {
+        str(key): item
+        for key, item in record.items()
+        if key not in {"record_id", "bytes_integrity"}
     }
     expected_record_id = hashlib.sha256(
-        canonical_json(identity).encode("utf-8")
+        canonical_json(immutable_record).encode("utf-8")
     ).hexdigest()
     case_state = record.get("case_state_at_import")
     case_state = dict(case_state) if isinstance(case_state, Mapping) else {}
@@ -182,6 +177,7 @@ def normalize_institution_receipt(
         hex_digest(digest),
         hex_digest(profile_digest),
         hex_digest(record_id),
+        hex_digest(str(record.get("idempotency_key") or "").lower()),
         record_id == expected_record_id,
         str(record["stored_name"]).startswith(f"recipient-return-{digest[:20]}-"),
         timestamps_valid,

@@ -99,6 +99,7 @@ def _normalized_timestamp(value: str) -> str:
 
 def _safe_filename(filename: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", str(filename or "return.bin")).strip(".-")
+    safe = re.sub(r"\.{2,}", ".", safe)
     return safe[:80] or "return.bin"
 
 
@@ -132,6 +133,55 @@ def _case_state_at_import(store: Any, job_id: str) -> dict[str, Any]:
         "artifact_sha256": artifact_sha256,
         "association_to_sent_version_verified": False,
     }
+
+
+def _record_digest(record: Mapping[str, Any]) -> str:
+    immutable = {
+        str(key): value
+        for key, value in record.items()
+        if key not in {"record_id", "bytes_integrity"}
+    }
+    return _sha(canonical_json(immutable).encode("utf-8"))
+
+
+def _validated_record_bytes(
+    store: Any, job_id: str, stored: Mapping[str, Any]
+) -> tuple[dict[str, Any], bytes]:
+    record = dict(stored)
+    digest = record.get("proof_sha256")
+    record_id = record.get("record_id")
+    size = record.get("size")
+    stored_name = record.get("stored_name")
+    structurally_valid = all(
+        (
+            isinstance(digest, str) and len(digest) == 64,
+            isinstance(record_id, str) and len(record_id) == 64,
+            record_id == _record_digest(record),
+            isinstance(size, int) and not isinstance(size, bool) and size > 0,
+            isinstance(stored_name, str),
+            isinstance(stored_name, str)
+            and stored_name.startswith(f"recipient-return-{str(digest)[:20]}-"),
+            isinstance(stored_name, str)
+            and stored_name == stored_name.rsplit("/", 1)[-1]
+            and "\\" not in stored_name
+            and ".." not in stored_name,
+        )
+    )
+    if not structurally_valid:
+        raise RecipientReturnError(
+            "RECIPIENT_RETURN_RECORD_INVALID",
+            "recipient-return immutable record digest or structure is invalid",
+            status_code=409,
+        )
+    raw = store.get_artifact(job_id, stored_name)
+    if raw is None or len(raw) != size or _sha(raw) != digest:
+        raise RecipientReturnError(
+            "RECIPIENT_RETURN_INTEGRITY_FAILED",
+            "recipient-return bytes are missing, have a different size, or differ from the hash",
+            status_code=409,
+        )
+    record["bytes_integrity"] = "verified"
+    return record, raw
 
 
 def store_recipient_return(
@@ -185,53 +235,34 @@ def store_recipient_return(
             )
         normalized_received_at = _normalized_timestamp(received_at)
         digest = _sha(content)
+        original_filename = str(filename or "recipient-return.bin")
+        normalized_media_type = str(media_type or "application/octet-stream")
         effective_synthetic_test_only = (
             synthetic_test_only
             or (job.get("request_spec") or {}).get("synthetic_test_only") is True
         )
-        case_state_at_import = _case_state_at_import(store, job_id)
-        identity_material = {
+        idempotency_material = {
             "proof_sha256": digest,
             "recipient_id": expected_recipient,
             "profile_id": profile.get("id"),
             "protocol": protocol,
             "received_at": normalized_received_at,
             "source": source,
+            "filename": original_filename,
+            "media_type": normalized_media_type,
             "synthetic_test_only": effective_synthetic_test_only,
             "authorized_for_report": bool(authorized_for_report),
-            "case_state_at_import": case_state_at_import,
         }
-        record_id = _sha(canonical_json(identity_material).encode("utf-8"))
-        records = _read_registry(store, job_id)
-        existing = next((item for item in records if item.get("record_id") == record_id), None)
+        idempotency_key = _sha(canonical_json(idempotency_material).encode("utf-8"))
+        records = [
+            _validated_record_bytes(store, job_id, item)[0]
+            for item in _read_registry(store, job_id)
+        ]
+        existing = next(
+            (item for item in records if item.get("idempotency_key") == idempotency_key),
+            None,
+        )
         if existing is not None:
-            existing_bytes = store.get_artifact(
-                job_id, str(existing.get("stored_name") or "")
-            )
-            immutable_matches = all(
-                existing.get(key) == value for key, value in identity_material.items()
-            ) and all(
-                (
-                    existing.get("status") == "received_declared_unverified",
-                    existing.get("decision") == "received_declared_unverified",
-                    existing.get("institution_acceptance") is False,
-                    existing.get("authenticity_verified") is False,
-                    existing.get("bytes_integrity") == "verified",
-                    existing.get("profile_version") == profile.get("version"),
-                    existing.get("profile_source_set_sha256")
-                    == profile.get("source_set_sha256"),
-                )
-            )
-            if (
-                not immutable_matches
-                or existing_bytes is None
-                or _sha(existing_bytes) != digest
-            ):
-                raise RecipientReturnError(
-                    "RECIPIENT_RETURN_INTEGRITY_FAILED",
-                    "idempotent recipient-return retry found missing or altered original bytes",
-                    status_code=409,
-                )
             return {
                 "schema_version": SCHEMA_VERSION,
                 "job_id": job_id,
@@ -241,8 +272,9 @@ def store_recipient_return(
 
         safe_name = _safe_filename(filename)
         stored_name = f"recipient-return-{digest[:20]}-{safe_name}"
+        case_state_at_import = _case_state_at_import(store, job_id)
         record = {
-            "record_id": record_id,
+            "idempotency_key": idempotency_key,
             "event": "recipient_return",
             "decision": "received_declared_unverified",
             "status": "received_declared_unverified",
@@ -257,16 +289,17 @@ def store_recipient_return(
             "recorded_at": datetime.now(UTC).isoformat(),
             "source": source,
             "operator_declaration": OPERATOR_DECLARATION,
-            "filename": str(filename or safe_name),
+            "filename": original_filename,
             "stored_name": stored_name,
-            "media_type": str(media_type or "application/octet-stream"),
+            "media_type": normalized_media_type,
             "proof_sha256": digest,
             "size": len(content),
-            "bytes_integrity": "verified",
             "synthetic_test_only": effective_synthetic_test_only,
             "authorized_for_report": bool(authorized_for_report),
             "case_state_at_import": case_state_at_import,
         }
+        record["record_id"] = _record_digest(record)
+        record["bytes_integrity"] = "verified"
         store.save_artifact(job_id, stored_name, content)
         registry = {
             "schema_version": SCHEMA_VERSION,
@@ -293,13 +326,7 @@ def get_recipient_return_status(store: Any, job_id: str) -> dict[str, Any]:
         profile, recipient_id = _profile_for_job(job)
         records = []
         for stored in _read_registry(store, job_id):
-            record = dict(stored)
-            raw = store.get_artifact(job_id, str(record.get("stored_name") or ""))
-            record["bytes_integrity"] = (
-                "verified"
-                if raw is not None and _sha(raw) == record.get("proof_sha256")
-                else "missing_or_hash_mismatch"
-            )
+            record, _raw = _validated_record_bytes(store, job_id, stored)
             records.append(record)
         latest = records[-1] if records else None
         return {
@@ -336,7 +363,11 @@ def recipient_return_bytes(store: Any, job_id: str, record_id: str) -> tuple[byt
             "RECIPIENT_RETURN_NOT_FOUND", "recipient-return record not found", status_code=404
         )
     raw = store.get_artifact(job_id, str(record.get("stored_name") or ""))
-    if raw is None or _sha(raw) != record.get("proof_sha256"):
+    if (
+        raw is None
+        or len(raw) != record.get("size")
+        or _sha(raw) != record.get("proof_sha256")
+    ):
         raise RecipientReturnError(
             "RECIPIENT_RETURN_INTEGRITY_FAILED",
             "recipient-return bytes are missing or differ from the recorded hash",

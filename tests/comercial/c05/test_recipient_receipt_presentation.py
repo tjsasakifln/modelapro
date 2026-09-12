@@ -14,29 +14,23 @@ from tests.comercial.c03.fixtures import qualified_case
 
 
 def _receipt(profile):
-    identity = {
+    idempotency_material = {
         "proof_sha256": "d" * 64,
         "recipient_id": profile["recipient_id"],
         "profile_id": profile["id"],
         "protocol": "PROTOCOLO-TESTE-PDF-001",
         "received_at": "2026-09-12T16:00:00-03:00",
         "source": "TESTE: retorno sintético",
+        "filename": "SYNTHETIC_TEST_retorno.txt",
+        "media_type": "text/plain",
         "synthetic_test_only": True,
         "authorized_for_report": True,
-        "case_state_at_import": {
-            "result_fingerprint": "2" * 64,
-            "report_content_fingerprint": None,
-            "artifact_sha256": {
-                "report.pdf": "3" * 64,
-                "signed_report.pdf": None,
-                "submission.zip": None,
-            },
-            "association_to_sent_version_verified": False,
-        },
     }
     record = {
-        **identity,
-        "record_id": hashlib.sha256(canonical_json(identity).encode()).hexdigest(),
+        **idempotency_material,
+        "idempotency_key": hashlib.sha256(
+            canonical_json(idempotency_material).encode()
+        ).hexdigest(),
         "event": "recipient_return",
         "decision": "received_declared_unverified",
         "status": "received_declared_unverified",
@@ -48,12 +42,21 @@ def _receipt(profile):
         "operator_declaration": (
             "RECEIVED_DOCUMENT_RECORDED_WITHOUT_AUTHENTICITY_OR_ACCEPTANCE_VERIFICATION"
         ),
-        "filename": "SYNTHETIC_TEST_retorno.txt",
         "stored_name": "recipient-return-" + "d" * 20 + "-SYNTHETIC_TEST_retorno.txt",
-        "media_type": "text/plain",
         "size": 42,
-        "bytes_integrity": "verified",
+        "case_state_at_import": {
+            "result_fingerprint": "2" * 64,
+            "report_content_fingerprint": None,
+            "artifact_sha256": {
+                "report.pdf": "3" * 64,
+                "signed_report.pdf": None,
+                "submission.zip": None,
+            },
+            "association_to_sent_version_verified": False,
+        },
     }
+    record["record_id"] = hashlib.sha256(canonical_json(record).encode()).hexdigest()
+    record["bytes_integrity"] = "verified"
     return {"recorded": True, "record": record, "detail": "untrusted caller detail"}
 
 
