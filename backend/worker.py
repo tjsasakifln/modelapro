@@ -15,12 +15,16 @@ from __future__ import annotations
 import hashlib
 import importlib
 import io
+import json
 import math
 import os
+import re
 import subprocess
+import sys
 import traceback
 import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from modules.logging_manager import logger
@@ -126,6 +130,21 @@ class CompositionError(RuntimeError):
 
 
 def current_code_sha() -> str:
+    if getattr(sys, "frozen", False):
+        identity_path = Path(sys._MEIPASS) / "build-source-identity.json"
+        try:
+            payload = json.loads(identity_path.read_text(encoding="utf-8"))
+            source_sha = str(payload.get("source_sha") or "")
+            tree_sha = str(payload.get("tree_sha") or "")
+        except (OSError, UnicodeError, json.JSONDecodeError, AttributeError) as exc:
+            raise RuntimeError("frozen build source identity is absent or invalid") from exc
+        if (
+            payload.get("schema_version") != "MP-COM-BUILD-IDENTITY/1"
+            or not re.fullmatch(r"[0-9a-f]{40}", source_sha)
+            or not re.fullmatch(r"[0-9a-f]{40}", tree_sha)
+        ):
+            raise RuntimeError("frozen build source identity is absent or invalid")
+        return source_sha
     env = os.getenv("MP_CODE_SHA")
     if env:
         return env.strip()
