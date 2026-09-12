@@ -11,5 +11,9 @@ Windows installer.
 
 Run `python -m scripts.comercial.operacao.build_windows --help` and
 `python -m scripts.comercial.operacao.sbom --help` from a release checkout.
+The Windows host must first generate and review
+`constraints/windows-py312-x64.txt`; the builder refuses a dirty checkout or
+an installed environment that differs from that lock. The Linux-generated
+`commercial-build.txt` is not evidence for Windows wheels/DLLs.
 Release evidence must retain the resulting `release-manifest.json`, SBOM,
 pip-audit result, artifact hashes and the actual installer-signing record.

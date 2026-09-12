@@ -28,9 +28,14 @@ def default_runtime_root() -> str:
     if configured:
         return os.path.abspath(os.path.expanduser(configured))
     if platform.system().lower().startswith("win"):
-        base = os.getenv("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+        base = os.getenv("LOCALAPPDATA") or os.path.join(
+            os.path.expanduser("~"), "AppData", "Local"
+        )
         return os.path.join(base, "MODELAPro")
-    return os.path.join(os.getenv("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"), "modelapro")
+    base = os.getenv("XDG_DATA_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "share"
+    )
+    return os.path.join(base, "modelapro")
 
 
 def load_dotenv_files() -> None:
@@ -233,6 +238,11 @@ def validate_config(cfg: Config) -> None:
             "Non-loopback API_HOST is disabled until shared-mode authentication, "
             "RBAC and transport qualification are implemented."
         )
+    if not is_loopback_host(cfg.FRONTEND_HOST):
+        raise ValueError(
+            "Non-loopback FRONTEND_HOST is disabled until shared-mode authentication, "
+            "RBAC and transport qualification are implemented."
+        )
 
 
 def build_config() -> Config:
@@ -243,7 +253,22 @@ def build_config() -> Config:
     frontend_port = _env_int("FRONTEND_PORT", 8501, minimum=1, maximum=65535)
     public_default = f"http://{_display_host(api_host)}:{api_port}"
     runtime_root = default_runtime_root()
-    data_dir = _env_str("DATA_DIR", os.path.join(runtime_root, "data"), allow_empty=False)
+    raw_store_override = os.getenv("MODELA_STORE_ROOT")
+    raw_data_override = os.getenv("DATA_DIR")
+    if raw_store_override is not None and not raw_store_override.strip():
+        raise ValueError("MODELA_STORE_ROOT must not be blank when explicitly set")
+    if raw_data_override is not None and not raw_data_override.strip():
+        raise ValueError("DATA_DIR must not be blank when explicitly set")
+    store_override = (raw_store_override or "").strip()
+    data_override = (raw_data_override or "").strip()
+    if store_override and data_override:
+        if os.path.abspath(os.path.expanduser(store_override)) != os.path.abspath(
+            os.path.expanduser(data_override)
+        ):
+            raise ValueError(
+                "MODELA_STORE_ROOT and DATA_DIR must identify the same canonical store root"
+            )
+    data_dir = store_override or data_override or os.path.join(runtime_root, "store")
     jobs_dir = _nested_dir("JOBS_DIR", data_dir, "jobs")
     projects_dir = _nested_dir("PROJECTS_DIR", data_dir, "projects")
     cfg = Config(

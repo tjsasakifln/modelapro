@@ -128,10 +128,14 @@ def default_store_root() -> Path:
     env = os.environ.get("MODELA_STORE_ROOT")
     if env:
         return Path(env).expanduser()
-    xdg = os.environ.get("XDG_DATA_HOME")
-    if xdg:
-        return Path(xdg) / "modelapro" / "store"
-    return Path.home() / ".local" / "share" / "modelapro" / "store"
+    data_dir = os.environ.get("DATA_DIR")
+    if data_dir and data_dir.strip():
+        return Path(data_dir.strip()).expanduser()
+    # Local import avoids making persistence configuration a module-import side
+    # effect while keeping one authority for Windows and Linux defaults.
+    from modules.config_manager import default_runtime_root
+
+    return Path(default_runtime_root()) / "store"
 
 
 def lock_for_root(root: Path) -> threading.RLock:
@@ -595,14 +599,38 @@ def _validate_backup_manifest(backup_root: Path) -> list[Dict[str, Any]]:
         if not isinstance(entry, Mapping) or set(entry) != {"path", "sha256", "size"}:
             raise BackupIntegrityError("invalid backup manifest entry")
         rel, expected, size = entry["path"], entry["sha256"], entry["size"]
-        if not isinstance(rel, str) or rel in seen or not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected) or not isinstance(size, int) or size < 0:
+        if (
+            not isinstance(rel, str)
+            or rel in seen
+            or not isinstance(expected, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected)
+            or not isinstance(size, int)
+            or size < 0
+        ):
             raise BackupIntegrityError("invalid backup file metadata")
         seen.add(rel)
         member = safe_relative_path(backup_root, rel, label="backup member")
-        if member.is_symlink() or not member.is_file() or member.stat().st_size != size or _sha256_file(member) != expected:
+        if (
+            member.is_symlink()
+            or not member.is_file()
+            or member.stat().st_size != size
+            or _sha256_file(member) != expected
+        ):
             raise BackupIntegrityError(f"backup member failed integrity check: {rel}")
     if STORE_DB_NAME not in seen:
         raise BackupIntegrityError("backup does not contain its SQLite store")
+    actual = {
+        path.relative_to(backup_root).as_posix()
+        for path in backup_root.rglob("*")
+        if path.is_file() and path != manifest_path
+    }
+    if actual != seen:
+        missing = sorted(seen - actual)
+        unexpected = sorted(actual - seen)
+        raise BackupIntegrityError(
+            f"backup member set differs from manifest; missing={missing}, "
+            f"unexpected={unexpected}"
+        )
     return [dict(entry) for entry in files]
 
 
@@ -801,6 +829,8 @@ class JobStore:
         if not backup_root.is_dir() or backup_root.is_symlink():
             raise BackupIntegrityError("backup source must be a regular directory")
         entries = _validate_backup_manifest(backup_root)
+        if target.is_symlink():
+            raise BackupIntegrityError("restore destination must not be a symlink")
         if target.exists() and (not target.is_dir() or any(target.iterdir())):
             raise BackupIntegrityError("restore destination must be a new or empty directory")
         ensure_directory(target)
@@ -1027,26 +1057,29 @@ class JobStore:
         payload = canonical_jsonable(dict(snapshot), label="snapshot")
         relpath = f"jobs/{safe_id_component(job_id, label='job_id')}/snapshot.json"
         dest = self.root / relpath
-        atomic_write_json(dest, payload)
-        now = utc_now()
-        with transactional_connection(self.db_path, self._lock) as conn:
-            cur = conn.execute(
-                """
-                UPDATE jobs SET
-                    result_available = 1,
-                    calculation_finished = 1,
-                    snapshot_relpath = ?,
-                    updated_at = ?
-                WHERE job_id = ?
-                """,
-                (relpath, now, job_id),
-            )
-            if cur.rowcount != 1:
-                raise JobNotFound(job_id)
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE job_id = ?",
-                (job_id,),
-            ).fetchone()
+        # The shared root lock spans both sidecar replacement and DB commit, so
+        # a concurrent backup cannot observe the new file with the old row.
+        with self._lock:
+            atomic_write_json(dest, payload)
+            now = utc_now()
+            with transactional_connection(self.db_path, self._lock) as conn:
+                cur = conn.execute(
+                    """
+                    UPDATE jobs SET
+                        result_available = 1,
+                        calculation_finished = 1,
+                        snapshot_relpath = ?,
+                        updated_at = ?
+                    WHERE job_id = ?
+                    """,
+                    (relpath, now, job_id),
+                )
+                if cur.rowcount != 1:
+                    raise JobNotFound(job_id)
+                row = conn.execute(
+                    "SELECT * FROM jobs WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
         return row_to_job(row)
 
     def get_snapshot(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -1166,15 +1199,17 @@ class JobStore:
             raise PathEscapeError(f"unsafe artifact name: {name!r}")
         relpath = f"jobs/{safe_id_component(job_id, label='job_id')}/artifacts/{name}"
         dest = self.root / relpath
-        atomic_write_bytes(dest, bytes(data))
-        self.patch_record(
-            job_id,
-            {
-                "artifact_states": {
-                    name: {"state": "ready", "error": None},
-                }
-            },
-        )
+        # Keep file+metadata indivisible with respect to export_backup().
+        with self._lock:
+            atomic_write_bytes(dest, bytes(data))
+            self.patch_record(
+                job_id,
+                {
+                    "artifact_states": {
+                        name: {"state": "ready", "error": None},
+                    }
+                },
+            )
         return relpath
 
     def get_artifact(self, job_id: str, name: str) -> Optional[bytes]:

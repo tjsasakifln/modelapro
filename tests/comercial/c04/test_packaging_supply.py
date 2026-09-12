@@ -17,14 +17,33 @@ from scripts.comercial.operacao.operational_harness import run_harness
 def test_commercial_build_tools_are_release_only() -> None:
     names = {requirement_name(item) for item in commercial_build_specs()}
     assert names == {"pyinstaller", "pip-audit"}
+    specs = set(commercial_build_specs())
+    assert "pyinstaller==6.22.2" in specs
+    assert "pip-audit==2.10.1" in specs
+    root = Path(__file__).resolve().parents[3]
+    lock = (root / "constraints" / "commercial-build.txt").read_text(encoding="utf-8")
+    assert "pyinstaller==6.22.2" in lock
+    assert "pip_audit==2.10.1" in lock
 
 
 def test_sbom_is_sorted_and_uses_noassertion_for_absent_license(monkeypatch) -> None:
-    monkeypatch.setattr(sbom, "_pip_report", lambda _python: [{"name": "zeta", "version": "1"}, {"name": "Alpha", "version": "2"}])
+    monkeypatch.setattr(
+        sbom,
+        "_pip_report",
+        lambda _python: [
+            {"name": "zeta", "version": "1"},
+            {"name": "Alpha", "version": "2"},
+        ],
+    )
     monkeypatch.setattr(
         sbom,
         "_metadata",
-        lambda _python, name: {"license": "" if name == "zeta" else "MIT", "license_expression": "", "home_page": "", "summary": ""},
+        lambda _python, name: {
+            "license": "" if name == "zeta" else "MIT",
+            "license_expression": "",
+            "home_page": "",
+            "summary": "",
+        },
     )
     first = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")
     second = sbom.build_sbom("python-test", generated_at="2026-09-12T00:00:00Z")
@@ -37,6 +56,24 @@ def test_sbom_cli_requires_fixed_timestamp(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         sbom.main(["--output", str(tmp_path / "sbom.json")])
     assert exc.value.code == 2
+
+
+def test_release_environment_must_exactly_match_lock(tmp_path: Path, monkeypatch) -> None:
+    lock = tmp_path / "windows.lock"
+    lock.write_text("Alpha==1\nzeta_pkg==2\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sbom,
+        "_pip_report",
+        lambda _python: [
+            {"name": "alpha", "version": "1"},
+            {"name": "zeta-pkg", "version": "2"},
+            {"name": "modelapro", "version": "0.1.0"},
+        ],
+    )
+    assert sbom.assert_environment_matches_lock("python-test", lock)["matches"] is True
+    lock.write_text("Alpha==9\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="does not match"):
+        sbom.assert_environment_matches_lock("python-test", lock)
 
 
 def test_audit_preserves_nonzero_exit_as_release_blocker(monkeypatch, tmp_path: Path) -> None:
@@ -54,6 +91,62 @@ def test_windows_build_refuses_non_windows_host(tmp_path: Path, monkeypatch) -> 
         build_windows.build(tmp_path, tmp_path / "dist", "1.0")
 
 
+def test_windows_build_manifest_stays_unsigned_and_carries_supply_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = Path(__file__).resolve().parents[3]
+    output = tmp_path / "dist"
+    monkeypatch.setattr(build_windows.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(build_windows.platform, "machine", lambda: "AMD64")
+
+    def fake_audit(_python, path):
+        path.write_text('{"dependencies":[]}', encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(build_windows.audit, "audit", fake_audit)
+    monkeypatch.setattr(
+        build_windows.sbom,
+        "build_sbom",
+        lambda *_args, **_kwargs: {"bomFormat": "MODELA-PRO-SBOM", "components": []},
+    )
+    monkeypatch.setattr(
+        build_windows.sbom,
+        "assert_environment_matches_lock",
+        lambda *_args, **_kwargs: {"matches": True},
+    )
+
+    class Result:
+        returncode = 0
+        stdout = ""
+
+    def fake_run(command, **_kwargs):
+        if "PyInstaller" in command:
+            bundle = output / "MODELA-PRO"
+            bundle.mkdir(parents=True)
+            (bundle / "MODELA-PRO.exe").write_bytes(b"synthetic-exe")
+        elif str(command[0]).lower().endswith("iscc.exe"):
+            (output / "MODELA-PRO-1.0-win64.exe").write_bytes(b"synthetic-installer")
+        result = Result()
+        if "rev-parse" in command:
+            result.stdout = "deadbeef\n"
+        return result
+
+    monkeypatch.setattr(build_windows.subprocess, "run", fake_run)
+    manifest_path = build_windows.build(
+        root,
+        output,
+        "1.0",
+        generated_at="2026-09-12T00:00:00Z",
+        lock=root / "constraints" / "commercial-build.txt",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["source_sha"] == "deadbeef"
+    assert manifest["signing_status"] == "UNSIGNED"
+    assert manifest["commercial_release_ready"] is False
+    assert (output / "MODELA-PRO" / "SBOM.modelapro.json").is_file()
+    assert (output / "MODELA-PRO" / "pip-audit.json").is_file()
+
+
 def test_reuse_manifest_is_explicit_about_unresolved_rights() -> None:
     root = Path(__file__).resolve().parents[3]
     payload = json.loads((root / "third_party" / "reuse_manifest.json").read_text(encoding="utf-8"))
@@ -68,10 +161,25 @@ def test_operational_harness_marks_unexecuted_checks_not_run() -> None:
     assert evidence["resource"]["exit_code"] == 0
 
 
+def test_operational_harness_exercises_integrity_and_resource_refusal() -> None:
+    root = Path(__file__).resolve().parents[3]
+    evidence = run_harness(
+        root / "docs" / "comercial" / "c04" / "performance_budget.json",
+        exercise=True,
+    )
+    for name in ("queue_cancel", "backup_restore", "disk_refusal"):
+        assert evidence["checks"][name]["status"] == "PASSED"
+    assert evidence["checks"]["backup_restore"]["evidence_parity"] is True
+    assert evidence["checks"]["technical_corpus"]["status"] == "NOT_RUN"
+
+
 def test_wheel_contains_runtime_components_but_not_release_tooling(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[3]
     subprocess.run(
-        [sys.executable, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps", "--wheel-dir", str(tmp_path), str(root)],
+        [
+            sys.executable, "-m", "pip", "wheel", "--no-build-isolation",
+            "--no-deps", "--wheel-dir", str(tmp_path), str(root),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -84,3 +192,16 @@ def test_wheel_contains_runtime_components_but_not_release_tooling(tmp_path: Pat
     assert not any(name.startswith("scripts/comercial/") for name in names)
     assert not any(name.startswith("packaging/comercial/") for name in names)
     assert not any(name.startswith("tests/") or name.lower().endswith((".pdf", ".ttf", ".otf")) for name in names)
+
+
+def test_windows_spec_materializes_streamlit_sources_and_uses_onedir() -> None:
+    root = Path(__file__).resolve().parents[3]
+    spec = (root / "packaging" / "comercial" / "modelapro.spec").read_text(encoding="utf-8")
+    assert 'rglob("*.py")' in spec
+    assert "exclude_binaries=True" in spec
+    assert "COLLECT(" in spec
+    for buyer_document in (
+        "SECURITY.md", "operations_manual.md", "privacy.md",
+        "support_and_maintenance.md", "THIRD_PARTY_NOTICES.md",
+    ):
+        assert buyer_document in spec

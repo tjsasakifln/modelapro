@@ -24,13 +24,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Interpreter used to create the throwaway venv",
     )
     parser.add_argument(
+        "--output",
+        type=Path,
+        help="explicit target, e.g. constraints/windows-py312-x64.txt on the Windows build host",
+    )
+    parser.add_argument(
         "--commercial-build",
         action="store_true",
         help="regenerate constraints/commercial-build.txt from the release-tools extra",
     )
     args = parser.parse_args(argv)
     root = source_root()
-    out = root / "constraints" / ("commercial-build.txt" if args.commercial_build else "linux-py3.txt")
+    out = (args.output.resolve() if args.output else
+           root / "constraints" / ("commercial-build.txt" if args.commercial_build else "linux-py3.txt"))
     extra = "commercial-build" if args.commercial_build else "dev"
     with tempfile.TemporaryDirectory(prefix="modelapro-c15-lock-") as tmp:
         venv = Path(tmp) / "venv"

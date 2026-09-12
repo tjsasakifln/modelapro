@@ -41,7 +41,11 @@ def _accepts_argument(fn: WorkFn, name: str) -> bool:
         signature = inspect.signature(fn)
     except (TypeError, ValueError):
         return False
-    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values()) or name in signature.parameters
+    accepts_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    return accepts_kwargs or name in signature.parameters
 
 
 class RunnerClosed(RuntimeError):
@@ -236,7 +240,14 @@ class LocalTaskRunner:
                 # bounded failure once it returns, preserving persisted evidence.
                 self._try_transition(
                     job_id, "running", "failed",
-                    issues=[make_issue(code="job_timeout", severity="error", origin="c11.runner", affected_ids=[job_id], message="Job exceeded its configured cooperative timeout.", evidence={"timeout_seconds": self._timeout_seconds})],
+                    issues=[make_issue(
+                        code="job_timeout",
+                        severity="error",
+                        origin="c11.runner",
+                        affected_ids=[job_id],
+                        message="Job exceeded its configured cooperative timeout.",
+                        evidence={"timeout_seconds": self._timeout_seconds},
+                    )],
                 )
                 return
             self._finish_from_result(job_id, result)

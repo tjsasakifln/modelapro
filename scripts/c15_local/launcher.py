@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import os
 import signal
@@ -29,6 +30,19 @@ def _config():
     return config
 
 
+def product_version() -> str:
+    """Return installed distribution version without depending on a checkout."""
+    try:
+        return importlib.metadata.version("modelapro")
+    except importlib.metadata.PackageNotFoundError:
+        return "0+uninstalled"
+
+
+def is_frozen_product() -> bool:
+    """True only inside the buyer-facing PyInstaller executable."""
+    return bool(getattr(sys, "frozen", False))
+
+
 def frontend_app_path() -> Path:
     import frontend
 
@@ -39,6 +53,8 @@ def frontend_app_path() -> Path:
 
 
 def backend_command(host: str, port: int) -> List[str]:
+    if is_frozen_product():
+        return [sys.executable, "--internal-api"]
     return [
         sys.executable,
         "-m",
@@ -54,6 +70,8 @@ def backend_command(host: str, port: int) -> List[str]:
 
 def frontend_command(app_path: Path, host: str, port: int) -> List[str]:
     """Streamlit must be launched as its own process, never frontend.app:main()."""
+    if is_frozen_product():
+        return [sys.executable, "--internal-frontend"]
     return [
         sys.executable,
         "-m",
@@ -107,7 +125,12 @@ def ensure_local_directories(cfg) -> None:
         cfg.PROJECTS_DIR,
         cfg.LOG_DIR,
     ):
-        os.makedirs(path, exist_ok=True)
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            # Windows ACLs are qualified separately; chmod is best-effort there.
+            pass
 
 
 def _print_commands(cfg) -> None:
@@ -154,6 +177,31 @@ def main_frontend(argv: Optional[Sequence[str]] = None) -> int:
     return 0
 
 
+def _main_frozen_frontend() -> int:
+    """Run Streamlit CLI inside the dedicated frozen child process."""
+    cfg = _config()
+    app_path = frontend_app_path()
+    sys.argv = frontend_command(app_path, cfg.FRONTEND_HOST, cfg.FRONTEND_PORT)
+    # ``frontend_command`` intentionally points back to this executable when
+    # frozen, so construct Streamlit's own argv for its in-process CLI here.
+    sys.argv = [
+        "streamlit",
+        "run",
+        str(app_path),
+        "--server.address",
+        cfg.FRONTEND_HOST,
+        "--server.port",
+        str(cfg.FRONTEND_PORT),
+        "--server.headless",
+        "true",
+        "--browser.gatherUsageStats",
+        "false",
+    ]
+    from streamlit.web import cli as streamlit_cli
+
+    return int(streamlit_cli.main() or 0)
+
+
 def _terminate(procs: Sequence[subprocess.Popen]) -> None:
     for proc in procs:
         if proc.poll() is None:
@@ -170,6 +218,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Start MODELA PRO locally (loopback API + Streamlit process)."
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"MODELA PRO {product_version()}",
+    )
+    parser.add_argument("--internal-api", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--internal-frontend", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--api-only", action="store_true")
     parser.add_argument("--frontend-only", action="store_true")
     parser.add_argument(
@@ -184,6 +239,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     parser.add_argument("--health-timeout", type=float, default=45.0)
     args = parser.parse_args(list(argv) if argv is not None else None)
+
+    if args.internal_api:
+        return main_api([])
+    if args.internal_frontend:
+        return _main_frozen_frontend()
 
     cfg = _config()
     ensure_local_directories(cfg)

@@ -5,11 +5,56 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _canonical_name(value: str) -> str:
+    return "-".join(filter(None, re.split(r"[-_.]+", value.lower())))
+
+
+def locked_versions(lock: Path) -> dict[str, str]:
+    """Read exact name/version pins; reject constraints that are not immutable."""
+    if not lock.is_file():
+        raise FileNotFoundError(f"lock file does not exist: {lock}")
+    versions: dict[str, str] = {}
+    for number, raw in enumerate(lock.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.count("==") != 1 or any(mark in line for mark in (";", " @ ", "[", "]")):
+            raise ValueError(f"lock line {number} is not an unconditional exact pin")
+        name, version = line.split("==", 1)
+        if not name or not version:
+            raise ValueError(f"lock line {number} is incomplete")
+        versions[_canonical_name(name)] = version
+    return versions
+
+
+def assert_environment_matches_lock(python: str, lock: Path) -> dict[str, object]:
+    """Fail when an installed build environment differs from its declared lock."""
+    expected = locked_versions(lock)
+    installed = {
+        _canonical_name(item["name"]): str(item["version"])
+        for item in _pip_report(python)
+        if _canonical_name(item["name"]) != "modelapro"
+    }
+    missing = sorted(name for name in expected if name not in installed)
+    unexpected = sorted(name for name in installed if name not in expected)
+    mismatched = {
+        name: {"expected": expected[name], "installed": installed[name]}
+        for name in sorted(expected.keys() & installed.keys())
+        if expected[name] != installed[name]
+    }
+    result = {"matches": not (missing or unexpected or mismatched), "missing": missing,
+              "unexpected": unexpected, "mismatched": mismatched}
+    if not result["matches"]:
+        raise RuntimeError(f"installed build environment does not match lock: {result}")
+    return result
 
 
 def _pip_report(python: str) -> list[dict]:
