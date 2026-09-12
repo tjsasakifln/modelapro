@@ -1114,9 +1114,17 @@ def reproduce_from_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
         comparison[f"{field}_within_tolerance"] = all(checks)
 
     ok = bool(integrity.get("ok")) and point is not None and bool(comparison.get("point_within_tolerance"))
-    for field in ("arbitration_interval", "admissible_interval"):
-        if snap_value.get(field) is not None and comparison.get(f"{field}_within_tolerance") is not True:
-            ok = False
+    policy_expected = any(
+        snap_value.get(field) is not None
+        for field in ("arbitration_interval", "admissible_interval")
+    )
+    policy_complete = all(
+        snap_value.get(field) is None
+        or comparison.get(f"{field}_within_tolerance") is True
+        for field in ("arbitration_interval", "admissible_interval")
+    )
+    if value_policy and not policy_complete:
+        ok = False
     if promised and point is None:
         ok = False
     if snap_value.get("point") is not None and point is None:
@@ -1173,7 +1181,11 @@ def reproduce_from_bundle(bundle_dir: Union[str, Path]) -> Dict[str, Any]:
 
     return {
         "ok": ok,
-        "numerical_reproduction_status": "verified" if ok else "failed",
+        "numerical_reproduction_status": (
+            "verified"
+            if ok and (not policy_expected or policy_complete)
+            else ("partial" if ok else "failed")
+        ),
         "integrity": integrity,
         "promised": promised,
         "point": point,

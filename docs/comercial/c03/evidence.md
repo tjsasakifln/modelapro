@@ -7,7 +7,7 @@ alterações. Nenhum dado de cliente, chave privada ou certificado persistiu no 
 
 ```text
 pytest -q tests/comercial/c03
-pytest -q tests/c08_report tests/c12_evidence tests/c13_decisions tests/pro_workflow/p03 tests/test_results_generator.py
+pytest -q tests/c08_report tests/c12_evidence tests/c13_decisions tests/pro_workflow/p01/test_a05_dossier.py tests/pro_workflow/p03 tests/test_results_generator.py
 python3 -m py_compile modules/results_generator.py modules/evidence_bundle.py modules/provenance.py modules/decision_support.py modules/report_presenter/*.py modules/report_export/*.py modules/digital_signatures/*.py
 git diff --check
 ```
@@ -15,13 +15,19 @@ git diff --check
 Resultados no worktree candidato, após a última alteração funcional:
 
 ```text
-tests/comercial/c03: 19 passed, 1 warning, 103.48 s, exit_code 0
-regressões C08/C12/C13/P03/results_generator: 70 passed, 1 warning, 311.78 s, exit_code 0
+tests/comercial/c03: 19 passed, 1 warning, 90.90 s, exit_code 0
+regressões C08/C12/C13/P01-A05/P03/results_generator: 75 passed, 4 warnings, 217.93 s, exit_code 0
 py_compile + ruff seletivo + JSON parse + git diff --check: exit_code 0
 ```
 
-O aviso único é a depreciação do fallback FontTools do WeasyPrint quando HarfBuzz-Subset não está
-instalado; o PDF foi gerado e inspecionado.
+Os avisos são depreciações de FastAPI/Starlette e do fallback FontTools do WeasyPrint quando
+HarfBuzz-Subset não está instalado; o PDF foi gerado e inspecionado.
+
+A suíte ampla da primeira execução de CI revelou que um dossiê legado P01 com intervalos de arbítrio,
+mas sem política explícita, era classificado como falha numérica total. A compatibilidade foi corrigida:
+o ponto e os intervalos estatísticos dentro do escopo prometido continuam `ok`, enquanto a política não
+reproduzível fica `partial`. Quando uma `value_policy` é fornecida, qualquer divergência de arbítrio ou
+admissibilidade continua reprovando a reprodução.
 
 ## Inspeção visual e conteúdo integral
 
