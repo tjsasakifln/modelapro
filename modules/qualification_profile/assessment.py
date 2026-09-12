@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .. import normative_rules as rules
+from ..provenance import canonical_json
 from . import claims as claims_mod
 from .catalog import ProfileError, resolve_profile
 from .output_conformance import assess_output_conformance, product_conformance_baseline
@@ -50,6 +52,15 @@ _PART2 = rules.EDITION_PART2
 _SRC2 = "abnt-nbr-14653-2-2011"
 _SRC1 = "abnt-nbr-14653-1-2019"
 
+_RECEIPT_STATUS = "received_declared_unverified"
+_RECEIPT_DECLARATION = (
+    "RECEIVED_DOCUMENT_RECORDED_WITHOUT_AUTHENTICITY_OR_ACCEPTANCE_VERIFICATION"
+)
+_RECEIPT_DETAIL = (
+    "Comprovante registrado, recebido/declarado e com bytes íntegros; "
+    "autenticidade e aceite institucional NÃO VERIFICADOS."
+)
+
 
 def result_fingerprint(payload: Mapping[str, Any]) -> str:
     """Digest of the facts a decision was taken on.
@@ -61,6 +72,126 @@ def result_fingerprint(payload: Mapping[str, Any]) -> str:
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True,
                            separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def normalize_institution_receipt(
+    value: Any, profile: Mapping[str, Any]
+) -> Dict[str, Any]:
+    """Validate a server receipt envelope without treating it as acceptance."""
+    envelope = dict(value) if isinstance(value, Mapping) else {}
+    record_value = envelope.get("record")
+    record = dict(record_value) if isinstance(record_value, Mapping) else {}
+    invalid_detail = (
+        "Nenhum comprovante íntegro de retorno institucional foi registrado. "
+        "Campos accepted/valid fornecidos pelo chamador não constituem aceite."
+    )
+    required_text = (
+        "record_id",
+        "event",
+        "decision",
+        "recipient_id",
+        "profile_id",
+        "profile_version",
+        "profile_source_set_sha256",
+        "protocol",
+        "received_at",
+        "recorded_at",
+        "source",
+        "operator_declaration",
+        "filename",
+        "stored_name",
+        "media_type",
+        "proof_sha256",
+    )
+    if not record or any(
+        not isinstance(record.get(key), str) or not record[key].strip()
+        for key in required_text
+    ):
+        return {"recorded": False, "record": record or None, "detail": invalid_detail}
+
+    digest = str(record["proof_sha256"]).lower()
+    record_id = str(record["record_id"]).lower()
+    profile_digest = str(record["profile_source_set_sha256"]).lower()
+
+    def hex_digest(item: str) -> bool:
+        return len(item) == 64 and all(ch in "0123456789abcdef" for ch in item)
+
+    try:
+        received = datetime.fromisoformat(str(record["received_at"]))
+        recorded = datetime.fromisoformat(str(record["recorded_at"]))
+        timestamps_valid = received.tzinfo is not None and recorded.tzinfo is not None
+        size_valid = (
+            isinstance(record.get("size"), int)
+            and not isinstance(record.get("size"), bool)
+            and record["size"] > 0
+        )
+    except (TypeError, ValueError):
+        timestamps_valid = False
+        size_valid = False
+    identity = {
+        "proof_sha256": digest,
+        "recipient_id": record["recipient_id"],
+        "profile_id": record["profile_id"],
+        "protocol": record["protocol"],
+        "received_at": record["received_at"],
+        "source": record["source"],
+        "synthetic_test_only": record.get("synthetic_test_only"),
+        "authorized_for_report": record.get("authorized_for_report"),
+        "case_state_at_import": record.get("case_state_at_import"),
+    }
+    expected_record_id = hashlib.sha256(
+        canonical_json(identity).encode("utf-8")
+    ).hexdigest()
+    case_state = record.get("case_state_at_import")
+    case_state = dict(case_state) if isinstance(case_state, Mapping) else {}
+    artifact_hashes = case_state.get("artifact_sha256")
+    artifact_hashes = dict(artifact_hashes) if isinstance(artifact_hashes, Mapping) else {}
+    case_fingerprints_valid = all(
+        value is None or (isinstance(value, str) and hex_digest(value.lower()))
+        for value in (
+            case_state.get("result_fingerprint"),
+            case_state.get("report_content_fingerprint"),
+        )
+    )
+    artifact_hashes_valid = set(artifact_hashes) == {
+        "report.pdf",
+        "signed_report.pdf",
+        "submission.zip",
+    } and all(
+        value is None or (isinstance(value, str) and hex_digest(value.lower()))
+        for value in artifact_hashes.values()
+    )
+    valid = all((
+        envelope.get("recorded") is True,
+        record.get("event") == "recipient_return",
+        record.get("status") == _RECEIPT_STATUS,
+        record.get("decision") == _RECEIPT_STATUS,
+        record.get("institution_acceptance") is False,
+        record.get("authenticity_verified") is False,
+        record.get("bytes_integrity") == "verified",
+        record.get("operator_declaration") == _RECEIPT_DECLARATION,
+        record.get("profile_id") == profile.get("id"),
+        record.get("profile_version") == profile.get("version"),
+        profile_digest == str(profile.get("source_set_sha256") or "").lower(),
+        record.get("recipient_id") == profile.get("recipient_id"),
+        isinstance(record.get("synthetic_test_only"), bool),
+        isinstance(record.get("authorized_for_report"), bool),
+        case_state.get("association_to_sent_version_verified") is False,
+        case_fingerprints_valid,
+        artifact_hashes_valid,
+        hex_digest(digest),
+        hex_digest(profile_digest),
+        hex_digest(record_id),
+        record_id == expected_record_id,
+        str(record["stored_name"]).startswith(f"recipient-return-{digest[:20]}-"),
+        timestamps_valid,
+        size_valid,
+    ))
+    return {
+        "recorded": bool(valid),
+        "record": record,
+        "detail": _RECEIPT_DETAIL if valid else invalid_detail,
+    }
 
 
 def _calculation_status(assessment: Mapping[str, Any], context: Mapping[str, Any]) -> str:
@@ -724,20 +855,13 @@ def assess_qualification(
         report_fingerprint=report_fingerprint,
     )
 
-    acceptance = ctx.get("institution_acceptance")
-    acceptance_block = {
-        "recorded": bool(acceptance),
-        "record": acceptance,
-        "detail": (
-            "Aceitação institucional registrada a partir de ato real."
-            if acceptance else
-            "Nenhuma aceitação institucional registrada. Ausência de aprovação NÃO é "
-            "aprovação implícita nem proibição universal de vender com alegações mais "
-            "restritas."
-        ),
-    }
+    acceptance_block = normalize_institution_receipt(
+        ctx.get("institution_acceptance"), resolved
+    )
 
-    claim_results = _evaluate_profile_claims(resolved, ctx, release["case_release_status"])
+    claim_results = _evaluate_profile_claims(
+        resolved, ctx, release["case_release_status"], acceptance_block
+    )
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -785,6 +909,7 @@ def _evaluate_profile_claims(
     profile: Mapping[str, Any],
     ctx: Mapping[str, Any],
     case_release_status: str,
+    institution_receipt: Optional[Mapping[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Which claims this profile+case licenses. Case facts never license a
     product-level claim, and vice versa."""
@@ -820,16 +945,19 @@ def _evaluate_profile_claims(
                  .get("reference_label", "referência não identificada"),
                  "version": version},
     ))
-    acceptance = ctx.get("institution_acceptance") or {}
+    acceptance = dict((institution_receipt or {}).get("record") or {})
     out.append(claims_mod.evaluate_claim(
         claims_mod.CLAIM_INSTITUTION_ACCEPTED,
         profile_state=state,
-        evidence=evidence.get(claims_mod.CLAIM_INSTITUTION_ACCEPTED),
+        # A received receipt is deliberately not an institutional approval
+        # act, even if client input also supplies valid=true/accepted or a
+        # fully shaped claim-evidence mapping.
+        evidence=None,
         subject={
-            "institution": acceptance.get("institution") or profile.get("recipient_id") or "?",
-            "act": acceptance.get("act") or "?",
-            "act_version": acceptance.get("act_version") or "?",
-            "act_scope": acceptance.get("act_scope") or "?",
+            "institution": acceptance.get("recipient_id") or profile.get("recipient_id") or "?",
+            "act": "comprovante recebido, não verificado",
+            "act_version": acceptance.get("protocol") or "?",
+            "act_scope": acceptance.get("proof_sha256") or "?",
         },
     ))
     for claim in out:

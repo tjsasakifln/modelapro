@@ -28,12 +28,14 @@ from __future__ import annotations
 
 import builtins
 import copy
+import hashlib
 import inspect
 import re
 
 import pytest
 
 from modules.nbr14653_validation import assess_normative
+from modules.provenance import canonical_json
 from modules.qualification_profile import (
     CASE_ANALYSIS_ONLY,
     CASE_FLOW,
@@ -53,6 +55,7 @@ from modules.qualification_profile import (
 )
 from modules.qualification_profile import catalog as catalog_mod
 from modules.qualification_profile import schema as schema_mod
+from modules.qualification_profile.claims import CLAIM_INSTITUTION_ACCEPTED
 
 PROFILE_ID = "abnt-14653-2-regressao-mercado"
 PROFILE_VERSION = "1.0.0"
@@ -757,11 +760,56 @@ def test_submission_and_acceptance_are_not_members_of_case_flow():
         assert "accept" not in state
 
 
-def test_institution_acceptance_is_an_event_record_not_a_release_state(
+def _unverified_recipient_receipt(profile):
+    identity = {
+        "proof_sha256": "d" * 64,
+        "recipient_id": profile["recipient_id"],
+        "profile_id": profile["id"],
+        "protocol": "PROTOCOLO-TESTE-C05-001",
+        "received_at": "2026-09-12T16:00:00-03:00",
+        "source": "TESTE: retorno sintético autorizado para a regressão",
+        "synthetic_test_only": True,
+        "authorized_for_report": True,
+        "case_state_at_import": {
+            "result_fingerprint": None,
+            "report_content_fingerprint": None,
+            "artifact_sha256": {
+                "report.pdf": None,
+                "signed_report.pdf": None,
+                "submission.zip": None,
+            },
+            "association_to_sent_version_verified": False,
+        },
+    }
+    record = {
+        **identity,
+        "record_id": hashlib.sha256(canonical_json(identity).encode("utf-8")).hexdigest(),
+        "event": "recipient_return",
+        "decision": "received_declared_unverified",
+        "status": "received_declared_unverified",
+        "institution_acceptance": False,
+        "authenticity_verified": False,
+        "profile_version": profile["version"],
+        "profile_source_set_sha256": profile["source_set_sha256"],
+        "recorded_at": "2026-09-12T16:01:00-03:00",
+        "operator_declaration": (
+            "RECEIVED_DOCUMENT_RECORDED_WITHOUT_AUTHENTICITY_OR_ACCEPTANCE_VERIFICATION"
+        ),
+        "filename": "SYNTHETIC_TEST_retorno.txt",
+        "stored_name": "recipient-return-" + "d" * 20 + "-SYNTHETIC_TEST_retorno.txt",
+        "media_type": "text/plain",
+        "size": 42,
+        "bytes_integrity": "verified",
+    }
+    return {"recorded": True, "record": record, "detail": "caller text is not trusted"}
+
+
+def test_recipient_receipt_is_unverified_evidence_not_acceptance_or_release_state(
     grau_iii_assessment,
 ):
+    recipient_profile = resolve_profile({"id": "bb-meci-avaliacao-imovel-pf"})
     fingerprint = assess_qualification(
-        _qualification_context(grau_iii_assessment), PROFILE_REF
+        _qualification_context(grau_iii_assessment), recipient_profile
     )["result_fingerprint"]
     review = [{
         "professional_id": "CREA-SP-123456",
@@ -770,25 +818,90 @@ def test_institution_acceptance_is_an_event_record_not_a_release_state(
         "fingerprint": fingerprint,
     }]
     without = assess_qualification(
-        _qualification_context(grau_iii_assessment, review_events=review), PROFILE_REF
+        _qualification_context(grau_iii_assessment, review_events=review), recipient_profile
     )
-    acceptance = {
+    fake_acceptance = {
+        "valid": True,
+        "accepted": True,
+        "status": "accepted",
         "institution": "Banco Exemplo S.A.",
-        "act": "verificacao_de_laudo",
-        "act_version": "2026-01",
-        "act_scope": "laudo unico protocolado em 2026-09-01",
     }
-    with_acceptance = assess_qualification(
+    full_claim_evidence = {
+        "real_act_by_institution": {"ref": "client supplied"},
+        "act_type_is_homologacao_or_explicit_acceptance": {"ref": "client supplied"},
+        "act_version_and_scope_recorded": {"ref": "client supplied"},
+    }
+    fake = assess_qualification(
         _qualification_context(
             grau_iii_assessment,
             review_events=review,
-            institution_acceptance=acceptance,
+            institution_acceptance=fake_acceptance,
+            claim_evidence={CLAIM_INSTITUTION_ACCEPTED: full_claim_evidence},
         ),
-        PROFILE_REF,
+        recipient_profile,
     )
-    assert with_acceptance["institution_acceptance"]["recorded"] is True
-    assert with_acceptance["institution_acceptance"]["record"] == acceptance
-    # Recording a real institutional act does not move the release pipeline.
-    assert with_acceptance["case_release_status"] == without["case_release_status"]
-    assert with_acceptance["case_release_status"] in CASE_FLOW
-    assert with_acceptance["case_release_status"] not in ("accepted", "submitted")
+    assert fake["institution_acceptance"]["recorded"] is False
+    fake_claim = next(
+        item for item in fake["claims"] if item["kind"] == CLAIM_INSTITUTION_ACCEPTED
+    )
+    assert fake_claim["state"] == "blocked"
+
+    receipt = _unverified_recipient_receipt(recipient_profile)
+    recorded = assess_qualification(
+        _qualification_context(
+            grau_iii_assessment,
+            review_events=review,
+            institution_acceptance=receipt,
+            claim_evidence={CLAIM_INSTITUTION_ACCEPTED: full_claim_evidence},
+        ),
+        recipient_profile,
+    )
+    assert recorded["institution_acceptance"]["recorded"] is True
+    assert recorded["institution_acceptance"]["record"] == receipt["record"]
+    assert "não verificado" in recorded["institution_acceptance"]["detail"].lower()
+    receipt_claim = next(
+        item for item in recorded["claims"] if item["kind"] == CLAIM_INSTITUTION_ACCEPTED
+    )
+    assert receipt_claim["state"] == "blocked"
+    # A receipt does not move the release pipeline.
+    assert recorded["case_release_status"] == without["case_release_status"]
+    assert recorded["case_release_status"] in CASE_FLOW
+    assert recorded["case_release_status"] not in ("accepted", "submitted")
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("event", "institution_acceptance"),
+        ("status", "accepted"),
+        ("recipient_id", "caixa-economica-federal"),
+        ("profile_version", "0.0.0"),
+        ("profile_source_set_sha256", "e" * 64),
+        ("proof_sha256", "e" * 64),
+        ("bytes_integrity", "missing_or_hash_mismatch"),
+        ("authorized_for_report", "true"),
+        ("recorded_at", "not-an-iso-timestamp"),
+    ],
+)
+def test_incomplete_or_mismatched_recipient_receipt_is_not_recorded(
+    grau_iii_assessment, field, invalid_value
+):
+    profile = resolve_profile({"id": "bb-meci-avaliacao-imovel-pf"})
+    receipt = _unverified_recipient_receipt(profile)
+    receipt["record"][field] = invalid_value
+
+    result = assess_qualification(
+        _qualification_context(
+            grau_iii_assessment,
+            institution_acceptance=receipt,
+        ),
+        profile,
+    )
+
+    assert result["institution_acceptance"]["recorded"] is False
+    claim = next(
+        item
+        for item in result["claims"]
+        if item["kind"] == CLAIM_INSTITUTION_ACCEPTED
+    )
+    assert claim["state"] == "blocked"

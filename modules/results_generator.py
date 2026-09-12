@@ -31,6 +31,7 @@ import seaborn as sns
 from .config_manager import config
 from .logging_manager import logger
 from .provenance import canonical_json
+from .qualification_profile.assessment import normalize_institution_receipt
 from .report_presenter.formula import compose_model_equation
 from .report_presenter.qualification import assess_document_state
 from .report_presenter.search_coverage import interpret_search
@@ -1181,16 +1182,23 @@ def build_report_view(
         )
     else:
         professional_review_display = "PENDENTE — evento aprovador identificável ausente"
-    acceptance = _as_mapping(document_state.get("institution_acceptance"))
-    acceptance_status = _safe_text(acceptance.get("status") or "not_recorded")
-    if acceptance_status.lower() in {"accepted", "approved"}:
+    acceptance = normalize_institution_receipt(
+        document_state.get("institution_acceptance"), qualification_profile
+    )
+    receipt = _as_mapping(acceptance.get("record"))
+    if acceptance.get("recorded"):
         institution_acceptance_display = " — ".join(
             part
             for part in (
-                acceptance_status,
-                _safe_text(acceptance.get("recipient_id") or qualification_profile.get("recipient_id") or ""),
-                _safe_text(acceptance.get("protocol") or acceptance.get("event_id") or ""),
-                _safe_text(acceptance.get("version") or acceptance.get("document_sha256") or ""),
+                "Comprovante registrado — NÃO VERIFICADO",
+                _safe_text(
+                    receipt.get("recipient_id")
+                    or qualification_profile.get("recipient_id")
+                    or ""
+                ),
+                _safe_text(receipt.get("protocol") or ""),
+                "SHA-256 " + _safe_text(receipt.get("proof_sha256") or ""),
+                "associação à versão efetivamente enviada NÃO VERIFICADA",
             )
             if part
         )
