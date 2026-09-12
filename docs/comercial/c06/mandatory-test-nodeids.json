@@ -751,6 +751,7 @@
     "tests/comercial/c04/test_packaging_supply.py::test_windows_job_verifier_requires_boolean_replay_state[None]",
     "tests/comercial/c04/test_packaging_supply.py::test_windows_job_verifier_requires_boolean_replay_state[false]",
     "tests/comercial/c04/test_packaging_supply.py::test_windows_product_shutdown_fails_before_using_cleanup_fallback",
+    "tests/comercial/c04/test_packaging_supply.py::test_windows_product_shutdown_fails_closed_when_child_observation_is_unavailable",
     "tests/comercial/c04/test_packaging_supply.py::test_windows_product_shutdown_kills_complete_process_tree",
     "tests/comercial/c04/test_packaging_supply.py::test_windows_spec_materializes_streamlit_sources_and_uses_onedir",
     "tests/comercial/c04/test_packaging_supply.py::test_windows_transition_scope_separates_bootstrap_from_distinct_recalculation",
