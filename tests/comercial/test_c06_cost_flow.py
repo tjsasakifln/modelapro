@@ -207,6 +207,10 @@ def test_worker_cost_route_does_not_call_market_peers_and_preserves_honest_revie
     assert signature_request["unsigned_pdf_sha256"]
     from tests.comercial.test_c06_document_flow import _sign_with_test_certificate
     unsigned = store.get_artifact(created["job_id"], "report.pdf")
+    from pypdf import PdfReader
+    pdf_text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(unsigned)).pages)
+    assert "Método da quantificação de custo" in pdf_text
+    assert "Método Comparativo Direto de Dados de Mercado" not in pdf_text
     signed, validation_context = _sign_with_test_certificate(unsigned)
     imported = import_signed_report(
         store, created["job_id"], signed_pdf=signed,

@@ -216,7 +216,11 @@
 
   <h1>{{ app_name }} — {{ document_kind }}</h1>
   <div class="subtitle">
+    {% if cost_route %}
+    Método da quantificação de custo — orçamento, BDI e depreciação documentados.
+    {% else %}
     Método Comparativo Direto de Dados de Mercado — tratamento científico por regressão.
+    {% endif %}
     {% if document_is_final %}
     Laudo vinculado ao perfil, às regras e à revisão profissional identificados abaixo.
     {% else %}
@@ -305,7 +309,7 @@
   </p>
   <p class="muted">
     Os números são cópia do resultado já calculado. Este relatório
-    <b>não recalcula regressão</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
+    <b>não recalcula {% if cost_route %}o custo{% else %}regressão{% endif %}</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
   </p>
 
   <h2>Identificação do resultado</h2>
@@ -894,7 +898,7 @@
   {% endif %}
   <p>
     Os números abaixo são cópia do snapshot. Este relatório
-    <b>não recalcula regressão</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
+    <b>não recalcula {% if cost_route %}o custo{% else %}regressão{% endif %}</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
   </p>
   <div class="frozen-box" id="snapshot-frozen">{% for line in frozen_lines %}{{ line }}
 {% endfor %}</div>
