@@ -93,6 +93,14 @@ class UnsafePayloadError(PersistenceError):
     pass
 
 
+class BackupIntegrityError(PersistenceError):
+    """A backup is malformed, modified, or unsafe to restore."""
+
+
+BACKUP_MANIFEST_NAME = "modelapro-store-manifest.json"
+BACKUP_FORMAT_VERSION = 1
+
+
 class SnapshotAbsent:
     """Sentinel type documenting explicit snapshot absence.
 
@@ -532,6 +540,72 @@ def init_store_root(root: Path) -> Path:
     return root
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _copy_regular_file(source: Path, destination: Path) -> None:
+    """Copy a regular file only; backups deliberately never follow symlinks."""
+    if source.is_symlink() or not source.is_file():
+        raise BackupIntegrityError(f"backup refuses non-regular file: {source}")
+    ensure_directory(destination.parent)
+    with source.open("rb") as src, destination.open("xb") as dst:
+        shutil.copyfileobj(src, dst)
+        dst.flush()
+        os.fsync(dst.fileno())
+    _chmod_file(destination, 0o600)
+
+
+def _manifest_entries(root: Path) -> list[Dict[str, Any]]:
+    entries: list[Dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if path == root / BACKUP_MANIFEST_NAME:
+            continue
+        if path.is_symlink():
+            raise BackupIntegrityError(f"backup contains symlink: {path}")
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        safe_relative_path(root, rel, label="backup member")
+        entries.append({"path": rel, "sha256": _sha256_file(path), "size": path.stat().st_size})
+    return entries
+
+
+def _validate_backup_manifest(backup_root: Path) -> list[Dict[str, Any]]:
+    manifest_path = backup_root / BACKUP_MANIFEST_NAME
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise BackupIntegrityError("backup manifest is missing")
+    try:
+        manifest = read_json_file(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise BackupIntegrityError("backup manifest is not valid JSON") from exc
+    if not isinstance(manifest, Mapping) or manifest.get("format_version") != BACKUP_FORMAT_VERSION:
+        raise BackupIntegrityError("unsupported backup manifest format")
+    if manifest.get("storage_schema_version") != STORAGE_SCHEMA_VERSION:
+        raise SchemaVersionError("backup schema is newer or incompatible with this product")
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files:
+        raise BackupIntegrityError("backup manifest has no files")
+    seen = set()
+    for entry in files:
+        if not isinstance(entry, Mapping) or set(entry) != {"path", "sha256", "size"}:
+            raise BackupIntegrityError("invalid backup manifest entry")
+        rel, expected, size = entry["path"], entry["sha256"], entry["size"]
+        if not isinstance(rel, str) or rel in seen or not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected) or not isinstance(size, int) or size < 0:
+            raise BackupIntegrityError("invalid backup file metadata")
+        seen.add(rel)
+        member = safe_relative_path(backup_root, rel, label="backup member")
+        if member.is_symlink() or not member.is_file() or member.stat().st_size != size or _sha256_file(member) != expected:
+            raise BackupIntegrityError(f"backup member failed integrity check: {rel}")
+    if STORE_DB_NAME not in seen:
+        raise BackupIntegrityError("backup does not contain its SQLite store")
+    return [dict(entry) for entry in files]
+
+
 @contextmanager
 def transactional_connection(db_path: Path, lock: threading.RLock):
     with lock:
@@ -660,6 +734,90 @@ class JobStore:
         with _default_guard:
             _default_store = None
             _auto_recovered_roots.clear()
+
+    def export_backup(self, destination: os.PathLike) -> Path:
+        """Create a portable directory backup with a SHA-256 manifest.
+
+        The destination must not exist. SQLite is copied through its backup API
+        while the store lock is held, so the database and immutable evidence are
+        not copied from a partially committed transaction.
+        """
+        target = Path(destination).expanduser()
+        if target.exists() or target.is_symlink():
+            raise BackupIntegrityError("backup destination must not already exist")
+        try:
+            target.resolve().relative_to(self.root.resolve())
+        except ValueError:
+            pass
+        else:
+            raise BackupIntegrityError("backup destination cannot be inside the store root")
+        ensure_directory(target.parent)
+        staging = target.parent / f".{target.name}.partial-{secrets.token_hex(8)}"
+        ensure_directory(staging)
+        try:
+            with self._lock:
+                for source in self.root.rglob("*"):
+                    if source == self.db_path or source.name in {f"{STORE_DB_NAME}-wal", f"{STORE_DB_NAME}-shm"}:
+                        continue
+                    if source.is_symlink():
+                        raise BackupIntegrityError(f"store contains symlink: {source}")
+                    if source.is_file():
+                        _copy_regular_file(source, staging / source.relative_to(self.root))
+                source_conn = _connect(self.db_path)
+                try:
+                    target_conn = sqlite3.connect(str(staging / STORE_DB_NAME))
+                    try:
+                        source_conn.backup(target_conn)
+                    finally:
+                        target_conn.close()
+                finally:
+                    source_conn.close()
+            entries = _manifest_entries(staging)
+            atomic_write_json(staging / BACKUP_MANIFEST_NAME, {
+                "format_version": BACKUP_FORMAT_VERSION,
+                "storage_schema_version": STORAGE_SCHEMA_VERSION,
+                "contract_version": CONTRACT_VERSION,
+                "created_at": utc_now(),
+                "files": entries,
+            })
+            os.replace(staging, target)
+            return target
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
+    backup = export_backup
+    export = export_backup
+
+    @classmethod
+    def restore_backup(cls, source: os.PathLike, destination: os.PathLike) -> "JobStore":
+        """Restore a verified backup only into a new, empty root.
+
+        Restoring over an existing store is intentionally rejected so a newer
+        schema cannot be mixed with older code or unrelated evidence.
+        """
+        backup_root = Path(source).expanduser().resolve()
+        target = Path(destination).expanduser()
+        if not backup_root.is_dir() or backup_root.is_symlink():
+            raise BackupIntegrityError("backup source must be a regular directory")
+        entries = _validate_backup_manifest(backup_root)
+        if target.exists() and (not target.is_dir() or any(target.iterdir())):
+            raise BackupIntegrityError("restore destination must be a new or empty directory")
+        ensure_directory(target)
+        try:
+            for entry in entries:
+                rel = entry["path"]
+                _copy_regular_file(
+                    safe_relative_path(backup_root, rel, label="backup member"),
+                    safe_relative_path(target, rel, label="restore member"),
+                )
+            return cls(target, recover_abandoned=False)
+        except Exception:
+            # The destination was required to be new/empty before restoration.
+            shutil.rmtree(target, ignore_errors=True)
+            raise
+
+    restore = restore_backup
 
     def create(
         self,

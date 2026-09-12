@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from typing import Optional
@@ -28,6 +29,22 @@ CLIENT_DATA_RECORD_KEYS = frozenset(
 )
 _MAX_BYTES = 5 * 1024 * 1024
 _BACKUP_COUNT = 7
+_SENSITIVE_PATTERNS = (
+    # Bearer/API/session credentials, including values supplied in formatted messages.
+    re.compile(r"(?i)\b(bearer\s+|(?:api[_ -]?key|access[_ -]?token|token|auth(?:orization)?|password|secret)\s*[=:]\s*)([^\s,;]+)"),
+    re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+    re.compile(r"\b\d{3}[.\- ]?\d{3}[.\- ]?\d{3}[.\- ]?\d{2}\b"),
+    re.compile(r"-----BEGIN (?:[A-Z ]* )?PRIVATE KEY-----.*?-----END (?:[A-Z ]* )?PRIVATE KEY-----", re.S),
+)
+
+
+def redact_text(value: object) -> str:
+    """Remove common credentials and Brazilian CPF identifiers from diagnostics."""
+    text = str(value)
+    text = _SENSITIVE_PATTERNS[0].sub(r"\1[REDACTED]", text)
+    for pattern in _SENSITIVE_PATTERNS[1:]:
+        text = pattern.sub("[REDACTED]", text)
+    return text
 
 
 class DropClientDataFilter(logging.Filter):
@@ -37,6 +54,14 @@ class DropClientDataFilter(logging.Filter):
         for key in CLIENT_DATA_RECORD_KEYS:
             if hasattr(record, key):
                 delattr(record, key)
+        # ``getMessage`` applies %-formatting before handlers persist it.  Redact
+        # that final value so callers cannot leak a token through ``logger.info``.
+        try:
+            record.msg = redact_text(record.getMessage())
+            record.args = ()
+        except Exception:
+            record.msg = "[REDACTED: unformattable log message]"
+            record.args = ()
         return True
 
 
