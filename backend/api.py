@@ -669,9 +669,11 @@ async def health_check():
 @app.get("/operations/license")
 async def current_license():
     from modules.operacao_local.runtime import license_decision
+    from modules.commercial_license import trust_anchor_metadata
     decision = license_decision()
     return {"signature_valid": decision.valid_signature, "expired": decision.expired,
-            "calculate": decision.permits("calculate"), "reason": decision.reason}
+            "calculate": decision.permits("calculate"), "reason": decision.reason,
+            "artifact_trust": trust_anchor_metadata()}
 
 
 @app.post("/operations/license")

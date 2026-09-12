@@ -544,6 +544,12 @@ def sidebar() -> dict:
         except PackageNotFoundError:
             product_version = "checkout de desenvolvimento"
         st.caption(f"MODELA PRO · {product_version}")
+        from modules.commercial_license import trust_anchor_metadata
+        anchor = trust_anchor_metadata()
+        if anchor.get("environment") == "synthetic_test":
+            st.warning(anchor["display_label"])
+        elif anchor.get("state") != "CONFIGURED":
+            st.caption("Âncora do titular não configurada neste artefato; cálculo não habilitado para venda.")
         with st.expander("Ajuda e sobre esta instalação"):
             manual = files("frontend").joinpath("assets/manual.md").read_text(encoding="utf-8")
             st.markdown(manual)

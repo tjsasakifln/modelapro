@@ -94,7 +94,8 @@ def test_runtime_environment_cannot_replace_unconfigured_vendor_anchor(monkeypat
         trusted_vendor_public_key()
 
 
-def test_unconfigured_anchor_exposes_only_buyer_facing_identity():
+def test_unconfigured_anchor_exposes_only_buyer_facing_identity(monkeypatch):
+    monkeypatch.delenv("MODELA_TEST_CONTEXT", raising=False)
     metadata = trust_anchor_metadata()
     assert metadata == {
         "schema": "MP-COM-TRUSTED-VENDOR/1",

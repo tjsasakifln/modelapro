@@ -79,13 +79,10 @@ def local_client_headers() -> dict[str, str]:
 
 
 def license_decision():
-    from modules.commercial_license import LicenseDecision, load_license
-    key = os.environ.get("MODELA_LICENSE_PUBLIC_KEY", "")
+    from modules.commercial_license import LicenseDecision, load_license, trusted_vendor_public_key
     path = Path(os.environ.get("MODELA_LICENSE_PATH") or runtime_root() / "entitlement.json")
     try:
-        if not key:
-            raise ValueError("vendor public key not configured")
-        return load_license(path, base64.urlsafe_b64decode(key + "=" * (-len(key) % 4)))
+        return load_license(path, trusted_vendor_public_key())
     except (ValueError, OSError):
         return LicenseDecision(False, False, None, frozenset(), "license unavailable or invalid")
 

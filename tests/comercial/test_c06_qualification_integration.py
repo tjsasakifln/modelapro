@@ -1,4 +1,4 @@
-"""C06 regressions for the real C01 -> C05 qualification contract.
+"""Collected C06 regressions for the real C01 -> C05 qualification contract.
 
 All people, evidence and documents below are synthetic test fixtures. They are
 not professional review, market evidence or an institutional act.

@@ -56,6 +56,10 @@ def _anchor_payload() -> dict:
 
 def trust_anchor_metadata() -> dict:
     """Expose non-key anchor identity and the mandatory buyer-facing label."""
+    if _source_test_override() is not None:
+        return {"schema": ANCHOR_SCHEMA, "state": "CONFIGURED", "environment": "synthetic_test",
+                "key_id": "SOURCE_TEST_ONLY", "algorithm": "Ed25519", "purpose": "buyer_entitlement",
+                "display_label": "BUILD SINTÉTICO DE TESTE — NÃO COMERCIAL"}
     payload = _anchor_payload()
     return {
         key: payload.get(key)

@@ -212,6 +212,59 @@ def check_junit(path: Path, min_tests: int = 1, label: str = "junit", forbid_ski
     return problems
 
 
+def check_collection(root: Path, expected_sha: str | None) -> list[str]:
+    problems: list[str] = []
+    payload = _load_json(root / "collection.json", problems, "wide collection")
+    if payload is None:
+        return problems
+    if (payload.get("schema") != "MP-C06-COLLECTION/1" or payload.get("exit_code") != 0
+            or payload.get("tested_commit_sha") != expected_sha
+            or str(payload.get("run_id")) != os.environ.get("GITHUB_RUN_ID")):
+        problems.append("wide collection: invalid schema, execution status or run/commit identity")
+    nodes = payload.get("nodeids")
+    calls = payload.get("calls")
+    if not isinstance(nodes, list) or not nodes or not isinstance(calls, dict):
+        return problems + ["wide collection: selected obligations or executed calls are absent"]
+    if len(nodes) != len(set(nodes)) or set(nodes) != set(calls):
+        problems.append("wide collection: duplicate, missing or unselected executed obligations")
+    for node, call in calls.items():
+        if (not isinstance(call, dict)
+                or call.get("outcome") not in {"passed", "failed", "skipped"}
+                or call.get("phase") not in {"setup", "call", "teardown"}):
+            problems.append(f"wide collection: malformed execution record for {node}")
+        elif call.get("outcome") != "passed" and not (
+            "test_wheel_install_smoke.py::" in node and call.get("outcome") == "skipped"
+        ):
+            problems.append(f"wide collection: obligation did not pass: {node}")
+    required_files = {
+        "tests/comercial/test_c06_qualification_integration.py",
+        "tests/comercial/test_c06_document_flow.py",
+        "tests/comercial/test_c06_security_routes.py",
+        "tests/comercial/test_c06_runtime_bootstrap.py",
+        "tests/comercial/c06/test_catalog_distribution.py",
+        "tests/pro_workflow/p04/test_nist_strd.py",
+        "tests/comercial/c02/test_playwright_path.py",
+        "tests/pro_workflow/p04/test_mutations_commercial.py",
+    }
+    collected_files = {node.split("::", 1)[0] for node in nodes}
+    if required_files - collected_files:
+        problems.append("wide collection: mandatory C06 files absent: "
+                        + ", ".join(sorted(required_files - collected_files)))
+    try:
+        cases = list(ET.parse(root / "wide.junit.xml").iter("testcase"))
+        actual = {f"{c.get('classname')}::{c.get('name')}" for c in cases}
+        expected = set()
+        for node in nodes:
+            file, tail = node.split("::", 1)
+            parts = tail.split("::")
+            expected.add(".".join([file.removesuffix(".py").replace("/", "."), *parts[:-1]]) + "::" + parts[-1])
+        if actual != expected or len(cases) != len(nodes):
+            problems.append("wide collection: JUnit does not cover the exact selected obligations")
+    except (OSError, ET.ParseError, ValueError, TypeError):
+        problems.append("wide collection: JUnit cross-check could not be completed")
+    return problems
+
+
 def check_c16(path: Path, expected_sha: str | None = None) -> list[str]:
     """The independent harness summary must show zero reprovados / violations."""
     problems: list[str] = []
@@ -277,6 +330,7 @@ def verify_artifacts(
     )
     problems.extend(check_c16(folder("c16-harness") / "c16.json", expected_sha=expected_sha))
     if require_identity:
+        problems.extend(check_collection(folder("wide-suite-linux"), expected_sha))
         for job, filename in [("c15-tests-linux", "c15-linux.junit.xml"),
                               ("c15-tests-windows", "c15-windows.junit.xml")]:
             problems.extend(check_junit(folder(job) / filename, label=filename, separate_install_job=True))
