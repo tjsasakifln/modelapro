@@ -29,7 +29,7 @@
   },
   "internal_remaining": [
     "Confirmar no CI final os produtores integrados de PDF/DOCX/XLSX, arbitramento e manifesto por requisito; coorte local de 52 testes passou",
-    "Concluir navegador real após correções da lista canônica de variáveis e das coordenadas pt-BR além da prévia; reabertura/zero passaram na coorte local",
+    "Confirmar no CI final o navegador composto; mercado e custo passaram juntos localmente e 12 arquivos emitidos tiveram hashes/tamanhos conferidos",
     "Corrigir e provar Windows instalado operacional, seguido por atualização/restauração entre árvores distintas",
     "Confirmar inventários por bytes, regeneração nativa, SBOM/licenças e pacote/manual da candidata final",
     "Concluir CI final com identidade/coleta/JUnit/bytes; alteração histórica do checkout não reproduzida localmente e ausente nos dois C15 A2",

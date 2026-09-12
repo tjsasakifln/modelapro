@@ -17,7 +17,9 @@ OOXML, com teste sob dois relógios diferentes. O navegador identificou depois
 coordenadas pt-BR mapeadas que não eram convertidas fora das oito linhas da prévia;
 `test_decimal_comma_mapping_covers_rows_beyond_preview_and_stays_strict` cobre
 12 linhas, zero, precedência e entradas inválidas. A coorte posterior de produtor
-e contratos Windows passou 87 testes; a confirmação do navegador está em curso.
+e contratos Windows passou 87 testes. Mercado e custo passaram juntos no
+navegador real, sem falhas ou skips; os hashes de seus 12 arquivos foram conferidos
+em [evidence-local-browser-20260912.json](evidence-local-browser-20260912.json).
 
 Os hashes dos seis arquivos do worker e os JUnits locais estão registrados em
 [evidence-local-documentary-20260912.json](evidence-local-documentary-20260912.json).

@@ -133,10 +133,12 @@ interface, superfícies comerciais, documentos e arbitramento passou 52 testes;
 as representações reais e os hashes estão no registro local vinculado. Isso
 não estende o SUCCESS de A2 aos commits posteriores.
 
-O navegador real está confirmando o formulário composto. Ele revelou duas
-incompatibilidades adicionais: classificação de variáveis em lista canônica e
-coordenadas pt-BR nas linhas além da prévia. O parser documental foi corrigido
-e testado; o ajuste do consumidor e a repetição do navegador estão em curso.
+O navegador real confirmou o formulário composto: mercado e custo passaram
+juntos, **2 passed, 0 failed, 0 skipped**, em 175,91 s. As incompatibilidades
+encontradas na lista canônica de variáveis e nas coordenadas pt-BR além da prévia
+foram corrigidas. O seletor do teste de custo agora confere o rótulo visível
+efetivamente selecionado. Os 12 arquivos emitidos tiveram hashes e tamanhos
+conferidos em [evidence-local-browser-20260912.json](evidence-local-browser-20260912.json).
 
 Permanecem obrigatórios a suíte ampla/agregador da candidata final, a confirmação
 das representações e guardas nos seus artefatos, o Windows instalado operacional
