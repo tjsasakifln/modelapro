@@ -43,6 +43,12 @@ com stderr ausente, assets e módulos dinâmicos Streamlit omitidos e cliente HT
 usado pela interface ausente das dependências runtime. Correções locais passam
 por reconstrução e verificação integral antes de nova publicação. Ainda não há
 A operacional aprovada para o ciclo entre árvores distintas.
+O [registro dos bytes Windows A2](evidence-windows-run-34721474609.json)
+preserva 56 entradas baixadas conferidas, incluindo o instalador, além dos
+36 arquivos de licença nativa e fontconfig. As 2.266 entradas do índice não
+baixadas individualmente não são declaradas verificadas. O audit de 115
+distribuições não reportou vulnerabilidades conhecidas; o pacote próprio
+`modelapro` não está no PyPI e fica fora dessa consulta de advisories.
 
 ## Execução → artefato
 

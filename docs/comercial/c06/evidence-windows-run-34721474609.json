@@ -1,0 +1,404 @@
+{
+  "schema": "MP-C06-WINDOWS-EVIDENCE-REVIEW/1",
+  "status": "FAILURE_NOT_APPROVAL",
+  "candidate_identity": {
+    "schema_version": "MP-COM-CANDIDATE-IDENTITY/1",
+    "event": "pull_request",
+    "run_id": "34721474609",
+    "run_attempt": "1",
+    "pr_head_sha": "df6b7b786f91b7a545d4c925d954cbedb9fbdf17",
+    "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+    "tested_commit_sha": "e4b82bed6c3e0ad5987ccc92d16e1bcef9b4588a",
+    "tree_sha": "d15c8f7356323952a8e391650cceb75137c169c8",
+    "tested_commit_parents": [
+      "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+      "df6b7b786f91b7a545d4c925d954cbedb9fbdf17"
+    ],
+    "windows_lock_sha256": "d1d0449349d6a37a5076f150d31a79338dfbf985bb065c152e3a21e941dd899c",
+    "windows_native_manifest_sha256": "dc2c7cc02bb5b75150f4bc6317496e25162201833f7cd3749199df8041e4f72b",
+    "trusted_entitlement_anchor_sha256": "5d7684b8b925ab1d05abc9340bfaaef01bb91666f1200e4267858d2897d87264",
+    "trusted_entitlement_anchor_scope": "SYNTHETIC_TEST_ONLY",
+    "msys2_setup_action": "msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884"
+  },
+  "initial_operation": {
+    "checks": {
+      "installed_executable": {
+        "path": "D:\\a\\_temp\\clean-user\\MODELA-PRO\\MODELA-PRO.exe",
+        "sha256": "22695a3ae251f90c255ccc33f6fa34df247c72a9344ddbb029ea5cbbd7854d4c",
+        "size": 37218293,
+        "status": "PASSED"
+      }
+    },
+    "error": {
+      "detail": "backend/UI did not become ready: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+      "type": "VerificationError"
+    },
+    "external_acceptance": false,
+    "phase": "initial",
+    "schema_version": "MP-COM-WINDOWS-INSTALL/1",
+    "status": "FAILED",
+    "synthetic_test_data": true
+  },
+  "installed_lifecycle_verified": false,
+  "distinct_tree_migration_verified": false,
+  "downloaded_index_sha256": "04a876da83aaa53c00b7455bbb115942f71e911c173146d08831b9e4150d9f80",
+  "downloaded_index_entries_verified": [
+    {
+      "path": "MODELA-PRO-0.1.0-c06.6-win64.exe",
+      "root": "modelapro-build-b",
+      "size": 120119623,
+      "sha256": "a20a3d7273c07a4c168c28be47b848cd138829e0db48d0039370cb7c8ad7beee"
+    },
+    {
+      "path": "release-manifest.json",
+      "root": "modelapro-build-b",
+      "size": 386765,
+      "sha256": "b8b1a0cbb300e99fa89db469e1ae02f62b4a7fae31e58aad4a61f2953980abdd"
+    },
+    {
+      "path": "MODELA-PRO-0.1.0-c06.6-mechanics-a-win64.exe",
+      "root": "modelapro-installer-a",
+      "size": 120119631,
+      "sha256": "e5282751431bcf35cf23e741ed17d13bf7a7006f4edc56a0587e4de1778f5831"
+    },
+    {
+      "path": "artifact-trusted-vendor-anchor.json",
+      "root": "c06-windows-evidence",
+      "size": 459,
+      "sha256": "5d7684b8b925ab1d05abc9340bfaaef01bb91666f1200e4267858d2897d87264"
+    },
+    {
+      "path": "build-status.json",
+      "root": "c06-windows-evidence",
+      "size": 608,
+      "sha256": "ac0ca1e562126710b0fcabd60ce817c96236cf368d886666a10715c936770840"
+    },
+    {
+      "path": "bundle-file-inventory.json",
+      "root": "c06-windows-evidence",
+      "size": 399109,
+      "sha256": "ae9c71c306b533fd5a501d530606c4afcac719690d2b0a5e0e2fe54ff54defd9"
+    },
+    {
+      "path": "bundle-isolation.json",
+      "root": "c06-windows-evidence",
+      "size": 202,
+      "sha256": "9b77cb80d60b2827ded689fa0cd72b0690d60b58ed27c1c10f69af6191de53f9"
+    },
+    {
+      "path": "candidate-identity.json",
+      "root": "c06-windows-evidence",
+      "size": 973,
+      "sha256": "f58f163101d9206f29576c573fa26ddb0cd0fd9648b1ef2b386cc02c1991fa2d"
+    },
+    {
+      "path": "initial-installed-preflight.json",
+      "root": "c06-windows-evidence",
+      "size": 281,
+      "sha256": "d132286ac2e637dbcc61a7963d696fd03b83c47d5a119852f44125aab7eb6559"
+    },
+    {
+      "path": "initial-product.log",
+      "root": "c06-windows-evidence",
+      "size": 649,
+      "sha256": "06783f2c4e25530a0fe05047413e29b7292d4d6390a014a392c57fea7d4576d4"
+    },
+    {
+      "path": "initial.json",
+      "root": "c06-windows-evidence",
+      "size": 643,
+      "sha256": "100b3f1b033f43333c766fd2d164ce8d5823e09d016c5258202105ecb1d863ab"
+    },
+    {
+      "path": "native-runtime.json",
+      "root": "c06-windows-evidence",
+      "size": 25721,
+      "sha256": "dc2c7cc02bb5b75150f4bc6317496e25162201833f7cd3749199df8041e4f72b"
+    },
+    {
+      "path": "pip-audit.json",
+      "root": "c06-windows-evidence",
+      "size": 6641,
+      "sha256": "5c86c1cc486d3761102bc803cc01cce423a69742c4e39f16df1d1a41aab2731c"
+    },
+    {
+      "path": "runtime-acl.json",
+      "root": "c06-windows-evidence",
+      "size": 17326,
+      "sha256": "f0a4b7d88f55eb0b1e760512a3081968a9ac111bbb5f064884639008bec2a9e8"
+    },
+    {
+      "path": "SBOM.modelapro.json",
+      "root": "c06-windows-evidence",
+      "size": 409995,
+      "sha256": "d33ff87bd719f50c97a2daefb9fb740f55ad86ca48c88caf89c33bd944a86029"
+    },
+    {
+      "path": "uninstall.json",
+      "root": "c06-windows-evidence",
+      "size": 224,
+      "sha256": "dbf0679993923e20f5f83d34363b9010e7bea9fb13368183a6b5b3ec87b3e96a"
+    },
+    {
+      "path": "version-transition.json",
+      "root": "c06-windows-evidence",
+      "size": 408,
+      "sha256": "0f65059cd3aa3a1b8b348b49c7f40c749f9374e8d90722d12995ca784c1400d3"
+    },
+    {
+      "path": "windows-native-regeneration.json",
+      "root": "c06-windows-evidence",
+      "size": 427,
+      "sha256": "6a3451b6f1bcd4d3d6c82a4b421ce04870ca4361c8d60b4b5b450816fff44e62"
+    },
+    {
+      "path": "windows-py312-x64.txt",
+      "root": "c06-windows-evidence",
+      "size": 2596,
+      "sha256": "d1d0449349d6a37a5076f150d31a79338dfbf985bb065c152e3a21e941dd899c"
+    },
+    {
+      "path": "windows-ui-controller-lock.txt",
+      "root": "c06-windows-evidence",
+      "size": 91,
+      "sha256": "908ffd96cd9b5016797532972cd6602e5a289c6b0fac73027dae19181f12acd2"
+    },
+    {
+      "path": "windows-native-runtime\\native-runtime.json",
+      "root": "c06-windows-evidence",
+      "size": 25721,
+      "sha256": "dc2c7cc02bb5b75150f4bc6317496e25162201833f7cd3749199df8041e4f72b"
+    },
+    {
+      "path": "windows-native-runtime\\fontconfig\\fonts.conf",
+      "root": "c06-windows-evidence",
+      "size": 2703,
+      "sha256": "f141c1b89b172d22f213531646c21e288f0ebf3ec46484698896e1b33c626756"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-brotli\\LICENSE",
+      "root": "c06-windows-evidence",
+      "size": 1084,
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-bzip2\\LICENSE",
+      "root": "c06-windows-evidence",
+      "size": 1896,
+      "sha256": "c6dbbf828498be844a89eaa3b84adbab3199e342eb5cb2ed2f0d4ba7ec0f38a3"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-cairo\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 1576,
+      "sha256": "67228a9f7c5f9b67c58f556f1be178f62da4d9e2e6285318d8c74d567255abdf"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-cairo\\COPYING-LGPL-2.1",
+      "root": "c06-windows-evidence",
+      "size": 26533,
+      "sha256": "9e9e8608c4cdda51a78cc3a385f4ec9a2e4c96d5ecad74ac8bca5fca3e563b7d"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-cairo\\COPYING-MPL-1.1",
+      "root": "c06-windows-evidence",
+      "size": 25755,
+      "sha256": "53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-expat\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 1144,
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-fontconfig\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 8616,
+      "sha256": "51a51aa9823704fd90bccc616cdd17ebabb5b2b3e9cbde886ca02c7002288067"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-freetype\\FTL.TXT",
+      "root": "c06-windows-evidence",
+      "size": 6743,
+      "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-freetype\\GPLv2.TXT",
+      "root": "c06-windows-evidence",
+      "size": 17994,
+      "sha256": "c4120c6752c910c299e3bd9cb3a46ff262c268303ca2069b61f92f10a5656c18"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-fribidi\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 26440,
+      "sha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-gcc-libs\\COPYING.LIB",
+      "root": "c06-windows-evidence",
+      "size": 26527,
+      "sha256": "a9bdde5616ecdd1e980b44f360600ee8783b1f99b8cc83a2beb163a0a390e861"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-gcc-libs\\COPYING.RUNTIME",
+      "root": "c06-windows-evidence",
+      "size": 3324,
+      "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-gcc-libs\\COPYING3",
+      "root": "c06-windows-evidence",
+      "size": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-gcc-libs\\README",
+      "root": "c06-windows-evidence",
+      "size": 236,
+      "sha256": "33400d067fa3e2bd670a0868dcdb60c9486e8f559b675cf9ff1ff55d4e0d06ab"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-gettext-runtime\\03133addae5b-COPYING",
+      "root": "c06-windows-evidence",
+      "size": 65,
+      "sha256": "03133addae5b99a6148c538300e6d97074453089be1423b741bd081f18e2b298"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-gettext-runtime\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 495,
+      "sha256": "7ef2cdfe58e0c0460657b6598b49af29d4e03c1e41cbaf0e1da1eb8ad74b95d0"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-gettext-runtime\\COPYING.LIB",
+      "root": "c06-windows-evidence",
+      "size": 26419,
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-glib2\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 25967,
+      "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-graphite2\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 1235,
+      "sha256": "2c272829ff23f182c8bf7ea12fedea69b0ae148663123ed5240c117cb129c9c1"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-graphite2\\LICENSE",
+      "root": "c06-windows-evidence",
+      "size": 29228,
+      "sha256": "cab46cd45adbfea4b1d0f14b033c70062c73074fa0b56532c2f351576ddf455e"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-harfbuzz\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 1971,
+      "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-libdatrie\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 26527,
+      "sha256": "a9bdde5616ecdd1e980b44f360600ee8783b1f99b8cc83a2beb163a0a390e861"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-libffi\\LICENSE",
+      "root": "c06-windows-evidence",
+      "size": 1132,
+      "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-libiconv\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-libiconv\\COPYING.LIB",
+      "root": "c06-windows-evidence",
+      "size": 26419,
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-libiconv\\README",
+      "root": "c06-windows-evidence",
+      "size": 5741,
+      "sha256": "4ae66e61d1c6593c84c47105b368d579bcee1af566dbb959ec63a0c48425dcf4"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-libpng\\LICENSE",
+      "root": "c06-windows-evidence",
+      "size": 5345,
+      "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-libthai\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 26419,
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-libwinpthread\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 2883,
+      "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-pango\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 25292,
+      "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-pcre2\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 97,
+      "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-pcre2\\LICENCE.md",
+      "root": "c06-windows-evidence",
+      "size": 4011,
+      "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-pixman\\COPYING",
+      "root": "c06-windows-evidence",
+      "size": 2087,
+      "sha256": "fac9270f0987b96ff4533fca3548c633e02083cbba4a0172a3b149b2e4019793"
+    },
+    {
+      "path": "windows-native-runtime\\licenses\\mingw-w64-ucrt-x86_64-zlib\\LICENSE",
+      "root": "c06-windows-evidence",
+      "size": 1002,
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+    }
+  ],
+  "index_entries_not_individually_downloaded": 2266,
+  "native_packages": 22,
+  "native_licenses_verified": 36,
+  "native_fontconfig_verified": true,
+  "native_regeneration": {
+    "changed": [],
+    "reference_file_count": 68,
+    "reference_inventory_sha256": "12efc10289fae391d2396f906c4cc8501a41733e956609fccb4af91f06bfee41",
+    "reference_only": [],
+    "regenerated_file_count": 68,
+    "regenerated_inventory_sha256": "12efc10289fae391d2396f906c4cc8501a41733e956609fccb4af91f06bfee41",
+    "regenerated_only": [],
+    "schema_version": "MP-COM-WINDOWS-NATIVE-REGENERATION/1",
+    "status": "PASSED"
+  },
+  "python_audit": {
+    "environment_distributions": 115,
+    "reported_vulnerabilities": 0,
+    "unaudited_distribution": "modelapro 0.1.0 (not on PyPI); covered by source/security review, not by dependency advisory lookup"
+  },
+  "limitation": "Complete installed bundle bytes were not independently matched in this failed run; installer hash and available evidence files were verified. New runtime fixes and final cohort require their own installed lifecycle."
+}
