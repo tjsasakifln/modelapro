@@ -153,7 +153,7 @@ def windows_private_acl_command(path: str, user_sid: str, *, is_dir: bool) -> li
     if not user_sid.startswith("S-1-") or " " in user_sid:
         raise RuntimeError("Windows private ACL requires a SID")
     rights = "(OI)(CI)F" if is_dir else "F"
-    return [
+    command = [
         "icacls",
         path,
         "/inheritance:r",
@@ -163,7 +163,16 @@ def windows_private_acl_command(path: str, user_sid: str, *, is_dir: bool) -> li
         f"SYSTEM:{rights}",
         "/grant:r",
         f"*{_WINDOWS_ADMINISTRATORS_SID}:{rights}",
+        "/remove:g",
+        "*S-1-3-4",
+        "/remove:g",
+        "*S-1-5-32-545",
+        "/remove:g",
+        "*S-1-1-0",
     ]
+    if is_dir:
+        command.append("/T")
+    return command
 
 
 def _windows_current_user_sid() -> str:
