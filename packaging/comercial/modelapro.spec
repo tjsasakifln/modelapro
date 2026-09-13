@@ -15,6 +15,9 @@ source_helpers = runpy.run_path(
 source_data_files = source_helpers["source_data_files"]
 source_submodules = source_helpers["source_submodules"]
 validate_runtime_metadata = source_helpers["validate_runtime_metadata"]
+filter_first_party_runtime_metadata = source_helpers[
+    "filter_first_party_runtime_metadata"
+]
 frontend_sources = [
     (str(path), str(path.parent.relative_to(root)))
     for path in sorted((root / "frontend").rglob("*.py"))
@@ -112,6 +115,29 @@ a = Analysis(
     excludes=["pytest", "playwright", "black", "flake8", "mypy"],
     noarchive=False,
 )
+# Analysis-00.toc is the unfiltered diagnostic. Packaging consumers must use
+# packaging_datas, not a.datas, after first-party dist-info is reduced to
+# source-generated METADATA.
+packaging_datas = filter_first_party_runtime_metadata(root, a.datas, runtime_metadata)
+_workpath = globals().get("workpath")
+if _workpath:
+    Path(_workpath).mkdir(parents=True, exist_ok=True)
+    (Path(_workpath) / "packaging-datas-filtered.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "MP-COM-PACKAGING-DATAS-FILTERED/1",
+                "distribution": runtime_metadata.name,
+                "entries": [
+                    [str(part) for part in (entry[:3] if isinstance(entry, (tuple, list)) else (entry,))]
+                    for entry in packaging_datas
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
@@ -122,4 +148,4 @@ exe = EXE(
     console=False,
     contents_directory=".",
 )
-coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, name="MODELA-PRO")
+coll = COLLECT(exe, a.binaries, a.zipfiles, packaging_datas, name="MODELA-PRO")

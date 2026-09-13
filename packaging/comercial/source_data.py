@@ -94,3 +94,89 @@ def validate_runtime_metadata(root: Path, metadata_dir: Path) -> tuple[str, str]
     if observed != expected:
         raise RuntimeError("runtime metadata differs from source project identity")
     return observed
+
+
+def _canonical_distribution_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).strip("-").lower()
+
+
+def _path_components(value: object) -> tuple[str, ...]:
+    text = str(value or "").replace("\\", "/")
+    return tuple(part for part in text.split("/") if part and part not in {".", ".."})
+
+
+def _distribution_name_from_dist_info_dir(dirname: str) -> str | None:
+    if not dirname.lower().endswith(".dist-info"):
+        return None
+    stem = dirname[: -len(".dist-info")]
+    matched = re.fullmatch(r"(.+)-([0-9].*)", stem)
+    if matched is None:
+        return None
+    return matched.group(1)
+
+
+def _first_party_dist_info_dir(
+    components: tuple[str, ...], canonical_name: str
+) -> str | None:
+    for part in components:
+        distribution = _distribution_name_from_dist_info_dir(part)
+        if distribution is None:
+            continue
+        if _canonical_distribution_name(distribution) == canonical_name:
+            return part
+    return None
+
+
+def _toc_dest_src(entry: object) -> tuple[str, str]:
+    if not isinstance(entry, (tuple, list)) or len(entry) < 2:
+        raise RuntimeError("packaging TOC entry is not a path pair or triple")
+    if len(entry) >= 3:
+        return str(entry[0]), str(entry[1])
+    return str(entry[1]), str(entry[0])
+
+
+def first_party_dist_info_dest_names(toc: list, root: Path) -> list[str]:
+    """Destination filenames inside first-party dist-info (normalized)."""
+    canonical = _canonical_distribution_name(_project_identity(root)[0])
+    names: list[str] = []
+    for entry in toc:
+        dest, src = _toc_dest_src(entry)
+        dist_dir = _first_party_dist_info_dir(
+            _path_components(dest), canonical
+        ) or _first_party_dist_info_dir(_path_components(src), canonical)
+        if dist_dir is None:
+            continue
+        dest_parts = _path_components(dest)
+        names.append(dest_parts[-1] if dest_parts else dist_dir)
+    return names
+
+
+def filter_first_party_runtime_metadata(
+    root: Path,
+    toc: list,
+    metadata_dir: Path,
+) -> list:
+    """Remove hook-reintroduced first-party dist-info; keep source METADATA.
+
+    Call after Analysis and pass the result to PYZ/EXE/COLLECT.  Do not assign
+    the result back onto Analysis; Analysis-00.toc stays the unfiltered
+    diagnostic.  Third-party metadata entries are unchanged.
+    """
+    name, version = validate_runtime_metadata(root, metadata_dir)
+    canonical = _canonical_distribution_name(name)
+    authorized_src = metadata_dir / "METADATA"
+    if not authorized_src.is_file():
+        raise RuntimeError("source runtime METADATA is absent")
+    if version not in metadata_dir.name:
+        raise RuntimeError("runtime metadata directory does not match source version")
+    authorized_dest = f"{metadata_dir.name}/METADATA"
+    kept: list = []
+    for entry in toc:
+        dest, src = _toc_dest_src(entry)
+        if _first_party_dist_info_dir(_path_components(dest), canonical):
+            continue
+        if _first_party_dist_info_dir(_path_components(src), canonical):
+            continue
+        kept.append(entry)
+    kept.append((authorized_dest, str(authorized_src), "DATA"))
+    return kept
