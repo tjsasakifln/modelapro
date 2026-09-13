@@ -1247,11 +1247,18 @@ def test_wheel_contains_runtime_components_but_not_release_tooling(tmp_path: Pat
 def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
     tmp_path: Path, monkeypatch
 ) -> None:
+    import runpy
+    import sys
+    from types import ModuleType
+    from types import SimpleNamespace
+
     root = Path(__file__).resolve().parents[3]
     spec = (root / "packaging" / "comercial" / "modelapro.spec").read_text(encoding="utf-8")
     assert 'rglob("*.py")' in spec
-    assert '_source_data_files(root, "frontend")' in spec
-    assert '_source_data_files(root, "profiles")' in spec
+    assert 'source_data_files(root, "frontend")' in spec
+    assert 'source_data_files(root, "profiles")' in spec
+    assert 'runpy.run_path(' in spec
+    assert '"packaging" / "comercial" / "source_data.py"' in spec
     assert 'collect_data_files("frontend")' not in spec
     assert 'collect_data_files("modules")' not in spec
     assert 'collect_data_files("profiles")' not in spec
@@ -1291,10 +1298,13 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
     anchor.write_text("{}", encoding="utf-8")
     monkeypatch.syspath_prepend(str(stale))
 
+    resolver = runpy.run_path(
+        str(root / "packaging" / "comercial" / "source_data.py")
+    )["source_data_files"]
     observed = set()
     for package in ("frontend", "modules", "profiles"):
         observed.update(
-            build_windows._source_data_files(
+            resolver(
                 checkout,
                 package,
                 excluded_names=(
@@ -1305,6 +1315,72 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
             )
         )
     assert observed == expected
+
+    native = tmp_path / "native"
+    (native / "dlls").mkdir(parents=True)
+    (native / "licenses").mkdir()
+    (native / "fontconfig").mkdir()
+    (native / "dlls" / "runtime.dll").write_bytes(b"dll")
+    (native / "native-runtime.json").write_text("{}", encoding="utf-8")
+    anchor = tmp_path / "trusted-anchor.json"
+    anchor.write_text("{}", encoding="utf-8")
+    identity = tmp_path / "build-source-identity.json"
+    identity.write_text(
+        json.dumps(
+            {
+                "schema_version": "MP-COM-BUILD-IDENTITY/1",
+                "source_sha": TEST_SOURCE_SHA,
+                "tree_sha": TEST_SOURCE_SHA,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODELA_WINDOWS_NATIVE_DIR", str(native))
+    monkeypatch.setenv("MODELA_BUILD_TRUSTED_ANCHOR", str(anchor))
+    monkeypatch.setenv("MODELA_BUILD_SOURCE_IDENTITY_FILE", str(identity))
+
+    pyinstaller = ModuleType("PyInstaller")
+    pyinstaller_utils = ModuleType("PyInstaller.utils")
+    hooks = ModuleType("PyInstaller.utils.hooks")
+    hooks.collect_data_files = lambda _package: []
+    hooks.collect_submodules = lambda _package: []
+    hooks.copy_metadata = lambda *_args, **_kwargs: []
+    pyinstaller.utils = pyinstaller_utils
+    pyinstaller_utils.hooks = hooks
+    monkeypatch.setitem(sys.modules, "PyInstaller", pyinstaller)
+    monkeypatch.setitem(sys.modules, "PyInstaller.utils", pyinstaller_utils)
+    monkeypatch.setitem(sys.modules, "PyInstaller.utils.hooks", hooks)
+
+    class FakeAnalysis(SimpleNamespace):
+        def __init__(self, scripts, **kwargs):
+            super().__init__(
+                scripts=scripts,
+                binaries=kwargs["binaries"],
+                datas=kwargs["datas"],
+                pure=[],
+                zipfiles=[],
+            )
+
+    executed = runpy.run_path(
+        str(root / "packaging" / "comercial" / "modelapro.spec"),
+        init_globals={
+            "SPEC": str(root / "packaging" / "comercial" / "modelapro.spec"),
+            "Analysis": FakeAnalysis,
+            "PYZ": lambda *_args, **_kwargs: object(),
+            "EXE": lambda *_args, **_kwargs: object(),
+            "COLLECT": lambda *_args, **_kwargs: object(),
+        },
+    )
+    project_data = {
+        (Path(source), destination)
+        for source, destination in executed["datas"]
+        if destination.startswith(("frontend", "modules", "profiles"))
+    }
+    assert (
+        root / "modules" / "templates" / "report.html",
+        "modules/templates",
+    ) in project_data
+    assert not any(stale in source.parents for source, _destination in project_data)
 
 
 def test_windows_uninstall_preserves_whichever_profile_was_created() -> None:

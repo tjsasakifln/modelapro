@@ -3,12 +3,15 @@
 import os
 import json
 import re
+import runpy
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
-from scripts.comercial.operacao.build_windows import _source_data_files
 
 root = Path(SPEC).resolve().parents[2]
+source_data_files = runpy.run_path(
+    str(root / "packaging" / "comercial" / "source_data.py")
+)["source_data_files"]
 frontend_sources = [
     (str(path), str(path.parent.relative_to(root)))
     for path in sorted((root / "frontend").rglob("*.py"))
@@ -31,13 +34,13 @@ native_evidence = [
     (str(native_root / "licenses"), "native-runtime/licenses"),
     (str(native_root / "fontconfig"), "native-runtime/fontconfig"),
 ]
-module_datas = _source_data_files(
+module_datas = source_data_files(
     root,
     "modules",
     excluded_names=frozenset({"trusted_vendor_anchor.json"}),
 )
-frontend_datas = _source_data_files(root, "frontend")
-profile_datas = _source_data_files(root, "profiles")
+frontend_datas = source_data_files(root, "frontend")
+profile_datas = source_data_files(root, "profiles")
 anchor_value = os.environ.get("MODELA_BUILD_TRUSTED_ANCHOR", "").strip()
 trusted_anchor = (
     Path(anchor_value)

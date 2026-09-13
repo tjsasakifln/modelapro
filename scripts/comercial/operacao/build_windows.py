@@ -21,26 +21,6 @@ BUILD_IDENTITY_FILENAME = "build-source-identity.json"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def _source_data_files(
-    root: Path,
-    package: str,
-    *,
-    excluded_names: frozenset[str] = frozenset(),
-) -> list[tuple[str, str]]:
-    """Return non-code package data from the authoritative source checkout."""
-    package_root = (root / package).resolve()
-    if not package_root.is_dir():
-        raise RuntimeError(f"source data package is absent: {package}")
-    return [
-        (str(path), path.parent.relative_to(root).as_posix())
-        for path in sorted(package_root.rglob("*"))
-        if path.is_file()
-        and path.name not in excluded_names
-        and path.suffix.lower() not in {".py", ".pyc"}
-        and "__pycache__" not in path.parts
-    ]
-
-
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
