@@ -90,6 +90,9 @@ def test_websocket_cross_origin_and_url_secret_rejected(installation):
 def test_job_token_recovery_requires_authenticated_workspace_and_csrf(
     installation, monkeypatch
 ):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
     from backend import api
     from tests.c10_pipeline.fixtures import complete_request_spec
 
@@ -135,6 +138,40 @@ def test_job_token_recovery_requires_authenticated_workspace_and_csrf(
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
     assert response.json()["access_token"] == record["access_token"]
+
+    # Force the losing create to populate the in-memory submission index
+    # before the winning create returns to the API adapter.  An explicit
+    # store-level created=True must remain authoritative under this ordering.
+    store = api.get_job_store()
+    original_create = store.create
+    winner_created = Event()
+    replay_finished = Event()
+
+    def interleaved_create(**kwargs):
+        created_record = original_create(**kwargs)
+        if created_record.get("created") is True:
+            winner_created.set()
+            assert replay_finished.wait(timeout=5)
+        return created_record
+
+    monkeypatch.setattr(store, "create", interleaved_create)
+
+    def concurrent_create():
+        created_record = api._create_job_record(
+            store,
+            idempotency_key="SYNTHETIC_CONCURRENT_SUBMISSION",
+            project_id="SYNTHETIC_CONCURRENT_PROJECT",
+            payload={"filename": "SYNTHETIC_CONCURRENT.csv"},
+        )
+        if created_record["created"] is False:
+            replay_finished.set()
+        return created_record
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: concurrent_create(), range(2)))
+
+    assert sorted(result["created"] for result in results) == [False, True]
+    assert sum(bool(result["access_token"]) for result in results) == 1
 
 
 def test_credentials_in_urls_are_rejected_even_percent_encoded(installation):
