@@ -18,7 +18,6 @@ from tests.pro_workflow.p01.conftest import (
 )
 from tests.pro_workflow.p01.test_a01_ols_oracle import _prepared
 
-SCRATCH = Path("/tmp/grok-goal-c8528f369173/implementer")
 DOCS = Path(__file__).resolve().parents[3] / "docs" / "campaigns" / "MP-PRO-20260911" / "P01"
 
 
@@ -127,12 +126,12 @@ def test_p01_a06_snapshot_and_report_context_json_roundtrip(tmp_path):
         },
         "workflow_context": wf,
     }
-    DOCS.mkdir(parents=True, exist_ok=True)
-    path = DOCS / "sanitized_snapshot_context.example.json"
+    committed = DOCS / "sanitized_snapshot_context.example.json"
+    assert committed.is_file()
+    path = tmp_path / "sanitized_snapshot_context.example.json"
     path.write_text(json.dumps(example, indent=2, allow_nan=False, ensure_ascii=False), encoding="utf-8")
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    (SCRATCH / "p01-a06-roundtrip.json").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
     loaded = json.loads(path.read_text(encoding="utf-8"))
+    assert json.loads(committed.read_text(encoding="utf-8"))["workflow_context"]["schema_version"] == "MP-PRO/1"
     assert loaded["label"].startswith("SYNTHETIC")
     assert loaded["snapshot"]["model"]["formula"]
     assert loaded["report_context"]["series_row_ids"] == used_ids
