@@ -145,21 +145,73 @@ def wait_for_health(
     raise TimeoutError(f"Timed out waiting for {url}: {last_error}")
 
 
+_WINDOWS_ADMINISTRATORS_SID = "S-1-5-32-544"
+
+
+def windows_private_acl_command(path: str, user_sid: str, *, is_dir: bool) -> list[str]:
+    """Explicit owner/SYSTEM/Administrators DACL; strip inherited Users."""
+    if not user_sid.startswith("S-1-") or " " in user_sid:
+        raise RuntimeError("Windows private ACL requires a SID")
+    rights = "(OI)(CI)F" if is_dir else "F"
+    return [
+        "icacls",
+        path,
+        "/inheritance:r",
+        "/grant:r",
+        f"*{user_sid}:{rights}",
+        "/grant:r",
+        f"SYSTEM:{rights}",
+        "/grant:r",
+        f"*{_WINDOWS_ADMINISTRATORS_SID}:{rights}",
+    ]
+
+
+def _windows_current_user_sid() -> str:
+    completed = subprocess.run(
+        ["whoami", "/user", "/fo", "csv", "/nh"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"unable to resolve Windows user SID: {completed.stderr}")
+    sid = completed.stdout.strip().split(",")[-1].strip().strip('"')
+    if not sid.startswith("S-1-"):
+        raise RuntimeError(f"unable to resolve Windows user SID: {completed.stdout!r}")
+    return sid
+
+
+def restrict_private_path(path: str | os.PathLike) -> None:
+    target = os.fspath(path)
+    if os.name != "nt":
+        mode = 0o700 if os.path.isdir(target) else 0o600
+        os.chmod(target, mode)
+        return
+    command = windows_private_acl_command(
+        target, _windows_current_user_sid(), is_dir=os.path.isdir(target)
+    )
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"unable to restrict Windows ACL on {target}: {completed.stderr or completed.stdout}"
+        )
+
+
 def ensure_local_directories(cfg) -> None:
-    for path in (
+    paths = [
         cfg.DATA_DIR,
         cfg.UPLOAD_DIR,
         cfg.REPORTS_DIR,
         cfg.JOBS_DIR,
         cfg.PROJECTS_DIR,
         cfg.LOG_DIR,
-    ):
+    ]
+    runtime_root = os.environ.get("MODELA_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        paths.insert(0, runtime_root)
+    for path in paths:
         os.makedirs(path, mode=0o700, exist_ok=True)
-        try:
-            os.chmod(path, 0o700)
-        except OSError:
-            # Windows ACLs are qualified separately; chmod is best-effort there.
-            pass
+        restrict_private_path(path)
 
 
 def _print_commands(cfg) -> None:

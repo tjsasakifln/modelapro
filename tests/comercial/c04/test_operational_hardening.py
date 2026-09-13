@@ -43,7 +43,54 @@ def test_runtime_and_job_store_share_one_default_root(tmp_path, monkeypatch):
     JobStore.reset_default()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows ACL verification needs a Windows runner")
+def test_windows_private_acl_command_excludes_inherited_users_and_owner_rights():
+    from scripts.c15_local.launcher import windows_private_acl_command
+
+    user_sid = "S-1-5-21-3699639565-2515463329-295617607-500"
+    command = windows_private_acl_command(r"D:\a\_temp\profile-active", user_sid, is_dir=True)
+    joined = " ".join(command)
+    assert command[:3] == ["icacls", r"D:\a\_temp\profile-active", "/inheritance:r"]
+    assert f"*{user_sid}:(OI)(CI)F" in command
+    assert "SYSTEM:(OI)(CI)F" in command
+    assert "*S-1-5-32-544:(OI)(CI)F" in command
+    assert "S-1-5-32-545" not in joined
+    assert "Users" not in joined
+    assert "Everyone" not in joined
+    assert "S-1-3-4" not in joined
+    assert "OWNER RIGHTS" not in joined
+
+
+def test_ensure_local_directories_restricts_windows_runtime_root(tmp_path, monkeypatch):
+    from scripts.c15_local import launcher as launcher_module
+    from scripts.c15_local.launcher import ensure_local_directories
+
+    root = tmp_path / "runtime"
+    monkeypatch.setenv("MODELA_RUNTIME_ROOT", str(root))
+    monkeypatch.setattr(launcher_module.os, "name", "nt")
+    monkeypatch.setattr(launcher_module, "_windows_current_user_sid", lambda: "S-1-5-21-1-2-3-500")
+    observed = []
+
+    def fake_run(command, **_kwargs):
+        observed.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(launcher_module.subprocess, "run", fake_run)
+    cfg = Config(
+        DATA_DIR=str(root / "store"),
+        UPLOAD_DIR=str(root / "uploads"),
+        REPORTS_DIR=str(root / "reports"),
+        JOBS_DIR=str(root / "store" / "jobs"),
+        PROJECTS_DIR=str(root / "store" / "projects"),
+        LOG_DIR=str(root / "logs"),
+    )
+    ensure_local_directories(cfg)
+    assert observed
+    assert observed[0][1] == str(root)
+    assert all(item[2] == "/inheritance:r" for item in observed)
+    assert all("S-1-5-32-545" not in " ".join(item) for item in observed)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX chmod bits; Windows uses restrict_private_path")
 def test_launcher_directories_and_rotating_log_are_private(tmp_path):
     from scripts.c15_local.launcher import ensure_local_directories
 
