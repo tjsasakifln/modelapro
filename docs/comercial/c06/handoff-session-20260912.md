@@ -1,19 +1,23 @@
 # C06 — continuidade em nova sessão
 
-## Topo vigente — 2026-09-13, A3 operacional hospedada
+## Topo vigente — 2026-09-13, B tecnicamente encerrada
 
-A3 **`271b08ddf412ceb733d98c3c6281b145289f5b18`** está na #20. Windows
-**34733840472** attempt 1 SUCCESS, escopo **OPERATIONAL_SAME_TREE_ONLY**.
-Filtro pós-Analysis deixou só `METADATA` próprio; ACL privada passou;
-initial/upgrade/restore/uninstall passaram. Não é migração entre árvores
-distintas nem instalador Inno aprovado como distribuição comercial.
-`COMMERCIAL_RELEASE_READY=false`. B local permanece à frente com UI/manual
-reais; publicar B por fast-forward na mesma #20.
+**ENCERRAR técnico.** PR #20 HEAD **`263ec1dcbaa7850459453215faf1066da402cb43`**,
+base `6d54f902b85a5a37bfbf154d39f74cf854ff9b2b`, draft, `auto_merge=null`.
+`COMMERCIAL_RELEASE_READY=false`.
 
-- PR #20: open, draft, `auto_merge=null`, base `6d54f902b85a5a37bfbf154d39f74cf854ff9b2b`
-- A3 obrigações: 1.822. B obrigações: 1.832
-- Instalador A3: `MODELA-PRO-0.1.0-c06.10-win64.exe` SHA-256
-  `73b768cc39eb19f811d4c8659aac8b6b70dc14aceb13063bb4129a11ef196ffc`
+| | Resultado | Runs |
+|---|---|---|
+| A Origem/metadados | PASS | filtro pós-Analysis; METADATA físico só da fonte |
+| B A3 operacional + B entre árvores | PASS | Windows A3 [34733840472](https://github.com/tjsasakifln/modelapro/actions/runs/34733840472)/1; A3→B [34734531128](https://github.com/tjsasakifln/modelapro/actions/runs/34734531128); B [34735590438](https://github.com/tjsasakifln/modelapro/actions/runs/34735590438)/1 |
+| C C15 PR e push | PASS | [34735590433](https://github.com/tjsasakifln/modelapro/actions/runs/34735590433) / [34735588458](https://github.com/tjsasakifln/modelapro/actions/runs/34735588458); 1832/1832; 1 skip wheel-smoke |
+| D Mercado/custo/documentos | PASS na suíte C15 desta SHA | assinatura TESTE; C05 autoridade |
+| E Identidades | PASS | merge de teste `7b3b046` não é stale; checkout limpo |
+
+- A3 `271b08ddf412ceb733d98c3c6281b145289f5b18`, instalador `73b768cc39eb19f811d4c8659aac8b6b70dc14aceb13063bb4129a11ef196ffc`
+- B instalador `695709e264d166310610a24c3bc6bcf474868421f06be76f8b340d6da565c729`
+- Obrigações A3 1.822 / B 1.832. UI/manual profissionais permanecem em B.
+- A3 nunca substitui B. Sem merge/deploy/venda/assinatura real.
 
 ## Encerramento solicitado — 2026-09-13, 00:43 UTC (12/09, 21:43 BRT)
 
