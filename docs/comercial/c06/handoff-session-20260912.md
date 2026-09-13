@@ -1,5 +1,159 @@
 # C06 — continuidade em nova sessão
 
+## Encerramento solicitado — 2026-09-13, 00:43 UTC (12/09, 21:43 BRT)
+
+**Este é o checkpoint vigente.** O usuário pediu handoff para continuidade posterior
+e encerramento. Agentes Windows e revisão foram interrompidos; nenhum novo ciclo,
+push, merge remoto ou workflow foi iniciado no encerramento. A meta permanece
+incompleta e não foi marcada como concluída. As seções seguintes são históricas,
+mesmo quando dizem que uma reconstrução está em execução.
+
+### Git e worktrees no encerramento
+
+- Composição `/home/tjsasakifln/code/modela-pro-p04`, branch
+  `mp-pro-20260911/p04-referencia-consolidacao`: HEAD técnico/documental antes
+  deste handoff `55bdbb295ca599b981a1f2be69c524db5966e54b`, árvore
+  `23c9d4d64e161761155031a1f366d60fe71c913c`, limpo. O commit deste handoff
+  aparecerá imediatamente depois; consultar `git log -3` na retomada.
+- A3 operacional `/home/tjsasakifln/code/modelapro-c06-operational-a3`, branch
+  `c06-operational-a3-20260912`: HEAD **`a884e62eb431adf47f670611a3063e6e59252bc2`**,
+  árvore **`3a9bc7fd5f1c490e11399359eb0d98973be36131`**, limpo e ancestral da
+  composição. A3 tem 1.820 obrigações; B tem 1.830, com diferença real na UI
+  profissional/manual. Não substituir B por A3.
+- Agente Windows `/home/tjsasakifln/code/modelapro-c06-distribution`, HEAD
+  **`24f56c08c90661f058b58d00b9e35c5ec5ef8a77`**, limpo na inspeção de encerramento.
+  Todos os commits entregues estão integrados em A3 e B. Nenhum patch pendente
+  foi encontrado nesse worktree.
+- PR #20 consultada novamente: **open**, `merged=false`, `auto_merge=null`,
+  HEAD remoto **`df6b7b786f91b7a545d4c925d954cbedb9fbdf17`**, base
+  `6d54f902b85a5a37bfbf154d39f74cf854ff9b2b`. Nenhum push nesta etapa da sessão.
+  O topo remoto ainda descreve A2; os novos commits/provas estão apenas locais.
+- Preservar `/home/tjsasakifln/code/modela-pro` (trabalho C11 do usuário), sem
+  limpeza, reset ou uso como checkout de implementação C06.
+
+### Primeira tarefa da retomada: fechar coleta automática de metadados
+
+A reconstrução real do archive A3 `a884e62` terminou em ~134,845 s, em
+`/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN`.
+O archive tem 7.700.480 bytes, SHA-256
+`6df261f778ab0b0e2cec764e6387272b250f06b19b6bf206db6e4319b41f2f80`.
+A conferência física **reprovou antes do ciclo de uso**:
+
+- Dados/templates/UI e módulos próprios vieram da fonte correta; o template
+  `modules/templates/report.html` agora coincide com a fonte (SHA `1678a4e...`).
+- `METADATA` gerado da fonte está correto, SHA-256
+  `48ff020bef09548b27090b48214f9049b1bd0ab3387430beed7653d91ba1bab9`.
+- Porém, `Analysis-00.toc` registra **sete arquivos dist-info antigos** coletados
+  automaticamente do ambiente `modelapro-c06-fixedsim.mTYdlZ/install`:
+  `direct_url.json`, `top_level.txt`, `REQUESTED`, `entry_points.txt`, `INSTALLER`,
+  `WHEEL`, `RECORD`. O hook de metadados do PyInstaller os descobriu a partir das
+  chamadas literais a `importlib.metadata.version("modelapro")`.
+- Evidência original: `proof/source-origin-verification.json` (`FAILED`),
+  `proof/pyinstaller.log`, `work/modelapro/Analysis-00.toc`. Hashes e resumo em
+  [evidence-local-windows-a884e62.json](evidence-local-windows-a884e62.json).
+  Não houve initial/upgrade/restore desta reconstrução. Não é prova hospedada
+  nem instalador Inno; é preflight local onedir em Windows 11.
+
+**Correção ainda não implementada:** após `Analysis` no spec, remover qualquer
+entrada dist-info própria reintroduzida pelos hooks e reinserir somente o
+`METADATA` da fonte já validado. Testar o spec com um Analysis que injeta esses
+arquivos antigos. O agente chegou a propor também construir dinamicamente o
+nome da distribuição para evitar descoberta do hook; avaliar se isso é necessário.
+Preferir que a garantia esteja no filtro final central, preservando a consulta
+normal de versão do runtime quando possível. Nenhuma dessas mudanças foi validada.
+Não apagar arquivos manualmente do bundle para transformar esta falha em sucesso.
+
+Os patches anteriores `9151565`, `5434b27`, `24f56c0` **já estão integrados**:
+helper carregado por caminho explícito, dados próprios da fonte, hidden imports
+por enumeração da fonte, `pathex` root+scripts e metadados mínimos gerados do
+`pyproject.toml`. A revisão independente aprovou essas origens declaradas com
+64/64 testes, mas ressalvou que só o freeze provaria a resolução física; a falha
+automática acima é a nova pendência, não um sucesso desses testes estendido ao pacote.
+
+### Sequência de continuidade e aceites restantes
+
+1. Corrigir/testar a coleta final de metadados no worktree isolado Windows;
+   revisar e integrar o commit imutável em A3 e B. Preservar ancestralidade por
+   merge de A3 na composição; congelar inventários se houver novas obrigações.
+2. Gerar novo archive de A3 limpa e reconstruir. Conferir todos os arquivos,
+   origem real de dados/módulos, identidade e metadados. Executar `--check-pdf`,
+   initial com perfil vazio, upgrade da mesma árvore, restore e encerramento de
+   todos os filhos/portas antes de fallback. O runtime deve funcionar sem
+   overrides externos `MODELA_API_TIMEOUT`, `MODELA_API_URL`, `MP_CODE_SHA`,
+   `PYTHONPATH`; o launcher fornece suas configurações de produto.
+3. Só após essa prova, publicar A3 por fast-forward na mesma #20. Reconsultar
+   HEAD/base/estado antes do push. Exigir Windows hospedado SUCCESS operacional,
+   explicitamente `OPERATIONAL_SAME_TREE_ONLY`; isso ainda não fecha migração.
+4. Publicar B, que contém mudanças reais de UI/manual. O workflow Windows de PR
+   seleciona automaticamente a última candidata bem-sucedida da mesma PR/branch.
+   Conferir que escolheu a A3 correta; usar `workflow_dispatch` com
+   `previous_run_id`/`previous_run_attempt=1` somente se essa seleção não ocorrer.
+5. Exigir B Windows entre árvores e SHAs distintos, novo job/replay=false,
+   preservação semântica após validar vínculos, documentos/save/reopen/backup/
+   restore/uninstall/ACL/filhos e inventário completo. Diferenciar Windows 11
+   local de `windows-latest` hospedado e Inno real.
+6. Exigir C15 PR **e push** da candidata final: coleta exata, JUnit terminal,
+   único skip permitido de wheel-smoke coberto pelo job próprio, identidades
+   PR HEAD/base/merge testado/tree/run/attempt, checkout limpo e hashes dos bytes
+   de todos os namespaces. Não rerodar apenas porque a observação expirou.
+7. Atualizar matriz, delivery, evidências, handoff e topo da PR, preservando
+   históricos e os dez estados. Sem main/#17 merge, auto-merge, deploy, venda,
+   ato profissional, assinatura real ou transmissão institucional.
+
+### Provas que não devem ser refeitas sem motivo
+
+- C15 A2 PR **34721474693** e push **34721472670**: SUCCESS, cada um
+  1.755 passed/1 skipped, 1.756 obrigações; 50 hashes em 7 namespaces por run
+  conferidos, checkout limpo. Windows A2 **34721474609**: FAILURE. São históricos.
+- Suíte ampla local `661fc82`: exit1, 1.822 passed/5 failed/1 skipped,
+  1.828 obrigações em 1.672,96 s, checkout limpo, 36 arquivos conferidos.
+  As cinco causas já foram corrigidas e verificadas em testes focados; ver
+  [registro completo](evidence-local-wide-661fc82.json). Não repetir essa suíte
+  intermediária só por falhas já resolvidas; falta o CI da candidata final.
+- Navegador final de mercado+custo em `71d549a`: **2/2 PASS**, exit0,
+  140,917 s, 12 arquivos conferidos, sem credenciais. Artefatos em
+  `/tmp/c06-token-final-71d549a-evidence/`, JUnit
+  `/tmp/c06-token-final-71d549a.xml`; ver
+  [registro](evidence-local-browser-71d549a.json). Fluxos incluem criação,
+  revisão, assinatura TESTE, exportação, save e reopen.
+- Última coorte packaging+launcher: **64/64 PASS**, exit0, 8,87 s,
+  `/tmp/c06-first-party-source-integrated2.{log,xml}`; revisão independente
+  também 64/64 e spec 1/1. Um comando anterior terminou exit4 por caminho
+  inexistente `test_launcher.py`, sem testes executados; foi corrigido para
+  `test_launcher_command.py`, sem esconder falha de produto.
+- Consumidores de criação/segurança/launcher: **99 PASS**; revisão independente
+  de concorrência: 50/50 corridas com um criador com token e um replay sem token.
+  O token foi preservado e `created=True` é autoritativo antes do cache. Não
+  reintroduzir a heurística que transformava os dois concorrentes em replay.
+- Documentos/arbitramento/UI/superfícies: 52 PASS; UI/gate 78 PASS; Windows+
+  produtor 87 PASS (um worker real já coberto na coorte de 52); ver
+  [evidência documental](evidence-local-documentary-20260912.json).
+- A3 `96975eb` anterior: cálculo succeeded, geração recusou template antigo;
+  2.811 arquivos/369.886.906 bytes conferidos; shutdown passou com dois filhos
+  e portas fechadas. Preservado em [registro](evidence-local-windows-96975eb.json).
+- Inventários exatos A3 1.820 e B 1.830 passaram após `5434b27`; `24f56c0`
+  alterou testes existentes sem adicionar nodeids. Lint aprovado em `71d549a`;
+  rodar lint final apenas na candidata pronta. Fronteiras externas PASS89/FAIL0.
+
+### Ambiente e agentes para retomar
+
+Venv travado: `/tmp/modelapro-c06-final-venv`; usar seu Python com
+`PYTHONPATH=.:scripts` **e cwd do worktree correto** (editable aponta para a
+composição). Navegador:
+`LD_LIBRARY_PATH=/tmp/modelapro-c06-browser-libs/usr/lib/x86_64-linux-gnu`.
+Não usar `python` genérico (ausente); usar `python3` ou Python do venv.
+
+Agentes existentes: `windows` é dono do empacotamento; `numeric_review` é
+revisor somente leitura; `professional_ui` concluiu os dois navegadores e está
+ocioso; `document_conformance` concluiu os produtores e está ocioso. Reusar
+somente quando houver trabalho independente útil. Root continua único publicador.
+As verificações sintéticas e assinatura TESTE não substituem casos reais,
+revisão profissional independente ou aceite institucional. Os dez estados de
+[delivery.json](delivery.json) continuam pendentes conforme suas provas;
+`COMMERCIAL_RELEASE_READY=false`.
+
+---
+
 ## Atualização da retomada — 2026-09-13, 00:19 UTC
 
 Esta atualização prevalece sobre as pendências históricas abaixo. O trabalho está
