@@ -59,11 +59,17 @@ def test_backend_command_is_uvicorn_on_loopback():
 
 def test_service_environment_binds_frontend_client_to_selected_api(monkeypatch):
     monkeypatch.delenv("MODELA_API_URL", raising=False)
+    monkeypatch.delenv("MODELA_API_TIMEOUT", raising=False)
     cfg = SimpleNamespace(API_PUBLIC_URL="http://127.0.0.1:18765")
-    assert service_environment(cfg)["MODELA_API_URL"] == cfg.API_PUBLIC_URL
+    env = service_environment(cfg)
+    assert env["MODELA_API_URL"] == cfg.API_PUBLIC_URL
+    assert env["MODELA_API_TIMEOUT"] == "120"
 
     monkeypatch.setenv("MODELA_API_URL", "http://127.0.0.1:19999")
-    assert service_environment(cfg)["MODELA_API_URL"] == "http://127.0.0.1:19999"
+    monkeypatch.setenv("MODELA_API_TIMEOUT", "45")
+    env = service_environment(cfg)
+    assert env["MODELA_API_URL"] == "http://127.0.0.1:19999"
+    assert env["MODELA_API_TIMEOUT"] == "45"
 
 
 def test_windows_process_tree_assigns_children_and_closes_job_handle():

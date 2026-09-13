@@ -87,10 +87,47 @@ def test_websocket_cross_origin_and_url_secret_rejected(installation):
                 pytest.fail("guard accepted forbidden WebSocket")
 
 
-def test_job_token_recovery_requires_authenticated_workspace_and_csrf(installation):
+def test_job_token_recovery_requires_authenticated_workspace_and_csrf(
+    installation, monkeypatch
+):
     from backend import api
+    from tests.c10_pipeline.fixtures import complete_request_spec
+
     client, headers, _ = installation
-    record = api.get_job_store().create(payload={"filename": "SYNTHETIC_TEST.csv"})
+    monkeypatch.setattr(api, "_submit_valuation", lambda **_kwargs: None)
+    spec = complete_request_spec(candidate_cols=["area"])
+    request = {
+        "headers": headers,
+        "data": {"request_json": json.dumps(spec)},
+        "files": {
+            "file": (
+                "SYNTHETIC_TEST.csv",
+                b"area,preco\n10,100\n20,200\n30,300\n",
+                "text/csv",
+            )
+        },
+    }
+    created = client.post("/jobs", **request)
+    assert created.status_code == 202, created.text
+    record = created.json()
+    assert record["idempotent_replay"] is False
+    assert isinstance(record["access_token"], str) and record["access_token"]
+
+    protected = f"/jobs/{record['job_id']}/documents"
+    assert client.get(protected, headers=headers).status_code == 403
+    assert client.get(
+        protected, headers={**headers, "X-Job-Token": "wrong"}
+    ).status_code == 403
+    assert client.get(
+        protected, headers={**headers, "X-Job-Token": record["access_token"]}
+    ).status_code == 200
+
+    replay = client.post("/jobs", **request)
+    assert replay.status_code == 202, replay.text
+    assert replay.json()["job_id"] == record["job_id"]
+    assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["access_token"] is None
+
     path = f"/jobs/{record['job_id']}/access-token"
     assert client.post(path).status_code == 403
     assert client.post(path, headers={**headers, "X-CSRF-Token": "wrong"}).status_code == 403
