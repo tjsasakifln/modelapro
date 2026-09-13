@@ -1244,11 +1244,17 @@ def test_wheel_contains_runtime_components_but_not_release_tooling(tmp_path: Pat
     assert not any(name.startswith("tests/") or name.lower().endswith((".pdf", ".ttf", ".otf")) for name in names)
 
 
-def test_windows_spec_materializes_streamlit_sources_and_uses_onedir() -> None:
+def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
+    tmp_path: Path, monkeypatch
+) -> None:
     root = Path(__file__).resolve().parents[3]
     spec = (root / "packaging" / "comercial" / "modelapro.spec").read_text(encoding="utf-8")
     assert 'rglob("*.py")' in spec
-    assert 'collect_data_files("profiles")' in spec
+    assert '_source_data_files(root, "frontend")' in spec
+    assert '_source_data_files(root, "profiles")' in spec
+    assert 'collect_data_files("frontend")' not in spec
+    assert 'collect_data_files("modules")' not in spec
+    assert 'collect_data_files("profiles")' not in spec
     assert 'collect_submodules("pyhanko")' in spec
     assert 'collect_submodules("streamlit")' in spec
     assert 'collect_submodules("pyhanko_certvalidator")' in spec
@@ -1266,6 +1272,39 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir() -> None:
         "support_and_maintenance.md", "THIRD_PARTY_NOTICES.md",
     ):
         assert buyer_document in spec
+
+    checkout = tmp_path / "checkout"
+    stale = tmp_path / "stale-site-packages"
+    expected = set()
+    for package in ("frontend", "modules", "profiles"):
+        source_dir = checkout / package / "data"
+        source_dir.mkdir(parents=True)
+        source_file = source_dir / f"{package}.json"
+        source_file.write_text(f'{{"source": "{package}"}}', encoding="utf-8")
+        (source_dir / "ignored.py").write_text("STALE = False\n", encoding="utf-8")
+        (source_dir / "ignored.pyc").write_bytes(b"not-bytecode")
+        stale_dir = stale / package / "data"
+        stale_dir.mkdir(parents=True)
+        (stale_dir / "stale-only.json").write_text("{}", encoding="utf-8")
+        expected.add((str(source_file), f"{package}/data"))
+    anchor = checkout / "modules" / "data" / "trusted_vendor_anchor.json"
+    anchor.write_text("{}", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(stale))
+
+    observed = set()
+    for package in ("frontend", "modules", "profiles"):
+        observed.update(
+            build_windows._source_data_files(
+                checkout,
+                package,
+                excluded_names=(
+                    frozenset({"trusted_vendor_anchor.json"})
+                    if package == "modules"
+                    else frozenset()
+                ),
+            )
+        )
+    assert observed == expected
 
 
 def test_windows_uninstall_preserves_whichever_profile_was_created() -> None:
