@@ -178,7 +178,9 @@ def compose_model_equation(
             notes.append(
                 "A equação descreve o ajuste na escala logarítmica, mas o snapshot "
                 "não fornece coeficientes e método suficientes para escrever a forma "
-                "na unidade original."
+                "na unidade original. A inversão simples exp(ajuste) não é apresentada "
+                "como média monetária sem método de retransformação e correção de viés "
+                "declarados pelo produtor."
             )
     elif formula_text and identity:
         notes.append("A equação descreve o ajuste na escala original do alvo.")
