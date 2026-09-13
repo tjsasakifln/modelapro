@@ -1249,6 +1249,7 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
 ) -> None:
     import runpy
     import sys
+    from importlib.metadata import distributions
     from types import ModuleType
     from types import SimpleNamespace
 
@@ -1268,12 +1269,16 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
     assert 'collect_submodules("pypdf")' in spec
     assert '[str(root / "scripts" / "c15_local" / "launcher.py")]' in spec
     assert 'Analysis(\n    ["scripts/c15_local/launcher.py"]' not in spec
-    assert 'pathex=[str(root)]' in spec
     assert "exclude_binaries=True" in spec
     assert "COLLECT(" in spec
     assert 'copy_metadata("streamlit", recursive=True)' in spec
     assert 'collect_data_files("streamlit")' in spec
-    assert 'copy_metadata("modelapro")' in spec
+    assert 'copy_metadata("modelapro")' not in spec
+    for package in ("backend", "frontend", "modules", "profiles"):
+        assert f'collect_submodules("{package}")' not in spec
+        assert f'source_submodules(root, "{package}")' in spec
+    assert 'source_submodules(root / "scripts", "c15_local")' in spec
+    assert 'pathex=[str(root), str(root / "scripts")]' in spec
     for buyer_document in (
         "SECURITY.md", "operations_manual.md", "privacy.md",
         "support_and_maintenance.md", "THIRD_PARTY_NOTICES.md",
@@ -1293,14 +1298,20 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
         stale_dir = stale / package / "data"
         stale_dir.mkdir(parents=True)
         (stale_dir / "stale-only.json").write_text("{}", encoding="utf-8")
+        (stale_dir / "stale_only.py").write_text("STALE = True\n", encoding="utf-8")
         expected.add((str(source_file), f"{package}/data"))
     anchor = checkout / "modules" / "data" / "trusted_vendor_anchor.json"
     anchor.write_text("{}", encoding="utf-8")
     monkeypatch.syspath_prepend(str(stale))
 
-    resolver = runpy.run_path(
+    (checkout / "pyproject.toml").write_text(
+        '[project]\nname = "modelapro"\nversion = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    source_helpers = runpy.run_path(
         str(root / "packaging" / "comercial" / "source_data.py")
-    )["source_data_files"]
+    )
+    resolver = source_helpers["source_data_files"]
     observed = set()
     for package in ("frontend", "modules", "profiles"):
         observed.update(
@@ -1315,6 +1326,37 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
             )
         )
     assert observed == expected
+    staged_metadata = source_helpers["write_runtime_metadata"](
+        checkout, tmp_path / "synthetic-runtime-metadata"
+    )
+    assert [path.name for path in staged_metadata.iterdir()] == ["METADATA"]
+    assert "Version: 1.2.3\n" in (staged_metadata / "METADATA").read_text(
+        encoding="utf-8"
+    )
+    assert source_helpers["validate_runtime_metadata"](
+        checkout, staged_metadata
+    ) == ("modelapro", "1.2.3")
+    staged_distributions = {
+        distribution.metadata["Name"]: distribution.version
+        for distribution in distributions(path=[str(staged_metadata.parent)])
+    }
+    assert staged_distributions == {"modelapro": "1.2.3"}
+    metadata_file = staged_metadata / "METADATA"
+    metadata_file.write_text(
+        metadata_file.read_text(encoding="utf-8").replace("1.2.3", "9.9.9"),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="differs from source"):
+        source_helpers["validate_runtime_metadata"](checkout, staged_metadata)
+    metadata_file.write_text(
+        "Metadata-Version: 2.4\nName: modelapro\nVersion: 1.2.3\n",
+        encoding="utf-8",
+    )
+    stale_direct_url = staged_metadata / "direct_url.json"
+    stale_direct_url.write_text('{"url": "stale"}', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="must contain only METADATA"):
+        source_helpers["validate_runtime_metadata"](checkout, staged_metadata)
+    stale_direct_url.unlink()
 
     native = tmp_path / "native"
     (native / "dlls").mkdir(parents=True)
@@ -1338,6 +1380,10 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
     monkeypatch.setenv("MODELA_WINDOWS_NATIVE_DIR", str(native))
     monkeypatch.setenv("MODELA_BUILD_TRUSTED_ANCHOR", str(anchor))
     monkeypatch.setenv("MODELA_BUILD_SOURCE_IDENTITY_FILE", str(identity))
+    runtime_metadata = source_helpers["write_runtime_metadata"](
+        root, tmp_path / "spec-runtime-metadata"
+    )
+    monkeypatch.setenv("MODELA_BUILD_RUNTIME_METADATA_DIR", str(runtime_metadata))
 
     pyinstaller = ModuleType("PyInstaller")
     pyinstaller_utils = ModuleType("PyInstaller.utils")
@@ -1357,6 +1403,8 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
                 scripts=scripts,
                 binaries=kwargs["binaries"],
                 datas=kwargs["datas"],
+                hiddenimports=kwargs["hiddenimports"],
+                pathex=kwargs["pathex"],
                 pure=[],
                 zipfiles=[],
             )
@@ -1381,6 +1429,11 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
         "modules/templates",
     ) in project_data
     assert not any(stale in source.parents for source, _destination in project_data)
+    assert (str(runtime_metadata), runtime_metadata.name) in executed["datas"]
+    assert "backend.api" in executed["a"].hiddenimports
+    assert "c15_local.launcher" in executed["a"].hiddenimports
+    assert "backend.stale_only" not in executed["a"].hiddenimports
+    assert executed["a"].pathex == [str(root), str(root / "scripts")]
 
 
 def test_windows_uninstall_preserves_whichever_profile_was_created() -> None:

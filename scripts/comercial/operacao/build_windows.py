@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -276,8 +277,13 @@ def build(
                 "tree_sha": status["tree_sha"],
             },
         )
+        write_runtime_metadata = runpy.run_path(
+            str(root / "packaging" / "comercial" / "source_data.py")
+        )["write_runtime_metadata"]
+        runtime_metadata = write_runtime_metadata(root, evidence / "runtime-metadata")
         pyinstaller_env = os.environ.copy()
         pyinstaller_env["MODELA_BUILD_SOURCE_IDENTITY_FILE"] = str(build_identity)
+        pyinstaller_env["MODELA_BUILD_RUNTIME_METADATA_DIR"] = str(runtime_metadata)
         subprocess.run(
             [sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(output), str(spec)],
             cwd=root,
