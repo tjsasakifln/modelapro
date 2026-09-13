@@ -1,5 +1,40 @@
 # C06 — continuidade em nova sessão
 
+## Atualização da retomada — 2026-09-13, 00:19 UTC
+
+Esta atualização prevalece sobre as pendências históricas abaixo. O trabalho está
+em execução; não é encerramento, aceite final nem liberação comercial.
+
+- Composição limpa em `71d549a9b3e6ab0dc444a871533f778ed1f2a88a`; A3 limpa em
+  `/home/tjsasakifln/code/modelapro-c06-operational-a3`,
+  `96975ebb8e181e72e63e4729b89b0e1cfdf83928`, árvore
+  `943e300b6492d5e40ac5465afba145f5a4346bc0`. A3 é ancestral da composição.
+- Os patches de P02/cobertura e os produtores documentais, arbitramento,
+  interface profissional e correções Windows já foram integrados. Não reaplicar
+  os checkpoints históricos abaixo.
+- Última candidata remota observada: A2 `df6b7b7`, C15 PR `34721474693` e push
+  `34721472670` SUCCESS; Windows `34721474609` FAILURE. Os registros próprios
+  preservam identidade, coleta e bytes; não aprovam os descendentes locais.
+- Inventário A3: 1.820 obrigações; composição: 1.830. Navegador mercado+custo
+  após a última correção passou 2/2 com 12 arquivos conferidos; lint e inventário
+  passaram. Ver [matriz atual](integration-matrix.md),
+  [prova do navegador](evidence-local-browser-71d549a.json) e
+  [suíte ampla local e cinco correções](evidence-local-wide-661fc82.json).
+- Windows está reconstruindo A3 a partir de archive limpo em
+  `/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3tokenfix.DXILG5`.
+  Esta é uma prova local de onedir em Windows 11, sem Inno Setup, distinta do
+  workflow hospedado. Exigir término de initial/upgrade da mesma árvore/restore
+  e encerramento de todos os descendentes sem depender de fallback.
+- Após a prova local, publicar A3 na mesma #20, aguardar Windows hospedado
+  operacional aprovado, e então publicar a composição B. Exigir atualização
+  entre árvores distintas, novo job sem replay, artefatos vinculados e C15 PR/push
+  final aprovado. Atualizar matriz, delivery e topo da #20 com os resultados reais.
+- Permanecem os limites originais: sem merge, deploy, venda, assinatura real,
+  submissão institucional ou aprovação profissional. Os dez estados continuam
+  separados em [delivery.json](delivery.json); `COMMERCIAL_RELEASE_READY=false`.
+
+## Checkpoint histórico original — preservado
+
 Checkpoint observado em **2026-09-12, 20:30 UTC**. A sessão foi encerrada a pedido
 do usuário após disponibilizar este handoff. A meta técnica permanece incompleta;
 este documento não é aceite de produto nem liberação comercial.

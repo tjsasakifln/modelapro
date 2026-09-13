@@ -140,6 +140,17 @@ foram corrigidas. O seletor do teste de custo agora confere o rótulo visível
 efetivamente selecionado. Os 12 arquivos emitidos tiveram hashes e tamanhos
 conferidos em [evidence-local-browser-20260912.json](evidence-local-browser-20260912.json).
 
+A repetição após a correção do token de criação e da corrida de idempotência
+passou **2 testes / 140,917 s** no HEAD `71d549a`; os 12 arquivos foram novamente
+conferidos em [evidence-local-browser-71d549a.json](evidence-local-browser-71d549a.json).
+Lint e inventário exato de **1.830 obrigações** passaram nesse HEAD. Os consumidores
+de criação/segurança/launcher passaram 99 testes; a revisão independente confirmou
+50 corridas com um criador portador de token e um reaproveitamento sem token.
+A suíte ampla local anterior encerrou com **1.822 passed, 5 failed, 1 skipped**,
+checkout limpo; as cinco causas e correções estão preservadas em
+[evidence-local-wide-661fc82.json](evidence-local-wide-661fc82.json). As correções
+passaram nos consumidores focados, mas a suíte ampla final continua pendente.
+
 Permanecem obrigatórios a suíte ampla/agregador da candidata final, a confirmação
 das representações e guardas nos seus artefatos, o Windows instalado operacional
 e a atualização/restauração entre árvores distintas. A3 é a candidata operacional

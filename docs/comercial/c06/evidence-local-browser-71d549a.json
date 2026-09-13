@@ -1,0 +1,114 @@
+{
+  "scope": "LOCAL_INTEGRATED_BROWSER_NOT_FINAL_HOSTED_CI",
+  "source_sha": "71d549a9b3e6ab0dc444a871533f778ed1f2a88a",
+  "source_tree": "e2f05ec3a10203f4339e3912ec48cb7845471e6b",
+  "reported_exit_code": 0,
+  "junit": {
+    "path": "/tmp/c06-token-final-71d549a.xml",
+    "sha256": "1496cd463c77c01cd6b5b60092a40cfa31426beae689e5b882af5a4538fb21ec",
+    "size": 568,
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "evidence": {
+    "c06-document-flow": {
+      "inventory_sha256": "eb561ecf7552bfb13314efcebc43d9e22efb85eedcd923b4808cb6b6d5fb5086",
+      "verified_files": 10,
+      "inventory": {
+        "schema": "MP-C06-BROWSER-EVIDENCE/1",
+        "synthetic_test_only": true,
+        "files": [
+          {
+            "path": "SYNTHETIC_TEST_signed_report.pdf",
+            "size": 208251,
+            "sha256": "6e9e406da301cf5c045ee9b7e2b0195018f1b3f91d55dc94e59658375890483d"
+          },
+          {
+            "path": "SYNTHETIC_TEST_unsigned_report.pdf",
+            "size": 202193,
+            "sha256": "3c6a14dd047830203562db5e3749a764dd0c9d156d36de7aa63c1b51b77ad2e2"
+          },
+          {
+            "path": "store/jobs/job_62270d35397a42c3b44516879520289d/artifacts/document_history.zip",
+            "size": 1196027,
+            "sha256": "975d4668a5647634dfbd8fb1d8ad053dd55fbfda78822ccc1ade6aae411d1b76"
+          },
+          {
+            "path": "store/jobs/job_62270d35397a42c3b44516879520289d/artifacts/evidence_bundle.zip",
+            "size": 447457,
+            "sha256": "27d638e208cc4f105aacc8ed9b69510cf1f192ca84fd367ae44f2d069be6ff89"
+          },
+          {
+            "path": "store/jobs/job_62270d35397a42c3b44516879520289d/artifacts/report.docx",
+            "size": 8907,
+            "sha256": "91c81324fcdc3fd533aa4e9c25b88ea61823afe7d5677a50559742f33a3442c3"
+          },
+          {
+            "path": "store/jobs/job_62270d35397a42c3b44516879520289d/artifacts/report.pdf",
+            "size": 202193,
+            "sha256": "3c6a14dd047830203562db5e3749a764dd0c9d156d36de7aa63c1b51b77ad2e2"
+          },
+          {
+            "path": "store/jobs/job_62270d35397a42c3b44516879520289d/artifacts/signature_request.json",
+            "size": 694,
+            "sha256": "7b62508bae0be16bd17d01f77df8732ec2d58286f6cb2750a5a3db4d95cb5dda"
+          },
+          {
+            "path": "store/jobs/job_62270d35397a42c3b44516879520289d/artifacts/signed_report.pdf",
+            "size": 208251,
+            "sha256": "6e9e406da301cf5c045ee9b7e2b0195018f1b3f91d55dc94e59658375890483d"
+          },
+          {
+            "path": "store/jobs/job_62270d35397a42c3b44516879520289d/artifacts/submission.zip",
+            "size": 842484,
+            "sha256": "e07da99e3af0985c40139afec14f522127422c5e7c7980aa71d9103ee4792f57"
+          },
+          {
+            "path": "store/jobs/job_62270d35397a42c3b44516879520289d/evidence/artifacts/report.pdf",
+            "size": 202783,
+            "sha256": "bf21a22a581dedee6003abe52fbc4bbd1233b0b89c7d1b8599c019b3efdff194"
+          }
+        ],
+        "credentials_collected": false
+      }
+    },
+    "c06-cost-flow": {
+      "inventory_sha256": "2f9066a43364916f97fd387798aa0cbeb814cc9cb661d8edf28b4c5673fc1c9d",
+      "verified_files": 2,
+      "inventory": {
+        "schema": "MP-C06-BROWSER-EVIDENCE/1",
+        "synthetic_test_only": true,
+        "files": [
+          {
+            "path": "store/jobs/job_795d8b27a6a8466fbff4d203b67ab7a1/artifacts/evidence_bundle.zip",
+            "size": 76511,
+            "sha256": "532dd1fd3574bc3a248b0195434f77168a7a83bd83225551d5a9931d1f29cd2e"
+          },
+          {
+            "path": "store/jobs/job_795d8b27a6a8466fbff4d203b67ab7a1/artifacts/report.pdf",
+            "size": 58035,
+            "sha256": "a9d3e03975e54920ceffde9f2509ae2c5b818ffa70c94a4e678dd1b3b3a258ad"
+          }
+        ],
+        "credentials_collected": false
+      }
+    }
+  },
+  "local_checks": {
+    "lint": {
+      "path": "/tmp/c06-71d549a-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "exit_code": 0
+    },
+    "inventory": {
+      "path": "/tmp/c06-71d549a-inventory.log",
+      "sha256": "ad81ec42b1db4a2f985e696901bca618c7b4930be7acc67f80ac122d1336977f",
+      "size": 204401,
+      "exit_code": 0,
+      "collected_obligations": 1830
+    }
+  }
+}
