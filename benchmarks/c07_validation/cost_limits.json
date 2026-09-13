@@ -1,0 +1,104 @@
+{
+  "schema_version": "MP/1",
+  "kind": "c07_cost_benchmark",
+  "note": "Synthetic identified sample. Not a client dataset.",
+  "fast": {
+    "synthetic": true,
+    "mode": "fast",
+    "elapsed_seconds": 0.090885,
+    "n_folds": 1,
+    "n_reserved": 7,
+    "budget": {
+      "pipeline_bootstrap_replicates": 3,
+      "fixed_model_perturbations": 3,
+      "max_folds": 2,
+      "perturbation_relative_scale": 0.01,
+      "mode": "fast"
+    },
+    "executed_steps": [
+      "partition_external",
+      "fit_select_predictor",
+      "score_reserved",
+      "analyze_stability"
+    ],
+    "stability_executed_analyses": [
+      "pipeline_bootstrap",
+      "variable_selection_frequency",
+      "fixed_model_sensitivity",
+      "candidate_dispersion"
+    ],
+    "stability_skipped": [
+      {
+        "analysis": "justified_revision_sensitivity",
+        "reason": "No justified revisions supplied; analysis not invented."
+      }
+    ],
+    "cost": {
+      "elapsed_seconds": 0.090072,
+      "n_fit_select_calls": 1,
+      "n_predict_calls": 1,
+      "n_folds_executed": 1
+    },
+    "stability_cost": {
+      "elapsed_seconds": 0.053162,
+      "n_fit_select_calls": 3,
+      "n_predict_calls": 7,
+      "n_folds_used": 1,
+      "limits": {
+        "pipeline_bootstrap_replicates": 3,
+        "fixed_model_perturbations": 3,
+        "mode": "fast"
+      }
+    },
+    "status": "completed"
+  },
+  "full": {
+    "synthetic": true,
+    "mode": "full",
+    "elapsed_seconds": 0.164168,
+    "n_folds": 1,
+    "n_reserved": 7,
+    "budget": {
+      "pipeline_bootstrap_replicates": 8,
+      "fixed_model_perturbations": 5,
+      "perturbation_relative_scale": 0.01,
+      "mode": "full"
+    },
+    "executed_steps": [
+      "partition_external",
+      "fit_select_predictor",
+      "score_reserved",
+      "analyze_stability"
+    ],
+    "stability_executed_analyses": [
+      "pipeline_bootstrap",
+      "variable_selection_frequency",
+      "fixed_model_sensitivity",
+      "candidate_dispersion"
+    ],
+    "stability_skipped": [
+      {
+        "analysis": "justified_revision_sensitivity",
+        "reason": "No justified revisions supplied; analysis not invented."
+      }
+    ],
+    "cost": {
+      "elapsed_seconds": 0.163276,
+      "n_fit_select_calls": 1,
+      "n_predict_calls": 1,
+      "n_folds_executed": 1
+    },
+    "stability_cost": {
+      "elapsed_seconds": 0.124119,
+      "n_fit_select_calls": 8,
+      "n_predict_calls": 14,
+      "n_folds_used": 1,
+      "limits": {
+        "pipeline_bootstrap_replicates": 8,
+        "fixed_model_perturbations": 5,
+        "mode": "full"
+      }
+    },
+    "status": "completed"
+  }
+}

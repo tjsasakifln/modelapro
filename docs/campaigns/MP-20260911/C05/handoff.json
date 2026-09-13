@@ -1,0 +1,69 @@
+{
+  "producer": "C05",
+  "contract_version": "MP/1",
+  "exported_interface": {
+    "module": "modules.optimal_combination",
+    "entry": "search_models",
+    "adapter": "OptimalCombinationFinder.find_best_model",
+    "space": "modules.search_space",
+    "returns": {
+      "winner": "CandidateAssessment-like mapping or null",
+      "alternatives": "list of comparable candidates with discard_reason",
+      "search_audit": {
+        "possible": "int",
+        "generated": "int",
+        "evaluated": "int",
+        "rejected": "int",
+        "rejection_reasons": "map",
+        "coverage": {
+          "enumeration": "exhaustive|partial",
+          "ranking_objective": "full|shortlist_only|partial",
+          "exact_optimum_guaranteed": "bool",
+          "pruning_proof": "null unless a proof exists"
+        },
+        "budget": "max_evaluations and used",
+        "objective": "name, scale=original, full_objective_evaluated_on",
+        "profile": "elapsed_s and rss_bytes for this process only"
+      },
+      "issues": "Issue list origin=C05"
+    }
+  },
+  "consumers": [
+    {
+      "consumer": "C10",
+      "required_callsite": "compose ResultSnapshot.search from search_audit; do not re-rank",
+      "acceptance_case": "search_audit.coverage.exact_optimum_guaranteed is never implied from enumeration alone"
+    },
+    {
+      "consumer": "C08",
+      "required_callsite": "render search coverage, budget, and optimum disclaimer from search_audit; do not invent global-optimum language",
+      "acceptance_case": "partial coverage is disclosed in the report"
+    },
+    {
+      "consumer": "C09",
+      "required_callsite": "candidate_cols=[] is zero authorized variables; null is auto-by-role. Wire progress_callback and cancel_requested.",
+      "acceptance_case": "empty multiselect must not mean all columns"
+    },
+    {
+      "consumer": "C13",
+      "required_callsite": "recommend_next_actions uses alternatives[].discard_reason and exploratory labels",
+      "acceptance_case": "exploratory models are not treated as admissible"
+    },
+    {
+      "consumer": "C14",
+      "required_callsite": "reuse via build_search_cache_key / search_audit.cache_key_components; include sample_fingerprint, policies, schema, y transforms, objective, code_version, subject",
+      "acceptance_case": "different y with the same columns must not reuse a cached winner"
+    },
+    {
+      "consumer": "C07",
+      "required_callsite": "evaluate_procedure wraps fit_select_predictor; C05 must not call evaluate_procedure inside candidate scoring",
+      "acceptance_case": "no recursive validation inside search_models"
+    }
+  ],
+  "dependency_pr": null,
+  "head_sha": "98532e685d57e566a7593351eb46c1b8743de093",
+  "notes": [
+    "C04 fit_candidate/evaluate_fitted and C06 inverse_target_prediction are used when importable; otherwise the existing ModelBuilder OLS path is used for the adapter and local search.",
+    "Do not edit modules/model_builder.py or modules/results.py from C05."
+  ]
+}

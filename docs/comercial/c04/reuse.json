@@ -1,0 +1,14 @@
+{
+  "schema_version": "MP-REUSE/1",
+  "front": "C04",
+  "decision": "DEPENDENCY_ONLY",
+  "reuse_manifest": "third_party/reuse_manifest.json",
+  "vendor_directory": "third_party/vendor/c04",
+  "vendored_code": false,
+  "evidence_required_before_distribution": [
+    "exact build-environment SBOM",
+    "licence/notices review including transitive distributions",
+    "pip-audit JSON with no unmitigated exploitable critical vulnerability",
+    "authorised repository/contributor distribution-right decision"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "budget_path": "docs/comercial/c04/performance_budget.json",
+  "budget_status": "THRESHOLDS_DEFINED_NOT_YET_MEASURED_ON_TARGET_WINDOWS",
+  "checks": {
+    "backup_restore": {
+      "backup": "/tmp/modelapro-c04-operational-yvtsa72u/backup",
+      "elapsed_seconds": 0.093404,
+      "evidence_parity": true,
+      "restored_job_id": "job_9a8dee0fa5ca4fc7a4f9d595ec8858ed",
+      "status": "PASSED"
+    },
+    "disk_refusal": {
+      "elapsed_seconds": 0.02695,
+      "refusal": "insufficient free disk space for a new local job",
+      "status": "PASSED"
+    },
+    "pdf_probe": {
+      "available": true,
+      "detail": "WeasyPrint rendered a PDF; native libraries are present.",
+      "elapsed_seconds": 2.72585,
+      "status": "PASSED"
+    },
+    "queue_cancel": {
+      "cancelled_job_state": "cancelled",
+      "completed_job_state": "succeeded",
+      "elapsed_seconds": 0.229854,
+      "status": "PASSED"
+    },
+    "technical_corpus": {
+      "command": [
+        "env",
+        "P04_REQUIRE_EXTENSIONS=1",
+        "MODELA_SKIP_DOTENV=1",
+        "python3",
+        "-m",
+        "pytest",
+        "tests/pro_workflow/p04/test_oracle_independence.py",
+        "tests/pro_workflow/p04/test_corpus_s01_s08.py",
+        "tests/pro_workflow/p04/test_mutations.py",
+        "tests/pro_workflow/p04/test_metrics_and_pilot.py",
+        "tests/pro_workflow/p04/test_runner_and_ci.py",
+        "tests/pro_workflow/p04/test_candidate_extensions.py",
+        "-q",
+        "--tb=short"
+      ],
+      "elapsed_seconds": 214.428587,
+      "exit_code": 1,
+      "status": "FAILED"
+    }
+  },
+  "environment": {
+    "free_disk_bytes": 972910084096,
+    "pid": 343984,
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]"
+  },
+  "resource": {
+    "elapsed_seconds": 217.512897,
+    "exit_code": 1,
+    "free_disk_bytes": 972910084096,
+    "max_rss_kib": 335220
+  },
+  "schema_version": "MP-COM-OPERATIONS/1"
+}

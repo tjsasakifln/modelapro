@@ -1,0 +1,58 @@
+{
+  "producer": "C02",
+  "consumers": ["C04", "C05", "C07", "C09", "C10", "C14"],
+  "exported_interface": {
+    "module": "modules.preprocessing",
+    "functions": ["fit_dataset", "transform_subject"],
+    "types": {
+      "PreparedDataset": "modules.variable_schema.PreparedDataset",
+      "SubjectDesign": "modules.variable_schema.SubjectDesign"
+    },
+    "signatures": {
+      "fit_dataset": "fit_dataset(input_bundle, request_spec, train_row_ids=None) -> PreparedDataset",
+      "transform_subject": "transform_subject(subject_raw, feature_schema, encoder_state) -> SubjectDesign"
+    },
+    "feature_schema": {
+      "version": "MP/1",
+      "column_order": "list[str] — JSON-stable order of X columns (dict key order is not used after JSON roundtrip)",
+      "columns": {
+        "internal_name": {
+          "original_name": "str",
+          "role": "str",
+          "kind": "numeric|categorical",
+          "unit": "str|null",
+          "group_id": "str|null",
+          "categories": "list[str]|null",
+          "reference_category": "str|null"
+        }
+      },
+      "groups": {"group_id": {"columns": "list[str]", "base_variable": "str"}},
+      "target": {"column": "str", "unit": "str|null"},
+      "parameter_accounting": "optional; n_effective, n_free_slopes, groups[id].n_free_parameters/support/atomic",
+      "base_variables": "optional; original_name -> kind/categories/reference/unit for C09 widgets"
+    },
+    "encoder_state": "declarative JSON-safe mapping (seen levels, reference, impute stats, column_order, locale, missing_policy). Not executable code. Persist with json.dumps of feature_schema+encoder_state; DataFrames stay in-process.",
+    "subject_raw": "mapping of original names to values, e.g. {\"bairro\": \"Centro\", \"area\": \"1.234,56\"}. Never dummy names.",
+    "sample_ledger": "received, observed_target, prepared, used, excluded, used_row_ids, excluded_row_ids, exclusions[{row_id, reasons}], n_effective"
+  },
+  "required_callsite": {
+    "C10": "backend/worker.py process_file currently expands dummy names after DataLoader.load_data one-hot. Replace that path with ingest_market (C01) + fit_dataset/transform_subject (C02). Do not edit worker.py in C02.",
+    "C09": "frontend/components/forms.py avaliando editor is numeric-only. Draw widgets from feature_schema.base_variables (categorical dropdown of seen levels + numeric with unit). Collect original values. Do not edit forms.py in C02.",
+    "C04": "fit_candidate(prepared_dataset, ...) consumes PreparedDataset.X/y/row_ids/base_frame/feature_schema/encoder_state and parameter_accounting for free parameters / groups. Keep indicator groups atomic; do not split group columns.",
+    "C05": "search_models(prepared_dataset, subject_design, ...) uses the same schema; do not propose transformations of indicators by default.",
+    "C07": "evaluate_procedure fit_select_predictor(train_row_ids, seed) must call fit_dataset(..., train_row_ids=train_row_ids) so reserved rows never leak into categories/means.",
+    "C14": "evaluate_batch transforms each subject with the frozen feature_schema/encoder_state from FrozenProject."
+  },
+  "contract_version": "MP/1",
+  "dependency_pr": null,
+  "head_sha": "797c75dbec8d0b34739bca40bbcf90dcf4164b94",
+  "acceptance_case": "tests/c02_schema/test_a01_shared_encoder.py::test_a01_bairro_and_formatted_numeric_share_encoder",
+  "notes": [
+    "candidate_cols=[] is an explicit error (no variables authorized). candidate_cols=null selects by role=predictor.",
+    "missing_policy must be declared before fit: target=never_impute; predictors=complete_case|mean|median (train-only).",
+    "Unknown category policy is unsupported: SubjectDesign.supported=false, group columns NaN, never all-zeros (reference).",
+    "Absence is not the reference category.",
+    "High cardinality is encoded with a diagnostic; it is not a technical impossibility.",
+    "InputBundle fixtures in tests/c02_schema are synthetic MP/1, not C01 ingest_market."
+  ]
+}

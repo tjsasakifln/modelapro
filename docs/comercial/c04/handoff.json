@@ -1,0 +1,57 @@
+{
+  "campaign_id": "MP-COM-20260912-V2/C04",
+  "base_sha": "8d66c7973c659174e06d7223c9a9a8181e8eeabf",
+  "producer": "C04",
+  "contract_compatibility": ["MP/1", "MP-PRO/1"],
+  "connections": [
+    {
+      "consumer": "C01/C06",
+      "required_callsite": "backend/api.py and backend/websocket.py",
+      "payload": "Install the C04 ASGI request guard on real HTTP routes; require exact Origin, bearer/local token and CSRF for mutations; bind project/job access to workspace scope; call upload inspection before parsers.",
+      "acceptance": "Cross-origin localhost request, missing/wrong token, missing CSRF, traversal and cross-workspace access fail on real routes; valid UI flow remains green. Shared mode stays disabled.",
+      "status": "WAITING_FOR_COMPONENTS"
+    },
+    {
+      "consumer": "C01/C02/C06",
+      "required_callsite": "calculation entrypoints, export/backup routes and local UI bootstrap",
+      "payload": "Load and verify the offline entitlement before new calculations. Expiry may block calculate/update but must preserve read/export/backup of evidence produced while entitlement was valid. Never map entitlement to report signature, grade or case release.",
+      "acceptance": "Invalid/missing entitlement blocks only licensed creation operations; expired valid entitlement preserves existing evidence access; every real callsite has integration tests.",
+      "status": "WAITING_FOR_COMPONENTS"
+    },
+    {
+      "consumer": "C06",
+      "required_callsite": ".env.example and installed first-run bootstrap",
+      "payload": "Replace checkout-relative DATA_DIR/UPLOAD_DIR/REPORTS_DIR/LOG_DIR examples with blank/per-user defaults, generate bearer/CSRF material in the user's private profile, and pass credentials to the local UI without embedding them in source, URL or logs.",
+      "acceptance": "A copied example does not move product data back into the checkout; empty-token text is removed from the commercial path; real UI/API requests authenticate after clean install.",
+      "status": "WAITING_FOR_COMPONENTS"
+    },
+    {
+      "consumer": "C02/C03",
+      "required_callsite": "Ajuda/Sobre and qualified report presentation",
+      "payload": "Show product version, entitlement state, artifact hash/notices link and supported-scope wording. Do not present buyer license as report signature or qualification.",
+      "acceptance": "About/help is visible from installed product and the report keeps professional/institution decisions separate.",
+      "status": "WAITING_FOR_COMPONENTS"
+    },
+    {
+      "consumer": "C05",
+      "required_callsite": "qualification profile catalog",
+      "payload": "Do not advertise insurer/bank profiles from C04 packaging metadata unless their exact method/value basis/rules are verified. Reconstruction/replacement cost is not derived from market price by coefficient.",
+      "acceptance": "Unknown or unverified decisive profile cannot become ready_for_professional_signoff.",
+      "status": "WAITING_FOR_COMPONENTS"
+    },
+    {
+      "consumer": "C06",
+      "required_callsite": "composition branch and CI/release workflow",
+      "payload": "Build Windows x64 on Windows, compile installer, install/uninstall on clean runner, run PDF/job/backup/license smoke, generate final SBOM/scan/hash/provenance, and attach actual artifacts. Fetch this stabilized HEAD before any transversal fix.",
+      "acceptance": "A -> jobs -> B -> reopen/reproduce -> rollback/restore on clean environment, with exact SHAs and no critical reachable unmitigated vulnerability.",
+      "status": "WAITING_FOR_COMPONENTS"
+    }
+  ],
+  "external_evidence": [
+    "repository/code/brand licensing decision by rights holder",
+    "rights decision for three root PDFs",
+    "private support and vulnerability contact",
+    "legitimate code-signing certificate/consent if signed installer is offered",
+    "Windows x64 clean-machine install and target-hardware performance evidence"
+  ]
+}

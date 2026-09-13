@@ -1,23 +1,203 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from typing import Dict, Any, List, Optional
+"""PDF report renderer for MP/1 ResultSnapshot (campaign C08).
+
+`render_report(snapshot, report_context)` is the only MP/1 PDF builder. It
+copies value/unit/dates/sample/issues from the snapshot and never refits a
+model or reconstructs the point estimate from interval bounds.
+
+`generate_pdf_report` remains a legacy adapter for `ModelResult` (C16/worker).
+Renderer failures on the MP/1 path raise `ReportRenderError` (never `None`).
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import io
+import math
+import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from .results import ModelResult
+from typing import Any, Dict, List, Optional, Tuple
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
 from .config_manager import config
 from .logging_manager import logger
-import io
-import base64
+from .provenance import canonical_json
+from .qualification_profile.assessment import normalize_institution_receipt
+from .report_presenter.formula import compose_model_equation
+from .report_presenter.qualification import assess_document_state
+from .report_presenter.search_coverage import interpret_search
+from .report_presenter.series import assess_chart_series
+from .results import ModelResult
+
+DISPLAY_ROUNDING_DECIMALS = 2
+
+ISSUANCE_REASON_LABELS = {
+    "no_automatic_report_approval": "Este documento não constitui aprovação automática de laudo.",
+    "grau_is_not_issuance_readiness": "O grau calculado não equivale a prontidão de emissão.",
+    "documentary_declared_is_not_verified_proof": "Documento apenas declarado não é comprovação.",
+    "draft": "Minuta em rascunho, sujeita a revisão profissional.",
+}
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 GRAU_LABELS = {1: "Grau I", 2: "Grau II", 3: "Grau III"}
 
+ISSUANCE_LABELS = {
+    "draft": "Minuta (rascunho) — saída técnica, não é laudo aprovado",
+    "review_required": "Revisão profissional obrigatória — não constitui aprovação",
+    "ready_for_professional_review": (
+        "Pronta para revisão profissional — não constitui aprovação automática"
+    ),
+}
+
+PRECISION_STATUS_LABELS = {
+    "not_computed": "Precisão não calculada",
+    "not_applicable_cost_quantification": "Não aplicável à quantificação de custo",
+    "classified": "Precisão classificada",
+    "unclassified": "Precisão calculada mas não classificável",
+    "error": "Erro ao calcular a precisão",
+}
+
+ORIGIN_BUCKETS = {
+    "normative": "normative",
+    "normativo": "normative",
+    "c03": "normative",
+    "nbr": "normative",
+    "statistical": "statistical",
+    "estatistico": "statistical",
+    "estatístico": "statistical",
+    "c04": "statistical",
+    "c07": "statistical",
+    "documentary": "documentary",
+    "documental": "documentary",
+    "document": "documentary",
+    "search": "search",
+    "busca": "search",
+    "c05": "search",
+    "inference": "inference",
+    "inferencia": "inference",
+    "inferência": "inference",
+    "c06": "inference",
+}
+
+ORIGIN_LABELS = {
+    "normative": "Normativo",
+    "statistical": "Estatístico",
+    "documentary": "Documental",
+    "search": "Busca",
+    "inference": "Inferência",
+    "other": "Outro",
+}
+
+CONFIRMED_BRL_UNITS = {
+    "BRL",
+    "R$",
+    "BRL/M2",
+    "BRL/M²",
+    "R$/M2",
+    "R$/M²",
+    "BRL/M^2",
+}
+
+_PATH_RE = re.compile(
+    r"(?:(?:/home/|/Users/|/var/|/tmp/|/opt/|[A-Za-z]:\\)[^\s,;<>\"']+)"
+)
+_SECRET_KEY_RE = re.compile(
+    r"(password|secret|token|api[_-]?key|authorization|cookie|private[_-]?key)",
+    re.IGNORECASE,
+)
+
+_CHART_FIGSIZE = (6.4, 3.7)
+_CHART_DPI = 120
+
+
+class ReportRenderError(Exception):
+    """Identifiable PDF renderer failure for C10 `artifact_states`.
+
+    Never used as a successful document. Callers must record the artifact as
+    failed; a finished calculation does not imply a delivered report.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "C08_RENDER_FAILED",
+        origin: str = "C08",
+        evidence: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.origin = origin
+        self.severity = "error"
+        self.evidence = dict(evidence or {})
+
+    def to_issue(self) -> Dict[str, Any]:
+        return {
+            "code": self.code,
+            "severity": self.severity,
+            "origin": self.origin,
+            "message": self.message,
+            "affected_ids": list(self.evidence.get("affected_ids") or []),
+            "evidence": {k: v for k, v in self.evidence.items() if k != "affected_ids"},
+        }
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _as_list(value: Any) -> List[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return list(value)
+    return [value]
+
+
+def _as_finite_number(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def format_snapshot_number(value: Any) -> str:
+    """Canonical, round-trip display of a snapshot number (not a recalculation)."""
+    if value is None:
+        return "null"
+    number = _as_finite_number(value)
+    if number is None:
+        return "null"
+    if abs(number) >= 1e15:
+        return format(number, ".15g")
+    if number.is_integer():
+        return str(int(number))
+    return format(number, ".15g")
+
 
 def _fmt(value: Optional[float], decimals: int = 2, prefix: str = "") -> str:
-    """Formats a numeric value for display in the report, or a dash if missing."""
     if value is None:
         return "—"
     try:
@@ -27,94 +207,2161 @@ def _fmt(value: Optional[float], decimals: int = 2, prefix: str = "") -> str:
     except (TypeError, ValueError):
         return str(value)
 
+
+def _fmt_pvalue(value: Any) -> str:
+    number = _as_finite_number(value)
+    if number is None or number < 0 or number > 1:
+        return "—"
+    if 0 < number < 0.0001:
+        return f"{number:.3e}"
+    return f"{number:.4f}"
+
+
+def _fmt_pt_br(value: Any, decimals: int = 2) -> str:
+    number = _as_finite_number(value)
+    if number is None:
+        return "—"
+    formatted = f"{number:,.{decimals}f}"
+    return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _normalize_unit(unit: Any) -> Optional[str]:
+    if unit is None:
+        return None
+    text = str(unit).strip()
+    if not text or text.lower() in {"none", "null", "unknown", "desconhecida", "n/a", "na"}:
+        return None
+    return text
+
+
+def _unit_is_brl(unit: Optional[str]) -> bool:
+    if not unit:
+        return False
+    compact = unit.replace(" ", "").upper().replace("²", "2")
+    compact = compact.replace("M^2", "M2")
+    return compact in {u.replace(" ", "").upper().replace("²", "2") for u in CONFIRMED_BRL_UNITS} or compact in {
+        "BRL",
+        "R$",
+        "BRL/M2",
+        "R$/M2",
+        "BRL/M^2",
+    }
+
+
+def _unit_is_brl_per_m2(unit: Optional[str]) -> bool:
+    if not unit:
+        return False
+    compact = unit.replace(" ", "").upper().replace("²", "2").replace("M^2", "M2")
+    return compact in {"BRL/M2", "R$/M2", "BRL/M^2"}
+
+
+def format_value_with_unit(value: Any, unit: Optional[str], *, decimals: int = 2) -> str:
+    number = _as_finite_number(value)
+    if number is None:
+        return "—"
+    if _unit_is_brl_per_m2(unit):
+        return f"R$ {_fmt_pt_br(number, decimals)}/m²"
+    if _unit_is_brl(unit):
+        return f"R$ {_fmt_pt_br(number, decimals)}"
+    if unit:
+        return f"{_fmt_pt_br(number, decimals)} {unit}"
+    return _fmt_pt_br(number, decimals)
+
+
+def _interval_bounds(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        lower = value.get("lower", value.get("inf", value.get("inferior")))
+        upper = value.get("upper", value.get("sup", value.get("superior")))
+        if lower is None and upper is None:
+            return None
+        out = {
+            "lower": _as_finite_number(lower),
+            "upper": _as_finite_number(upper),
+        }
+        if value.get("level") is not None:
+            out["level"] = value.get("level")
+        if value.get("kind") is not None:
+            out["kind"] = value.get("kind")
+        return out
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        return {
+            "lower": _as_finite_number(value[0]),
+            "upper": _as_finite_number(value[1]),
+        }
+    return None
+
+
+def _interval_display(bounds: Optional[Mapping[str, Any]], unit: Optional[str]) -> str:
+    if not bounds:
+        return "—"
+    lower = bounds.get("lower")
+    upper = bounds.get("upper")
+    if lower is None and upper is None:
+        return "—"
+    return (
+        f"{format_value_with_unit(lower, unit)} a "
+        f"{format_value_with_unit(upper, unit)}"
+    )
+
+
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    text = _PATH_RE.sub("[caminho local omitido]", text)
+    return text
+
+
+def _redact_mapping(value: Any, *, depth: int = 0) -> Any:
+    if depth > 6:
+        return "[omitido]"
+    if isinstance(value, Mapping):
+        out = {}
+        for key, item in value.items():
+            key_s = str(key)
+            if _SECRET_KEY_RE.search(key_s) or key_s.lower() in {
+                "path",
+                "file_path",
+                "source_path",
+                "local_path",
+                "abspath",
+                "filename_path",
+            }:
+                out[key_s] = "[omitido]"
+            else:
+                out[key_s] = _redact_mapping(item, depth=depth + 1)
+        return out
+    if isinstance(value, list):
+        return [_redact_mapping(item, depth=depth + 1) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        if isinstance(value, str):
+            return _safe_text(value)
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return value
+    return _safe_text(value)
+
+
+def _issuance_reason_text(reason: Any) -> str:
+    text = _safe_text(reason)
+    if not text:
+        return ""
+    return ISSUANCE_REASON_LABELS.get(text, ISSUANCE_REASON_LABELS.get(text.lower(), text))
+
+
+def _group_issues(issues: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: List[Dict[str, Any]] = []
+    index: Dict[Tuple[str, str, str], int] = {}
+    for issue in issues:
+        key = (
+            str(issue.get("origin_bucket") or ""),
+            str(issue.get("code") or ""),
+            str(issue.get("message") or ""),
+        )
+        if key not in index:
+            index[key] = len(grouped)
+            grouped.append(dict(issue))
+            continue
+        current = grouped[index[key]]
+        seen = set(current.get("affected_ids") or [])
+        for rid in issue.get("affected_ids") or []:
+            if rid not in seen:
+                current.setdefault("affected_ids", []).append(rid)
+                seen.add(rid)
+    return grouped
+
+
+def _metrics_block(model: Mapping[str, Any], statistical: Mapping[str, Any]) -> Dict[str, Any]:
+    metrics_src = model.get("metrics") if isinstance(model.get("metrics"), Mapping) else {}
+    if not metrics_src:
+        metrics_src = {
+            k: statistical.get(k)
+            for k in ("r", "r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson")
+            if statistical.get(k) is not None
+        }
+        if statistical.get("f_pvalue") is not None and "f_pvalue" not in metrics_src:
+            metrics_src["f_pvalue"] = statistical.get("f_pvalue")
+    present = bool(metrics_src)
+    definitions = _as_mapping(model.get("metric_definitions"))
+    r_definition = _as_mapping(definitions.get("r"))
+    r2_definition = _as_mapping(definitions.get("r2"))
+    dw_definition = _as_mapping(definitions.get("durbin_watson"))
+    candidate_spec = _as_mapping(model.get("candidate_spec"))
+    transform_state = _as_mapping(model.get("target_transform_state"))
+    target_transform = _safe_text(
+        model.get("y_transformation")
+        or candidate_spec.get("y_transformation")
+        or transform_state.get("name")
+        or transform_state.get("transformation")
+        or "não informada"
+    )
+    r2_relation_src = _as_mapping(metrics_src.get("r2_relation"))
+    r2_relation = {
+        "present": bool(r2_relation_src),
+        "r_squared": format_snapshot_number(r2_relation_src.get("r_squared")),
+        "r2": format_snapshot_number(r2_relation_src.get("r2")),
+        "difference": format_snapshot_number(r2_relation_src.get("difference")),
+        "text": (
+            "No ajuste OLS com intercepto sobre a mesma amostra efetiva e escala "
+            "centrada, o quadrado de R coincide com R² dentro da precisão numérica."
+            if r2_relation_src else ""
+        ),
+    }
+    view = {
+        "present": present,
+        "source": "model.metrics" if isinstance(model.get("metrics"), Mapping) and model.get("metrics") else (
+            "validation.statistical" if present else ""
+        ),
+        "external": False,
+        "r": _fmt(_as_finite_number(metrics_src.get("r")), 4) if present else "—",
+        "r2": _fmt(_as_finite_number(metrics_src.get("r2")), 4) if present else "—",
+        "r2_adjusted": _fmt(_as_finite_number(metrics_src.get("r2_adjusted")), 4) if present else "—",
+        "f_statistic": _fmt(_as_finite_number(metrics_src.get("f_statistic")), 3) if present else "—",
+        "f_pvalue": _fmt_pvalue(metrics_src.get("f_pvalue")) if present else "—",
+        "durbin_watson": _fmt(
+            _as_finite_number(
+                metrics_src.get("durbin_watson") or metrics_src.get("autocorrelation_durbin_watson")
+            ),
+            3,
+        )
+        if present
+        else "—",
+        "r2_relation": r2_relation,
+        "target_transform": target_transform,
+        "r_scale": _safe_text(r_definition.get("scale") or "não informada"),
+        "r2_scale": _safe_text(r2_definition.get("scale") or "não informada"),
+        "durbin_watson_scale": _safe_text(dw_definition.get("scale") or "não informada"),
+        "note": (
+            "Indicadores de ajuste dentro da amostra efetiva do modelo, calculados sobre "
+            f"o alvo na escala modelada (transformação: {target_transform}; "
+            f"escala declarada para R: {r_definition.get('scale') or 'não informada'}; "
+            f"para R²: {r2_definition.get('scale') or 'não informada'}). "
+            "Não são desempenho de validação externa."
+            if present
+            else "Indicadores de ajustamento não foram fornecidos neste snapshot."
+        ),
+    }
+    view["tokens"] = {
+        field: report_field_token("metrics", field)
+        for field in (
+            "r", "r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson"
+        )
+    }
+    return view
+
+
+def _statistical_diagnostics(statistical: Mapping[str, Any]) -> Dict[str, Any]:
+    diagnostics = _as_mapping(statistical.get("diagnostics"))
+    standardized = _as_mapping(diagnostics.get("standardized_residuals"))
+    standardized_values = [
+        number for value in _as_list(standardized.get("values"))
+        if (number := _as_finite_number(value)) is not None
+    ]
+    frequency = _as_mapping(diagnostics.get("normal_frequency_comparison"))
+    frequency_rows = []
+    for row in _as_list(frequency.get("intervals")):
+        if not isinstance(row, Mapping):
+            continue
+        observed_probability = _as_finite_number(row.get("observed_probability"))
+        row_index = len(frequency_rows)
+        frequency_rows.append({
+            "z": _fmt(_as_finite_number(row.get("z")), 2),
+            "nominal_percent": _fmt(_as_finite_number(row.get("nominal_percent")), 2),
+            "observed_count": row.get("observed_count"),
+            "observed_percent": _fmt(
+                observed_probability * 100.0 if observed_probability is not None else None, 2
+            ),
+            "tokens": {
+                field: report_field_token("normal_frequency", row_index, field)
+                for field in ("z", "nominal_percent", "observed_count", "observed_percent")
+            },
+        })
+    correlation = _as_mapping(diagnostics.get("correlation_matrix"))
+
+    def technical_label(value: Any, labels: Mapping[str, str]) -> str:
+        raw = _safe_text(value or "")
+        return labels.get(raw, raw)
+
+    def matrix_block(
+        raw: Any, *, section: str, inherited_available: bool = False
+    ) -> Dict[str, Any]:
+        block = _as_mapping(raw)
+        variables = [str(item) for item in _as_list(block.get("variables"))]
+        values = []
+        for row in _as_list(block.get("values")):
+            values.append([
+                _fmt(number, 4) if (number := _as_finite_number(value)) is not None else "—"
+                for value in _as_list(row)
+            ])
+        valid = bool(variables and len(values) == len(variables)) and all(
+            len(row) == len(variables) for row in values
+        )
+        complete = (
+            block.get("status") in (None, "complete")
+            and block.get("missing_cells") in (None, 0, [])
+            and not block.get("missing_variables")
+        )
+        panels = []
+        if valid:
+            for start in range(0, len(variables), 6):
+                stop = min(start + 6, len(variables))
+                panels.append({
+                    "number": len(panels) + 1,
+                    "variables": variables[start:stop],
+                    "rows": [
+                        {
+                            "variable": variables[index],
+                            "values": row[start:stop],
+                            "cell_tokens": [
+                                report_field_token(
+                                    section, variables[index], variables[column],
+                                    len(panels) + 1,
+                                )
+                                for column in range(start, stop)
+                            ],
+                        }
+                        for index, row in enumerate(values)
+                    ],
+                })
+        return {
+            "present": valid and complete
+            and (block.get("available") is True or inherited_available)
+            and not block.get("reason"),
+            "variables": variables,
+            "values": values if valid else [],
+            "panels": panels,
+            "n": block.get("n"),
+            "sample": _safe_text(block.get("sample") or ""),
+            "sample_label": technical_label(block.get("sample"), {
+                "effective_model_sample": "amostra efetiva do modelo",
+            }),
+            "scale": _safe_text(block.get("scale") or ""),
+            "scale_label": technical_label(block.get("scale"), {
+                "original": "escala original",
+                "design": "escala da matriz de projeto",
+            }),
+            "reason": _safe_text(block.get("reason") or ""),
+        }
+
+    elasticities = _as_mapping(diagnostics.get("elasticities"))
+    elasticity_rows = []
+    for row in _as_list(elasticities.get("items")):
+        if not isinstance(row, Mapping):
+            continue
+        row_index = len(elasticity_rows)
+        elasticity_rows.append({
+            "variable": _safe_text(row.get("variable") or ""),
+            "elasticity": format_snapshot_number(row.get("elasticity")),
+            "base_value": format_snapshot_number(row.get("base_value")),
+            "base_prediction": format_snapshot_number(row.get("base_prediction")),
+            "step": format_snapshot_number(row.get("step")),
+            "derivative": format_snapshot_number(row.get("derivative")),
+            "tokens": {
+                field: report_field_token("elasticity", row_index, field)
+                for field in (
+                    "variable", "elasticity", "base_value", "base_prediction", "step",
+                    "derivative",
+                )
+            },
+        })
+    outliers = _as_mapping(diagnostics.get("outlier_count"))
+    definition_rows = []
+    definition_labels = {
+        "detected": "Critério para dados discrepantes detectados",
+        "excluded": "Critério para dados excluídos",
+        "influential": "Critério para pontos influentes",
+    }
+    for key, raw_text in _as_mapping(outliers.get("definition")).items():
+        text = _safe_text(raw_text)
+        if text.startswith("used observations with abs(internally studentized residual) > "):
+            limit = text.rsplit(" > ", 1)[-1]
+            text = (
+                "observações usadas cujo resíduo internamente studentizado, em "
+                f"módulo, é maior que {limit}"
+            )
+        elif text == (
+            "observations absent from the effective fit under declared/pre-fit sample policy; "
+            "they are not inferred to be outliers"
+        ):
+            text = (
+                "observações ausentes do ajuste efetivo conforme a política amostral "
+                "declarada antes do ajuste; exclusão não implica classificação como outlier"
+            )
+        elif text == (
+            "used observations flagged by the fit influence union (Cook distance, "
+            "internally studentized residual, or leverage)"
+        ):
+            text = (
+                "observações usadas sinalizadas pela união dos critérios de influência: "
+                "distância de Cook, resíduo internamente studentizado ou alavancagem"
+            )
+        elif text.startswith("|standardized_residual| > "):
+            text = "resíduo padronizado, em módulo, maior que " + text.split(" > ", 1)[1]
+        definition_rows.append({
+            "key": _safe_text(key),
+            "label": definition_labels.get(str(key), f"Critério técnico ({key})"),
+            "text": text,
+        })
+    return {
+        "standardized_residuals": {
+            "definition": _safe_text(standardized.get("definition") or ""),
+            "values": standardized_values,
+            "n": standardized.get("n"),
+            "present": bool(standardized_values) and standardized.get("available") is True
+            and not standardized.get("reason"),
+            "reason": _safe_text(standardized.get("reason") or ""),
+        },
+        "normal_frequency": {
+            "rows": frequency_rows,
+            "n": frequency.get("n"),
+            "present": bool(frequency_rows) and frequency.get("available") is True
+            and not frequency.get("reason"),
+            "reason": _safe_text(frequency.get("reason") or ""),
+        },
+        "correlation": matrix_block(correlation, section="correlation_original"),
+        "correlation_design": matrix_block(
+            correlation.get("design"),
+            section="correlation_design",
+            inherited_available=correlation.get("available") is True
+            and not correlation.get("reason"),
+        ),
+        "elasticities": {
+            "method": _safe_text(elasticities.get("method") or ""),
+            "method_label": technical_label(elasticities.get("method"), {
+                "central_finite_difference_predict_original": (
+                    "diferença finita central na predição em unidade original"
+                ),
+            }),
+            "point": _safe_text(elasticities.get("point") or ""),
+            "point_label": technical_label(elasticities.get("point"), {
+                "subject": "imóvel avaliando",
+            }),
+            "relative_step": format_snapshot_number(elasticities.get("relative_step")),
+            "items": elasticity_rows,
+            "warnings": [_safe_text(item) for item in _as_list(elasticities.get("warnings"))],
+            "present": bool(elasticity_rows) and elasticities.get("available") is True
+            and not elasticities.get("reason")
+            and _as_mapping(elasticities.get("coverage")).get("complete") is True
+            and not _as_mapping(elasticities.get("coverage")).get("missing_variables"),
+            "reason": _safe_text(elasticities.get("reason") or ""),
+        },
+        "outliers": {
+            "detected": outliers.get("detected"),
+            "excluded": outliers.get("excluded"),
+            "influential": outliers.get("influential"),
+            "definition": _redact_mapping(outliers.get("definition") or {}),
+            "definition_rows": definition_rows,
+            "tokens": {
+                field: report_field_token("outliers", field)
+                for field in ("detected", "excluded", "influential")
+            },
+            "present": outliers.get("available") is True and not outliers.get("reason")
+            and _as_mapping(outliers.get("coverage")).get("complete") is True
+            and all(outliers.get(key) is not None for key in ("detected", "excluded", "influential")),
+            "reason": _safe_text(outliers.get("reason") or ""),
+        },
+    }
+
+
+def sample_cell_token(
+    kind: str, row_id: Any, field: Any, *, panel: Optional[int] = None
+) -> str:
+    """Return a short stable marker binding a rendered cell to row and panel."""
+    row_key = hashlib.sha256(str(row_id).encode("utf-8")).hexdigest()[:10]
+    field_key = hashlib.sha256(str(field).encode("utf-8")).hexdigest()[:10]
+    panel_key = f":P{panel}" if panel is not None else ""
+    return f"[MPS:{kind[:1].upper()}:{row_key}:{field_key}{panel_key}]"
+
+
+def report_field_token(section: str, *parts: Any) -> str:
+    """Bind a displayed statistical value to its semantic section and field."""
+    material = canonical_json([str(section), *[str(part) for part in parts]])
+    key = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+    return f"[MPSTAT:{key}]"
+
+
+def _ledger_value_panels(
+    rows: Sequence[Mapping[str, Any]], columns: Sequence[str], *, kind: str,
+    width: int = 5
+) -> List[Dict[str, Any]]:
+    """Lay out every sample value in readable panels with repeated row IDs."""
+    panels: List[Dict[str, Any]] = []
+    names = [str(column) for column in columns]
+    for offset in range(0, len(names), width):
+        panel_columns = names[offset : offset + width]
+        panel_rows = []
+        panel_number = len(panels) + 1
+        for row in rows:
+            values = list(row.get("value_cells") or [])
+            panel_rows.append({
+                "seq": row.get("seq"),
+                "row_id": row.get("row_id"),
+                "row_id_token": sample_cell_token(
+                    kind, row.get("row_id"), "row_id", panel=panel_number
+                ),
+                "cells": values[offset : offset + len(panel_columns)],
+                "cell_tokens": [
+                    sample_cell_token(
+                        kind, row.get("row_id"), column, panel=panel_number
+                    )
+                    for column in panel_columns
+                ],
+            })
+        panels.append({
+            "number": panel_number,
+            "columns": panel_columns,
+            "header_tokens": [
+                sample_cell_token(kind, "__header__", column, panel=panel_number)
+                for column in panel_columns
+            ],
+            "rows": panel_rows,
+        })
+    return panels
+
+
+def _context_sources(ctx: Mapping[str, Any], provenance: Mapping[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Split human sources from technical hashes. Do not invent market URLs."""
+    human: List[Dict[str, Any]] = []
+    technical: List[Dict[str, Any]] = []
+    raw = ctx.get("sources")
+    if isinstance(raw, Mapping) and not any(k in raw for k in ("id", "label", "citation", "name")):
+        for key, value in raw.items():
+            technical.append({"id": str(key), "label": str(key), "citation": _safe_text(value)})
+        return human, technical
+    for src in _as_list(raw):
+        if isinstance(src, Mapping):
+            entry = {
+                "id": _safe_text(src.get("id") or ""),
+                "label": _safe_text(src.get("label") or src.get("name") or ""),
+                "citation": _safe_text(src.get("citation") or src.get("description") or ""),
+            }
+            if str(entry["id"]).lower() in {"input_sha256", "dataset_sha256", "code_sha"}:
+                technical.append(entry)
+            else:
+                human.append(entry)
+        else:
+            human.append({"id": "", "label": _safe_text(src), "citation": ""})
+    return human, technical
+
+
+def _origin_bucket(origin: Any) -> str:
+    text = str(origin or "other").strip().lower()
+    if text in ORIGIN_BUCKETS:
+        return ORIGIN_BUCKETS[text]
+    for prefix, bucket in ORIGIN_BUCKETS.items():
+        if text.startswith(prefix):
+            return bucket
+    return "other"
+
+
+def _issue_dict(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, Mapping):
+        origin = raw.get("origin") or "other"
+        return {
+            "code": str(raw.get("code") or "ISSUE"),
+            "severity": str(raw.get("severity") or "warning"),
+            "origin": str(origin),
+            "origin_bucket": _origin_bucket(origin),
+            "origin_label": ORIGIN_LABELS.get(_origin_bucket(origin), "Outro"),
+            "message": _safe_text(raw.get("message") or ""),
+            "affected_ids": [str(i) for i in _as_list(raw.get("affected_ids"))],
+            "evidence": _redact_mapping(raw.get("evidence") or {}),
+        }
+    return {
+        "code": "ISSUE",
+        "severity": "warning",
+        "origin": "other",
+        "origin_bucket": "other",
+        "origin_label": "Outro",
+        "message": _safe_text(raw),
+        "affected_ids": [],
+        "evidence": {},
+    }
+
+
+def _row_id(value: Any) -> str:
+    if isinstance(value, Mapping):
+        for key in ("row_id", "id", "identificador"):
+            if value.get(key) is not None:
+                return str(value.get(key))
+    return str(value)
+
+
+def _document_items(raw: Any) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    if not raw:
+        return items
+    if isinstance(raw, Mapping):
+        if any(k in raw for k in ("declared", "present", "verified", "pending", "items")):
+            for status in ("declared", "present", "verified", "pending"):
+                for item in _as_list(raw.get(status)):
+                    if isinstance(item, Mapping):
+                        items.append(
+                            {
+                                "name": _safe_text(item.get("name") or item.get("id") or item),
+                                "status": status,
+                                "status_label": {
+                                    "declared": "Declarado",
+                                    "present": "Presente",
+                                    "verified": "Verificado",
+                                    "pending": "Pendente",
+                                }[status],
+                                "provenance": _safe_text(item.get("provenance") or item.get("source") or ""),
+                            }
+                        )
+                    else:
+                        items.append(
+                            {
+                                "name": _safe_text(item),
+                                "status": status,
+                                "status_label": {
+                                    "declared": "Declarado",
+                                    "present": "Presente",
+                                    "verified": "Verificado",
+                                    "pending": "Pendente",
+                                }[status],
+                                "provenance": "",
+                            }
+                        )
+            for item in _as_list(raw.get("items")):
+                items.extend(_document_items([item]))
+            for key, nested in raw.items():
+                if key in {
+                    "declared",
+                    "present",
+                    "verified",
+                    "pending",
+                    "items",
+                    "status",
+                    "note",
+                    "provenance",
+                }:
+                    continue
+                if isinstance(nested, Mapping) and (
+                    nested.get("evidence_status") or nested.get("status") or nested.get("grade") is not None
+                ):
+                    extra = dict(nested)
+                    extra.setdefault("name", key)
+                    extra.setdefault("id", key)
+                    items.extend(_document_items(extra))
+            return items
+        nested_docs = [
+            (key, nested)
+            for key, nested in raw.items()
+            if isinstance(nested, Mapping)
+            and key
+            not in {"status", "note", "provenance", "evidence", "calculation", "source"}
+            and (nested.get("evidence_status") or nested.get("status") or "grade" in nested)
+        ]
+        if nested_docs and not raw.get("name") and not raw.get("id"):
+            for key, nested in nested_docs:
+                extra = dict(nested)
+                extra.setdefault("name", key)
+                extra.setdefault("id", key)
+                items.extend(_document_items(extra))
+            return items
+        status = str(raw.get("status") or raw.get("evidence_status") or "declared")
+        status_norm = {
+            "declared": "declared",
+            "declarado": "declared",
+            "present": "present",
+            "presente": "present",
+            "verified": "verified",
+            "verificado": "verified",
+            "pending": "pending",
+            "pendente": "pending",
+        }.get(status.lower(), "declared")
+        items.append(
+            {
+                "name": _safe_text(raw.get("name") or raw.get("id") or ""),
+                "status": status_norm,
+                "status_label": {
+                    "declared": "Declarado",
+                    "present": "Presente",
+                    "verified": "Verificado",
+                    "pending": "Pendente",
+                }.get(status_norm, status_norm),
+                "provenance": _safe_text(raw.get("provenance") or raw.get("source") or ""),
+            }
+        )
+        return items
+    if isinstance(raw, list):
+        for item in raw:
+            items.extend(_document_items(item))
+    return items
+
+
+def _documentary_attachments(raw: Any) -> List[Dict[str, Any]]:
+    """Prepare only explicitly authorized attachment bytes for the report."""
+    attachments = []
+    for index, item in enumerate(_as_list(raw)):
+        if not isinstance(item, Mapping):
+            continue
+        content = item.get("bytes") or item.get("content")
+        media_type = _safe_text(item.get("type") or item.get("media_type") or "application/octet-stream")
+        authorized = item.get("authorized_for_report") is True
+        row = {
+            "name": _safe_text(item.get("filename") or item.get("name") or f"anexo-{index + 1}"),
+            "media_type": media_type,
+            "authorized": authorized,
+            "sha256": hashlib.sha256(bytes(content)).hexdigest()
+            if isinstance(content, (bytes, bytearray))
+            else _safe_text(item.get("sha256") or ""),
+            "image_data_uri": None,
+            "status": "mapped",
+        }
+        if authorized and isinstance(content, (bytes, bytearray)) and media_type in {
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+        }:
+            row["image_data_uri"] = f"data:{media_type};base64," + base64.b64encode(bytes(content)).decode("ascii")
+            row["status"] = "embedded"
+        elif not authorized:
+            row["status"] = "not_authorized_for_report"
+        elif not isinstance(content, (bytes, bytearray)):
+            row["status"] = "bytes_missing"
+        attachments.append(row)
+    return attachments
+
+
+def _next_action_dict(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, Mapping):
+        limitations_raw = raw.get("limitations")
+        if isinstance(limitations_raw, list):
+            limitations_items = [_safe_text(x) for x in limitations_raw if str(x).strip()]
+        elif limitations_raw:
+            limitations_items = [_safe_text(limitations_raw)]
+        else:
+            limitations_items = []
+        return {
+            "code": _safe_text(raw.get("code") or ""),
+            "priority": _safe_text(raw.get("priority") or ""),
+            "reason": _safe_text(raw.get("reason") or ""),
+            "next_step": _safe_text(raw.get("next_step") or ""),
+            "evidence_refs": [str(x) for x in _as_list(raw.get("evidence_refs"))],
+            "limitations": "; ".join(limitations_items),
+            "limitations_items": limitations_items,
+        }
+    return {
+        "code": "",
+        "priority": "",
+        "reason": _safe_text(raw),
+        "next_step": "",
+        "evidence_refs": [],
+        "limitations": "",
+        "limitations_items": [],
+    }
+
+
+def _coef_rows(model: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    coefficients = model.get("coefficients")
+    pvalues = model.get("pvalues") if isinstance(model.get("pvalues"), Mapping) else {}
+    vif = model.get("vif") if isinstance(model.get("vif"), Mapping) else {}
+    if isinstance(coefficients, Mapping):
+        for name, coef in coefficients.items():
+            number = _as_finite_number(coef)
+            rows.append(
+                {
+                    "variable": str(name),
+                    "coefficient_full": format_snapshot_number(number),
+                    "coefficient": _fmt(number, 6) if number is not None else "—",
+                    "pvalue": _fmt_pvalue(pvalues.get(name)) if name in pvalues else "—",
+                    "pvalue_token": report_field_token("coefficient_pvalue", name),
+                    "vif": _fmt(_as_finite_number(vif.get(name)), 3)
+                    if name in vif and str(name) != "const"
+                    else "—",
+                }
+            )
+        return rows
+    for item in _as_list(coefficients):
+        if not isinstance(item, Mapping):
+            continue
+        name = item.get("name") or item.get("variable") or ""
+        number = _as_finite_number(item.get("value") if "value" in item else item.get("coefficient"))
+        rows.append(
+            {
+                "variable": str(name),
+                "coefficient_full": format_snapshot_number(number),
+                "coefficient": _fmt(number, 6) if number is not None else "—",
+                "pvalue": _fmt_pvalue(item.get("pvalue")),
+                "pvalue_token": report_field_token("coefficient_pvalue", name),
+                "vif": _fmt(_as_finite_number(item.get("vif")), 3)
+                if str(name) != "const"
+                else "—",
+            }
+        )
+    return rows
+
+
+def _index_rows(
+    rows: Sequence[Any], *, metadata_columns: Sequence[str] = ()
+) -> Dict[str, Dict[str, Any]]:
+    indexed: Dict[str, Dict[str, Any]] = {}
+    documentary_columns = {str(column) for column in metadata_columns if str(column)}
+    for raw in rows:
+        if isinstance(raw, Mapping):
+            rid = _row_id(raw)
+            values = raw.get("values") if isinstance(raw.get("values"), Mapping) else {}
+            extra = {
+                k: v
+                for k, v in raw.items()
+                if k not in {
+                    "row_id", "id", "identificador", "source", "source_is_documentary",
+                    "justification", "values", "label", "name", "address", "endereco",
+                    "latitude", "longitude", "geolocation",
+                }
+            }
+            merged_values = {
+                key: value for key, value in values.items()
+                if str(key) not in documentary_columns
+            }
+            merged_values.update(extra)
+            indexed[rid] = {
+                "row_id": rid,
+                "source": _safe_text(raw.get("source") or raw.get("fonte") or ""),
+                "justification": _safe_text(raw.get("justification") or raw.get("justificativa") or ""),
+                "label": _safe_text(raw.get("label") or raw.get("name") or ""),
+                "address": _safe_text(raw.get("address") or raw.get("endereco") or ""),
+                "latitude": _as_finite_number(raw.get("latitude")),
+                "longitude": _as_finite_number(raw.get("longitude")),
+                "geolocation": _as_mapping(raw.get("geolocation")),
+                "values": {str(k): v for k, v in merged_values.items()},
+            }
+        else:
+            rid = str(raw)
+            indexed[rid] = {
+                "row_id": rid,
+                "source": "",
+                "justification": "",
+                "label": "",
+                "values": {},
+            }
+    return indexed
+
+
+def _ledger_rows(
+    ids: Sequence[Any],
+    details: Mapping[str, Dict[str, Any]],
+    *,
+    default_justification: str,
+) -> List[Dict[str, Any]]:
+    rows = []
+    for raw_id in ids:
+        rid = str(raw_id)
+        info = details.get(rid) or {}
+        source = info.get("source") or ""
+        justification = info.get("justification") or ""
+        label = info.get("label") or ""
+        values = info.get("values") or {}
+        geolocation = _as_mapping(info.get("geolocation"))
+        storage_values = {
+            str(k): format_snapshot_number(v) if _as_finite_number(v) is not None else _safe_text(v)
+            for k, v in values.items()
+        }
+        rows.append(
+            {
+                "row_id": rid,
+                "source": source if source else "Fonte não informada no contexto do relatório",
+                "justification": justification if justification else default_justification,
+                "label": label,
+                "address": info.get("address") or geolocation.get("address") or "",
+                "latitude": info.get("latitude") if info.get("latitude") is not None else geolocation.get("latitude"),
+                "longitude": info.get("longitude") if info.get("longitude") is not None else geolocation.get("longitude"),
+                "geolocation_complete": geolocation.get("complete") is True,
+                "values": values,
+                "storage_values": storage_values,
+                "value_cells": [storage_values.get(k, values.get(k, "")) for k in sorted(values.keys())],
+            }
+        )
+    return rows
+
+
+def _value_columns(rows: Sequence[Mapping[str, Any]]) -> List[str]:
+    keys = []
+    seen = set()
+    for row in rows:
+        for key in (row.get("values") or {}):
+            if key not in seen:
+                seen.add(key)
+                keys.append(str(key))
+    return keys
+
+
+def _pending(label: str) -> str:
+    return f"Pendência: {label}"
+
+
+def build_report_view(
+    snapshot: Mapping[str, Any],
+    report_context: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Pure snapshot → view-model mapping. No I/O, no model fitting."""
+    if not isinstance(snapshot, Mapping):
+        raise ReportRenderError(
+            "snapshot MP/1 inválido ou ausente",
+            code="C08_INVALID_SNAPSHOT",
+            evidence={"snapshot_type": type(snapshot).__name__},
+        )
+    ctx = _as_mapping(report_context)
+
+    target = _as_mapping(snapshot.get("target"))
+    value = _as_mapping(snapshot.get("value"))
+    sample = _as_mapping(snapshot.get("sample"))
+    validation = _as_mapping(snapshot.get("validation"))
+    model = _as_mapping(snapshot.get("model"))
+    search = _as_mapping(snapshot.get("search"))
+    provenance = _as_mapping(snapshot.get("provenance"))
+    cost_result = _as_mapping(provenance.get("cost_result"))
+    cost_memory = _as_mapping(cost_result.get("memory")) or _as_mapping(ctx.get("cost_memory"))
+    cost_labels = (
+        ("direct_subtotal", "Custo direto"),
+        ("bdi_rate", "Taxa de BDI"),
+        ("bdi_amount", "BDI"),
+        ("reproduction_building", "Custo de reprodução da benfeitoria"),
+        ("depreciation_rate", "Taxa de depreciação física"),
+        ("depreciation_amount", "Depreciação física"),
+        ("depreciated_building", "Benfeitoria depreciada"),
+        ("land_subtotal", "Terreno explicitamente incluído"),
+        ("total", "Total"),
+    )
+    issuance = _as_mapping(validation.get("issuance"))
+    precisao = _as_mapping(validation.get("precisao"))
+    fundamentacao = _as_mapping(validation.get("fundamentacao"))
+    statistical = _as_mapping(validation.get("statistical"))
+    documentary = validation.get("documentary")
+    document_state = assess_document_state(snapshot, ctx)
+    qualification_profile = _as_mapping(document_state.get("profile"))
+    qualification_rules = []
+    status_labels = {
+        "passed": "Atendido",
+        "failed": "Não atendido",
+        "pending_manual": "Pendente de insumo profissional",
+        "unsupported": "Sem suporte",
+        "not_applicable": "Não aplicável",
+        "unverified": "Não verificado",
+    }
+    for raw_rule in _as_list(document_state.get("rule_results")):
+        if not isinstance(raw_rule, Mapping):
+            continue
+        rule = _redact_mapping(raw_rule)
+        rule["status_label"] = status_labels.get(
+            str(rule.get("status") or ""), _safe_text(rule.get("status") or "PENDENTE")
+        )
+        rule["source_display"] = " / ".join(
+            part for part in (
+                _safe_text(rule.get("source_id") or ""),
+                _safe_text(rule.get("edition_or_version") or ""),
+            ) if part
+        ) or "PENDENTE"
+        rule["evidence_display"] = "; ".join(
+            _safe_text(item) for item in _as_list(rule.get("evidence_refs"))
+        ) or "Sem evidência registrada"
+        rule["observed_display"] = _safe_text(rule.get("observed") or "—")
+        qualification_rules.append(rule)
+
+    unit = _normalize_unit(target.get("unit") if target.get("unit") is not None else ctx.get("target_unit"))
+    unit_pending = unit is None
+    reference_date = snapshot.get("reference_date")
+    if reference_date is not None:
+        reference_date = str(reference_date).strip() or None
+    inspection_date = snapshot.get("inspection_date")
+    if inspection_date is None:
+        inspection_date = ctx.get("inspection_date")
+    if inspection_date is not None:
+        inspection_date = str(inspection_date).strip() or None
+
+    point = _as_finite_number(value.get("point"))
+    mean_ci80 = _interval_bounds(value.get("mean_ci80"))
+    prediction_interval = _interval_bounds(value.get("prediction_interval"))
+    arbitration_interval = _interval_bounds(value.get("arbitration_interval"))
+    admissible_interval = _interval_bounds(value.get("admissible_interval"))
+    adopted_raw = value.get("adopted_value", value.get("adopted"))
+    if isinstance(adopted_raw, Mapping):
+        adopted_point = _as_finite_number(adopted_raw.get("point") or adopted_raw.get("value"))
+        adopted_reason = _safe_text(adopted_raw.get("reason") or adopted_raw.get("policy_ref") or "")
+    else:
+        adopted_point = _as_finite_number(adopted_raw)
+        adopted_reason = _safe_text(value.get("adoption_policy_ref") or "")
+
+    used_ids = [str(i) for i in _as_list(sample.get("used_row_ids"))]
+    excluded_ids = [str(i) for i in _as_list(sample.get("excluded_row_ids"))]
+    n_received = sample.get("received")
+    n_observed = sample.get("observed_target")
+    n_prepared = sample.get("prepared")
+    n_used = sample.get("used")
+    n_excluded = sample.get("excluded")
+    if n_used is None:
+        n_used = len(used_ids)
+    if n_excluded is None:
+        n_excluded = len(excluded_ids)
+
+    evidence_columns = _as_mapping(ctx.get("sample_evidence_columns"))
+    metadata_columns = [str(value) for value in evidence_columns.values() if value]
+    used_details = _index_rows(
+        _as_list(ctx.get("used_rows")), metadata_columns=metadata_columns
+    )
+    excluded_details = _index_rows(
+        _as_list(ctx.get("excluded_rows")), metadata_columns=metadata_columns
+    )
+    used_rows = _ledger_rows(
+        used_ids,
+        used_details,
+        default_justification="Incluído na amostra efetiva do snapshot (justificativa não informada no contexto)",
+    )
+    excluded_rows = _ledger_rows(
+        excluded_ids,
+        excluded_details,
+        default_justification="Pendência: justificativa de exclusão não informada",
+    )
+    used_value_columns = _value_columns(used_rows)
+    excluded_value_columns = _value_columns(excluded_rows)
+    for n, row in enumerate(used_rows, start=1):
+        row["seq"] = n
+        storage = row.get("storage_values") or {}
+        row["value_cells"] = [storage.get(k, row["values"].get(k, "")) for k in used_value_columns]
+    for n, row in enumerate(excluded_rows, start=1):
+        row["seq"] = n
+        storage = row.get("storage_values") or {}
+        row["value_cells"] = [storage.get(k, row["values"].get(k, "")) for k in excluded_value_columns]
+    for kind, rows in (("used", used_rows), ("excluded", excluded_rows)):
+        for row in rows:
+            row["cell_tokens"] = {
+                field: sample_cell_token(kind, row.get("row_id"), field)
+                for field in (
+                    "row_id", "source", "justification", "label", "address",
+                    "latitude", "longitude",
+                )
+            }
+    used_value_panels = _ledger_value_panels(
+        used_rows, used_value_columns, kind="used"
+    )
+    excluded_value_panels = _ledger_value_panels(
+        excluded_rows, excluded_value_columns, kind="excluded"
+    )
+
+    issues = _group_issues([_issue_dict(i) for i in _as_list(snapshot.get("issues"))])
+    issues_by_origin: Dict[str, List[Dict[str, Any]]] = {
+        key: [] for key in ("normative", "statistical", "documentary", "search", "inference", "other")
+    }
+    for issue in issues:
+        issues_by_origin.setdefault(issue["origin_bucket"], []).append(issue)
+    priority_limitations = [
+        issue for issue in issues if str(issue.get("severity") or "").lower() in {"error", "warning"}
+    ]
+
+    precisao_status = str(precisao.get("status") or "not_computed")
+    precision_not_applicable_to_cost = (
+        precisao_status == "not_applicable_cost_quantification"
+        or precisao.get("reason") == "not_applicable_to_cost_quantification"
+        or (
+            statistical.get("route") == "cost_quantification"
+            and statistical.get("precision_grade_applicable") is False
+        )
+    )
+    if precision_not_applicable_to_cost:
+        precisao_status = "not_applicable_cost_quantification"
+    precisao_grade = precisao.get("grade")
+    amplitude_pct = _as_finite_number(precisao.get("amplitude_pct"))
+
+    documents = _document_items(documentary)
+    documents.extend(_document_items(ctx.get("documents")))
+    documentary_attachments = _documentary_attachments(
+        ctx.get("documentary_files") or ctx.get("photos") or ctx.get("attachments")
+    )
+    # de-duplicate by (name, status)
+    seen_docs = set()
+    unique_docs = []
+    for doc in documents:
+        key = (doc.get("name"), doc.get("status"))
+        if key in seen_docs:
+            continue
+        seen_docs.add(key)
+        unique_docs.append(doc)
+
+    sources, technical_sources = _context_sources(ctx, provenance)
+    search_info = interpret_search(search)
+    search_exhaustive = search_info["exhaustive"]
+    search_mode = search_info["mode"]
+    approximate = search_info["approximate"]
+    search_limitations = list(search_info["limitations"])
+    for item in _as_list(ctx.get("search_limitations")):
+        text_item = _safe_text(item)
+        if text_item and text_item not in search_limitations:
+            search_limitations.append(text_item)
+    inference_limitations = [
+        _safe_text(item) for item in _as_list(ctx.get("inference_limitations") or model.get("inference_limitations"))
+    ]
+    if statistical.get("limitations"):
+        inference_limitations.extend(_safe_text(x) for x in _as_list(statistical.get("limitations")))
+    if search_info["summary"] and search_info["approximate"]:
+        inference_limitations.append(search_info["summary"])
+
+    next_actions = [_next_action_dict(a) for a in _as_list(snapshot.get("next_actions"))]
+
+    issuance_status = str(issuance.get("status") or "draft")
+    if issuance_status not in ISSUANCE_LABELS:
+        issuance_status = "draft"
+    issuance_reasons = [
+        _issuance_reason_text(r) for r in _as_list(issuance.get("reasons")) if _issuance_reason_text(r)
+    ]
+
+    metrics = _metrics_block(model, statistical)
+    diagnostics = _statistical_diagnostics(statistical)
+    equation = compose_model_equation(model, target_col=str(target.get("column") or ""))
+    chart_series = assess_chart_series(ctx, used_row_ids=used_ids)
+    external_validation = None
+    procedure = validation.get("procedure") or validation.get("evaluation") or snapshot.get("evaluation")
+    if isinstance(procedure, Mapping) and procedure:
+        method = str(procedure.get("method") or procedure.get("kind") or "").strip().lower()
+        if method and method not in {"none", "not_requested", "skipped"}:
+            external_validation = {
+                "present": True,
+                "method": _safe_text(procedure.get("method") or procedure.get("kind") or ""),
+                "summary": _safe_text(procedure.get("summary") or procedure.get("detail") or ""),
+                "metrics": procedure.get("metrics") if isinstance(procedure.get("metrics"), Mapping) else {},
+            }
+        elif method in {"none", "not_requested", "skipped"}:
+            external_validation = {
+                "present": False,
+                "method": method,
+                "summary": "Validação externa não foi solicitada neste pedido. Isso não é defeito da minuta exploratória.",
+                "metrics": {},
+            }
+
+    market = ctx.get("market_descriptive") or ctx.get("market_summary")
+    market_rows = []
+    market_n = None
+    if isinstance(market, Mapping) and market.get("variables"):
+        market_n = market.get("n")
+        for var in market["variables"]:
+            market_rows.append(
+                {
+                    "name": var.get("name"),
+                    "unit": var.get("unit") or "",
+                    "min": _fmt(var.get("min"), 2),
+                    "mean": _fmt(var.get("mean"), 2),
+                    "median": _fmt(var.get("median"), 2) if var.get("median") is not None else "—",
+                    "max": _fmt(var.get("max"), 2),
+                }
+            )
+
+    annexes = []
+    for annex in _as_list(ctx.get("annexes")):
+        if not isinstance(annex, Mapping):
+            continue
+        annexes.append(
+            {
+                "title": _safe_text(annex.get("title") or annex.get("name") or "Anexo"),
+                "kind": annex.get("kind") or "table",
+                "columns": [str(c) for c in _as_list(annex.get("columns"))],
+                "rows": _as_list(annex.get("rows")),
+                "note": _safe_text(annex.get("note") or ""),
+            }
+        )
+
+    subject = ctx.get("subject") if isinstance(ctx.get("subject"), Mapping) else {}
+    subject_items = [(str(k), subject[k]) for k in subject]
+    subject_geolocation = _as_mapping(subject.get("geolocation"))
+    variable_classification = []
+    for raw in _as_list(ctx.get("variable_classification")):
+        if not isinstance(raw, Mapping):
+            continue
+        variable_classification.append({
+            "variable": _safe_text(raw.get("variable") or raw.get("name") or ""),
+            "criterion": _safe_text(raw.get("criterion") or ""),
+            "coding": _safe_text(raw.get("coding") or ""),
+            "categories": _safe_text(raw.get("categories") or ""),
+            "scale_values": _safe_text(raw.get("scale_values") or ""),
+            "complete": raw.get("complete") is True,
+        })
+
+    model_id = (
+        model.get("model_id")
+        or model.get("id")
+        or model.get("number")
+        or model.get("candidate_id")
+        or provenance.get("model_id")
+    )
+    model_revision = model.get("revision") or provenance.get("model_revision") or provenance.get("revision")
+    model_sha = model.get("model_sha256") or provenance.get("model_sha256")
+    code_sha = snapshot.get("code_sha") or provenance.get("code_sha")
+    input_sha = snapshot.get("input_sha256") or provenance.get("input_sha256")
+    generated_at = snapshot.get("generated_at")
+    job_id = snapshot.get("job_id")
+    project_id = snapshot.get("project_id")
+
+    frozen = {
+        "MP1_POINT": format_snapshot_number(point),
+        "MP1_ADOPTED_VALUE": format_snapshot_number(adopted_point),
+        "MP1_MEAN_CI80_LOWER": format_snapshot_number(mean_ci80["lower"] if mean_ci80 else None),
+        "MP1_MEAN_CI80_UPPER": format_snapshot_number(mean_ci80["upper"] if mean_ci80 else None),
+        "MP1_PRED_LOWER": format_snapshot_number(
+            prediction_interval["lower"] if prediction_interval else None
+        ),
+        "MP1_PRED_UPPER": format_snapshot_number(
+            prediction_interval["upper"] if prediction_interval else None
+        ),
+        "MP1_ARB_LOWER": format_snapshot_number(
+            arbitration_interval["lower"] if arbitration_interval else None
+        ),
+        "MP1_ARB_UPPER": format_snapshot_number(
+            arbitration_interval["upper"] if arbitration_interval else None
+        ),
+        "MP1_ADM_LOWER": format_snapshot_number(
+            admissible_interval["lower"] if admissible_interval else None
+        ),
+        "MP1_ADM_UPPER": format_snapshot_number(
+            admissible_interval["upper"] if admissible_interval else None
+        ),
+        "MP1_REFERENCE_DATE": reference_date or "PENDENTE",
+        "MP1_INSPECTION_DATE": inspection_date or "PENDENTE",
+        "MP1_TARGET_UNIT": unit or "PENDENTE",
+        "MP1_N_RECEIVED": format_snapshot_number(n_received),
+        "MP1_N_OBSERVED": format_snapshot_number(n_observed),
+        "MP1_N_PREPARED": format_snapshot_number(n_prepared),
+        "MP1_N_USED": format_snapshot_number(n_used),
+        "MP1_N_EXCLUDED": format_snapshot_number(n_excluded),
+        "MP1_ISSUANCE": issuance_status,
+        "MP1_PRECISAO_STATUS": precisao_status,
+        "MP1_FUNDAMENTACAO_GRADE": (
+            str(int(fundamentacao["grade"]))
+            if isinstance(fundamentacao.get("grade"), int)
+            else "PENDENTE"
+        ),
+        "MP1_PRECISAO_GRADE": (
+            str(int(precisao_grade)) if isinstance(precisao_grade, int) else "PENDENTE"
+        ),
+        "MPQUAL_PROFILE_ID": qualification_profile.get("id") or "PENDENTE",
+        "MPQUAL_PROFILE_VERSION": qualification_profile.get("version") or "PENDENTE",
+        "MPQUAL_VALUE_BASIS": qualification_profile.get("value_basis") or "PENDENTE",
+        "MPQUAL_RELEASE_STATUS": document_state.get("case_release_status") or "analysis_only",
+        "MPQUAL_GRADE_REQUIREMENT": document_state.get("grade_requirement_status") or "pending",
+        "MPQUAL_RESULT_FINGERPRINT": document_state.get("result_fingerprint") or "PENDENTE",
+        "MPQUAL_REPORT_CONTENT_FINGERPRINT": document_state.get("report_content_fingerprint")
+        or "PENDENTE",
+        "MPQUAL_REVIEW_EVENTS": str(len(document_state.get("review_events") or [])),
+        "MPQUAL_RULES_SHA256": hashlib.sha256(
+            canonical_json(document_state.get("rule_results") or []).encode("utf-8")
+        ).hexdigest(),
+        "MPQUAL_REVIEW_SHA256": hashlib.sha256(
+            canonical_json(document_state.get("review_events") or []).encode("utf-8")
+        ).hexdigest(),
+        "MPSAMPLE_ROWS_SHA256": hashlib.sha256(
+            canonical_json(
+                {
+                    "used_rows": _as_list(ctx.get("used_rows")),
+                    "excluded_rows": _as_list(ctx.get("excluded_rows")),
+                }
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+    frozen_lines = [f"{key}={value}" for key, value in frozen.items()]
+
+    provenance_for_report = _redact_mapping(provenance)
+    for verbose_key in ("qualification_context", "workflow_context"):
+        verbose_value = provenance_for_report.pop(verbose_key, None)
+        if verbose_value:
+            provenance_for_report[f"{verbose_key}_sha256"] = hashlib.sha256(
+                canonical_json(verbose_value).encode("utf-8")
+            ).hexdigest()
+
+    grau_fundamentacao_label = GRAU_LABELS.get(fundamentacao.get("grade"), "Não classificado")
+    if precisao_status == "not_applicable_cost_quantification":
+        grau_precisao_label = "Não aplicável à quantificação de custo"
+    elif precisao_status == "unclassified":
+        grau_precisao_label = "Calculada, não classificável"
+    elif precisao_status == "not_computed":
+        grau_precisao_label = "Não calculado"
+    elif precisao_status == "error":
+        grau_precisao_label = "Erro no cálculo"
+    else:
+        grau_precisao_label = GRAU_LABELS.get(precisao_grade, "Não classificado")
+
+    precisao_note = None
+    if precisao_status == "unclassified":
+        if amplitude_pct is not None:
+            precisao_note = (
+                f"Amplitude do IC da média = {_fmt(amplitude_pct, 1)}% — precisão calculada "
+                "mas não classificável quanto ao grau da Tabela 5. Isso não autoriza emissão "
+                "como se o grau existisse."
+            )
+        else:
+            precisao_note = "Precisão calculada mas não classificável (amplitude não informada no snapshot)."
+    elif precisao_status == "not_computed":
+        precisao_note = "Grau de precisão não calculado no snapshot."
+    elif precisao_status == "error":
+        precisao_note = "Erro ao calcular a precisão — campo permanece pendente."
+
+    item_scores = []
+    for item in _as_list(fundamentacao.get("items")):
+        if not isinstance(item, Mapping):
+            continue
+        item_scores.append(
+            {
+                "item": item.get("id") or item.get("item") or "",
+                "description": _safe_text(item.get("description") or item.get("name") or ""),
+                "grau_label": GRAU_LABELS.get(item.get("grade") or item.get("grau"), "Não atingido")
+                if isinstance(item.get("grade") or item.get("grau"), int)
+                else _safe_text(item.get("grade") or item.get("status") or "Pendente"),
+                "detail": _safe_text(item.get("detail") or item.get("evidence_status") or ""),
+                "evidence_status": _safe_text(item.get("evidence_status") or item.get("status") or ""),
+                "points": item.get("points"),
+            }
+        )
+
+    alternatives = []
+    for alt in _as_list(snapshot.get("alternatives")):
+        if isinstance(alt, Mapping):
+            alternatives.append(
+                {
+                    "id": _safe_text(alt.get("candidate_id") or alt.get("id") or ""),
+                    "summary": _safe_text(alt.get("summary") or alt.get("reason") or alt.get("status") or ""),
+                }
+            )
+        else:
+            alternatives.append({"id": "", "summary": _safe_text(alt)})
+
+    applicant = (
+        ctx.get("applicant")
+        or snapshot.get("applicant")
+        or provenance.get("applicant")
+        or qualification_profile.get("applicant")
+        or ""
+    )
+    purpose = (
+        ctx.get("purpose")
+        or qualification_profile.get("purpose")
+        or snapshot.get("purpose")
+        or provenance.get("purpose")
+        or ""
+    )
+    objective = ctx.get("objective") or snapshot.get("objective") or ""
+    rights = ctx.get("rights") or ctx.get("property_rights") or ""
+    asset_identification = ctx.get("asset_identification") or ctx.get("asset") or subject
+    if isinstance(asset_identification, Mapping):
+        asset_identification_display = "; ".join(
+            f"{_safe_text(key)}: {_safe_text(val)}" for key, val in asset_identification.items()
+        )
+    else:
+        asset_identification_display = _safe_text(asset_identification)
+    if rights:
+        asset_identification_display = (
+            f"{asset_identification_display}; direitos: {_safe_text(rights)}"
+            if asset_identification_display
+            else f"Direitos: {_safe_text(rights)}"
+        )
+    methodology = (
+        ctx.get("methodology_justification")
+        or qualification_profile.get("method")
+        or validation.get("method")
+        or ""
+    )
+    approved_reviews = document_state.get("approved_review_events") or []
+    professional_identity = _as_mapping(ctx.get("professional_identity"))
+    professional_identity_display = " — ".join(
+        part
+        for part in (
+            _safe_text(professional_identity.get("name") or ""),
+            _safe_text(professional_identity.get("council") or ""),
+            _safe_text(professional_identity.get("registration") or ""),
+            (
+                "ART/RRT "
+                + _safe_text(
+                    professional_identity.get("art_rrt")
+                    or professional_identity.get("responsibility_document")
+                )
+                if professional_identity.get("art_rrt")
+                or professional_identity.get("responsibility_document")
+                else ""
+            ),
+            _safe_text(professional_identity.get("documentary_reference") or ""),
+        )
+        if part
+    )
+    if approved_reviews:
+        review = approved_reviews[-1]
+        professional = _as_mapping(review.get("professional") or review.get("reviewer"))
+        professional_review_display = " — ".join(
+            part
+            for part in (
+                _safe_text(professional.get("name") or review.get("professional_name") or "Profissional identificado"),
+                _safe_text(professional.get("registration") or review.get("professional_id") or ""),
+                _safe_text(review.get("reason") or review.get("motive") or review.get("motivation") or ""),
+                _safe_text(review.get("revision_id") or review.get("version") or ""),
+            )
+            if part
+        )
+    else:
+        professional_review_display = "PENDENTE — evento aprovador identificável ausente"
+    acceptance = normalize_institution_receipt(
+        document_state.get("institution_acceptance"), qualification_profile
+    )
+    receipt = _as_mapping(acceptance.get("record"))
+    if acceptance.get("recorded"):
+        institution_acceptance_display = " — ".join(
+            part
+            for part in (
+                "Comprovante registrado — NÃO VERIFICADO",
+                _safe_text(
+                    receipt.get("recipient_id")
+                    or qualification_profile.get("recipient_id")
+                    or ""
+                ),
+                _safe_text(receipt.get("protocol") or ""),
+                "SHA-256 " + _safe_text(receipt.get("proof_sha256") or ""),
+                "associação à versão efetivamente enviada NÃO VERIFICADA",
+            )
+            if part
+        )
+    else:
+        institution_acceptance_display = "Não registrada; emissão do laudo não implica aceitação do destinatário."
+
+    view = {
+        "app_name": config.APP_NAME,
+        "document_kind": document_state["document_kind"],
+        "document_is_final": document_state["is_final"],
+        "not_approved_label": (
+            "Laudo final emitido após os critérios e a revisão vinculados a esta versão"
+            if document_state["is_final"]
+            else "Este documento não é laudo aprovado automaticamente e permanece análise/minuta"
+        ),
+        "issuance_status": issuance_status,
+        "issuance_label": document_state["document_kind"],
+        "issuance_reasons": issuance_reasons,
+        "document_state": document_state,
+        "document_state_blockers": document_state["blockers"],
+        "case_release_status": document_state["case_release_status"],
+        "applicant": _safe_text(applicant) or "Não informado",
+        "purpose": _safe_text(purpose) or "Não informado",
+        "objective": _safe_text(objective) or _pending("objetivo da avaliação não informado"),
+        "market_diagnosis": _safe_text(ctx.get("market_diagnosis") or "")
+        or _pending("diagnóstico do mercado não informado"),
+        "grade_i_justification": _safe_text(ctx.get("grade_i_justification") or "")
+        or _pending("justificativa para Grau I não informada"),
+        "observations": [_safe_text(item) for item in _as_list(ctx.get("observations"))],
+        "target_col": _safe_text(target.get("column") or ""),
+        "target_estimand": _safe_text(target.get("estimand") or ""),
+        "unit": unit,
+        "unit_pending": unit_pending,
+        "unit_display": unit if unit else _pending("unidade do valor-alvo não informada"),
+        "reference_date": reference_date,
+        "reference_date_display": reference_date or _pending("data-base não informada"),
+        "inspection_date": inspection_date,
+        "inspection_date_display": inspection_date or _pending("data de vistoria não informada"),
+        "generated_at": generated_at or _pending("data de emissão da minuta não informada"),
+        "generated_at_raw": generated_at,
+        "sources": sources,
+        "technical_sources": technical_sources,
+        "job_id": _safe_text(job_id),
+        "project_id": _safe_text(project_id),
+        "priority_limitations": priority_limitations,
+        "point": point,
+        "point_display": format_value_with_unit(point, unit) if not unit_pending else (
+            format_snapshot_number(point) if point is not None else "—"
+        ),
+        "point_raw": format_snapshot_number(point),
+        "cost_route": bool(cost_result),
+        "cost_memory": cost_memory,
+        "cost_memory_rows": [
+            {
+                "key": key,
+                "label": label,
+                "raw": format_snapshot_number(cost_memory.get(key)),
+                "display": (
+                    f"{_fmt_pt_br(cost_memory.get(key) * 100, 4)}%"
+                    if key.endswith("_rate") and _as_finite_number(cost_memory.get(key)) is not None
+                    else format_value_with_unit(cost_memory.get(key), unit)
+                ),
+            }
+            for key, label in cost_labels
+            if cost_memory.get(key) is not None
+        ],
+        "cost_items": [_redact_mapping(item) for item in _as_list(cost_result.get("items")) if isinstance(item, Mapping)],
+        "cost_fundamentacao": _redact_mapping(cost_result.get("fundamentacao")),
+        "adopted_value": adopted_point,
+        "adopted_value_display": (
+            format_value_with_unit(adopted_point, unit) if adopted_point is not None and not unit_pending else (
+                format_snapshot_number(adopted_point) if adopted_point is not None else "Não adotado"
+            )
+        ),
+        "adopted_value_reason": adopted_reason or "Política de adoção não declarada",
+        "mean_ci80": mean_ci80,
+        "mean_ci80_display": _interval_display(mean_ci80, unit if not unit_pending else None),
+        "prediction_interval": prediction_interval,
+        "prediction_interval_display": _interval_display(
+            prediction_interval, unit if not unit_pending else None
+        ),
+        "arbitration_interval": arbitration_interval,
+        "arbitration_interval_display": _interval_display(
+            arbitration_interval, unit if not unit_pending else None
+        ),
+        "admissible_interval": admissible_interval,
+        "admissible_interval_display": _interval_display(
+            admissible_interval, unit if not unit_pending else None
+        ),
+        "n_received": n_received if n_received is not None else "—",
+        "n_observed": n_observed if n_observed is not None else "—",
+        "n_prepared": n_prepared if n_prepared is not None else "—",
+        "n_used": n_used if n_used is not None else "—",
+        "n_excluded": n_excluded if n_excluded is not None else "—",
+        "used_ids": used_ids,
+        "excluded_ids": excluded_ids,
+        "used_ids_joined": " ".join(used_ids),
+        "excluded_ids_joined": " ".join(excluded_ids),
+        "used_rows": used_rows,
+        "excluded_rows": excluded_rows,
+        "used_value_columns": used_value_columns,
+        "excluded_value_columns": excluded_value_columns,
+        "used_value_panels": used_value_panels,
+        "excluded_value_panels": excluded_value_panels,
+        "used_count_mismatch": (
+            n_used is not None and used_ids and int(n_used) != len(used_ids)
+        ),
+        "excluded_count_mismatch": (
+            n_excluded is not None and excluded_ids and int(n_excluded) != len(excluded_ids)
+        ),
+        "issues": issues,
+        "issues_by_origin": issues_by_origin,
+        "has_issues": bool(issues),
+        "precisao_status": precisao_status,
+        "precisao_status_label": PRECISION_STATUS_LABELS.get(precisao_status, precisao_status),
+        "precisao_grade": precisao_grade,
+        "precisao_amplitude_pct": amplitude_pct,
+        "precisao_note": precisao_note,
+        "grau_fundamentacao_label": grau_fundamentacao_label,
+        "grau_fundamentacao_points": fundamentacao.get("points"),
+        "grau_precisao_label": grau_precisao_label,
+        "item_scores": item_scores,
+        "documents": unique_docs,
+        "documentary_attachments": documentary_attachments,
+        "next_actions": next_actions,
+        "search_exhaustive": search_exhaustive,
+        "search_mode": _safe_text(search_mode) if search_mode else "",
+        "search_approximate": approximate,
+        "search_coverage_known": search_info["coverage_known"],
+        "search_budget": (
+            _safe_text(search_info["budget"]) if search_info["budget"] is not None else (
+                _safe_text(search.get("budget")) if search.get("budget") is not None else ""
+            )
+        ),
+        "search_coverage": (
+            _safe_text(search_info["enumeration"])
+            if search_info["enumeration"]
+            else (_safe_text(search.get("coverage")) if search.get("coverage") is not None else "")
+        ),
+        "search_objective": _safe_text(search_info["objective"] or search.get("objective") or ""),
+        "combinations_tested": search_info["evaluated"] or search.get("combinations_tested") or search.get("evaluated"),
+        "search_possible": search_info["possible"],
+        "search_summary": search_info["summary"],
+        "search_message": _safe_text(search_info["message"] or search.get("message") or ""),
+        "search_limitations": search_limitations,
+        "inference_limitations": inference_limitations,
+        "formula": _safe_text(equation["formula"]),
+        "formula_display": _safe_text(equation["formula_display"]),
+        "formula_storage": _safe_text(equation["formula_storage"]),
+        "original_scale_formula": _safe_text(equation["original_scale_formula"]),
+        "original_scale_formula_storage": _safe_text(
+            equation["original_scale_formula_storage"]
+        ),
+        "original_scale_formula_present": equation["original_scale_present"],
+        "retransformation_method": _safe_text(equation.get("retransformation_method") or ""),
+        "retransformation_estimand": _safe_text(
+            equation.get("retransformation_estimand") or ""
+        ),
+        "formula_source": equation["source"],
+        "formula_present": equation["present"],
+        "fitting_scale": equation["fitting_scale"],
+        "formula_log_scale": equation["log_scale"],
+        "formula_notes": equation["notes"],
+        "transform_rows": equation["transform_rows"],
+        "variable_meanings": equation["variable_meanings"],
+        "coef_rows": _coef_rows(model),
+        "metrics": metrics,
+        "metrics_present": metrics["present"],
+        "statistical_diagnostics": diagnostics,
+        "chart_series": chart_series,
+        "chart_available": chart_series["plot"],
+        "chart_absence_reason": chart_series["reason"],
+        "chart_warning": chart_series.get("warning"),
+        "external_validation": external_validation,
+        "market_summary_rows": market_rows,
+        "market_summary_n": market_n,
+        "annexes": annexes,
+        "subject_items": subject_items,
+        "has_subject": bool(subject_items),
+        "subject_geolocation": subject_geolocation,
+        "variable_classification": variable_classification,
+        "asset_identification_display": asset_identification_display or _pending("identificação do bem não informada"),
+        "rights_display": _safe_text(rights) or _pending("direitos avaliados não informados"),
+        "region_characterization": _safe_text(ctx.get("region_characterization") or ""),
+        "property_characterization": _safe_text(ctx.get("property_characterization") or ""),
+        "methodology_display": _safe_text(methodology) or _pending("justificativa metodológica não informada"),
+        "assumptions": [_safe_text(x) for x in _as_list(ctx.get("assumptions"))],
+        "professional_review_display": professional_review_display,
+        "professional_identity": _redact_mapping(professional_identity),
+        "professional_identity_display": professional_identity_display
+        or "PENDENTE — qualificação legal do responsável não informada",
+        "qualification_profile": qualification_profile,
+        "qualification_profile_display": (
+            " / ".join(
+                part
+                for part in (
+                    _safe_text(qualification_profile.get("id")),
+                    _safe_text(qualification_profile.get("version")),
+                    _safe_text(qualification_profile.get("recipient_id")),
+                )
+                if part
+            )
+            or "PENDENTE"
+        ),
+        "value_basis_display": _safe_text(qualification_profile.get("value_basis")) or "PENDENTE",
+        "qualification_rules": qualification_rules,
+        "result_fingerprint": document_state.get("result_fingerprint"),
+        "institution_acceptance_display": institution_acceptance_display,
+        "digital_signature": document_state.get("signature") or {},
+        "alternatives": alternatives,
+        "model_id": _safe_text(model_id) if model_id else "",
+        "model_revision": _safe_text(model_revision) if model_revision else "",
+        "display_rounding_decimals": DISPLAY_ROUNDING_DECIMALS,
+        "model_sha": _safe_text(model_sha) if model_sha else "",
+        "code_sha": _safe_text(code_sha) if code_sha else "",
+        "input_sha256": _safe_text(input_sha) if input_sha else "",
+        "provenance_safe": provenance_for_report,
+        "frozen": frozen,
+        "frozen_lines": frozen_lines,
+        "charts": {},
+        "chart_b64": None,
+        "unit_is_brl": (not unit_pending) and _unit_is_brl(unit),
+        "unit_is_brl_m2": (not unit_pending) and _unit_is_brl_per_m2(unit),
+        "legacy_exhaustive": search_exhaustive,
+        "legacy_combinations_tested": search.get("combinations_tested"),
+        "legacy_search_message": search.get("message") or "",
+    }
+    return view
+
+
+def _figure_to_base64() -> str:
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=_CHART_DPI, bbox_inches="tight")
+    buf.seek(0)
+    encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
+    plt.close()
+    return encoded
+
+
+def _charts_from_series(
+    fitted: Any,
+    residuals: Any,
+    observed: Any = None,
+    *,
+    axis_fitted: str = "Valores ajustados",
+    axis_resid: str = "Resíduos",
+    axis_observed: str = "Valores observados",
+    standardized_residuals: Any = None,
+) -> Dict[str, str]:
+    charts: Dict[str, str] = {}
+    fitted_arr = np.asarray(fitted, dtype=float) if fitted is not None else np.array([])
+    resid_arr = np.asarray(residuals, dtype=float) if residuals is not None else np.array([])
+    if fitted_arr.size == 0 or resid_arr.size == 0:
+        return charts
+    if observed is None:
+        observed_arr = fitted_arr + resid_arr
+    else:
+        observed_arr = np.asarray(observed, dtype=float)
+
+    plt.figure(figsize=_CHART_FIGSIZE)
+    sns.scatterplot(x=fitted_arr, y=resid_arr)
+    plt.axhline(y=0, color="r", linestyle="--")
+    plt.xlabel(axis_fitted)
+    plt.ylabel(axis_resid)
+    plt.title("Resíduos versus valores ajustados")
+    plt.tight_layout()
+    charts["residuals_vs_fitted"] = _figure_to_base64()
+
+    standardized_arr = np.asarray(
+        standardized_residuals, dtype=float
+    ) if standardized_residuals is not None else np.array([])
+    hist_arr = standardized_arr if standardized_arr.size == resid_arr.size else resid_arr
+    hist_standardized = standardized_arr.size == resid_arr.size
+    plt.figure(figsize=_CHART_FIGSIZE)
+    sns.histplot(hist_arr, kde=True)
+    plt.xlabel("Resíduos padronizados" if hist_standardized else axis_resid)
+    plt.ylabel("Frequência")
+    plt.title(
+        "Histograma dos resíduos padronizados"
+        if hist_standardized else "Histograma dos resíduos"
+    )
+    plt.tight_layout()
+    charts["residuals_hist"] = _figure_to_base64()
+
+    plt.figure(figsize=_CHART_FIGSIZE)
+    sns.scatterplot(x=observed_arr, y=fitted_arr)
+    min_val = float(min(observed_arr.min(), fitted_arr.min()))
+    max_val = float(max(observed_arr.max(), fitted_arr.max()))
+    plt.plot([min_val, max_val], [min_val, max_val], color="r", linestyle="--", label="Bissetriz (y = x)")
+    plt.xlabel(axis_observed)
+    plt.ylabel(axis_fitted)
+    plt.title("Observado versus estimado")
+    plt.legend()
+    plt.tight_layout()
+    charts["observed_vs_estimated"] = _figure_to_base64()
+    return charts
+
+
+def _attach_charts(
+    view: Dict[str, Any],
+    report_context: Optional[Mapping[str, Any]],
+    model_result: Optional[ModelResult] = None,
+    provided_charts: Optional[Mapping[str, str]] = None,
+) -> Dict[str, Any]:
+    charts: Dict[str, str] = {}
+    if provided_charts:
+        charts.update({k: v for k, v in provided_charts.items() if v})
+    ctx = _as_mapping(report_context)
+    if ctx.get("charts") and isinstance(ctx.get("charts"), Mapping):
+        charts.update({k: v for k, v in ctx["charts"].items() if v})
+    series = view.get("chart_series") or assess_chart_series(
+        ctx, used_row_ids=view.get("used_ids") or []
+    )
+    view["chart_series"] = series
+    view["chart_available"] = bool(series.get("plot"))
+    view["chart_absence_reason"] = series.get("reason") or ""
+    view["chart_warning"] = series.get("warning")
+    if series.get("warning"):
+        warning_issue = _issue_dict(
+            {
+                "code": series["warning"].get("code") or "REPORT_CHARTS_MISALIGNED",
+                "severity": "warning",
+                "origin": "report",
+                "message": (
+                    f"{series['warning'].get('message')}. Os gráficos não foram plotados. "
+                    "O cálculo do snapshot permanece inalterado."
+                ),
+                "affected_ids": [],
+                "evidence": {"chart": True},
+            }
+        )
+        existing_codes = {i.get("code") for i in view.get("issues") or []}
+        if warning_issue["code"] not in existing_codes:
+            view.setdefault("issues", []).append(warning_issue)
+            bucket = warning_issue["origin_bucket"]
+            view.setdefault("issues_by_origin", {}).setdefault(bucket, []).append(warning_issue)
+            view["has_issues"] = True
+    if series.get("plot") and (
+        not charts.get("observed_vs_estimated") or not charts.get("residuals_vs_fitted")
+    ):
+        try:
+            generated = _charts_from_series(
+                series.get("fitted"),
+                series.get("residuals"),
+                series.get("observed"),
+                axis_fitted=series.get("axis_fitted") or "Valores ajustados",
+                axis_resid=series.get("axis_resid") or "Resíduos",
+                axis_observed=series.get("axis_observed") or "Valores observados",
+                standardized_residuals=(
+                    ((view.get("statistical_diagnostics") or {}).get(
+                        "standardized_residuals"
+                    ) or {}).get("values")
+                ),
+            )
+            for key, val in generated.items():
+                charts.setdefault(key, val)
+        except Exception as exc:  # charts must not abort a valid snapshot PDF
+            logger.error("Error generating report charts: %s", exc)
+            view.setdefault("issues", []).append(
+                _issue_dict(
+                    {
+                        "code": "C08_CHARTS_FAILED",
+                        "severity": "warning",
+                        "origin": "C08",
+                        "message": f"Gráficos não gerados: {type(exc).__name__}: {exc}",
+                        "affected_ids": [],
+                        "evidence": {},
+                    }
+                )
+            )
+    elif (not series.get("plot")) and model_result is not None and not charts:
+        try:
+            generated = ResultsGenerator.generate_charts(model_result)
+            for key, val in generated.items():
+                charts.setdefault(key, val)
+        except Exception as exc:
+            logger.error("Error generating report charts: %s", exc)
+    view["charts"] = charts
+    view["chart_b64"] = charts.get("observed_vs_estimated")
+    return view
+
+
+def compose_report_html(
+    snapshot: Mapping[str, Any],
+    report_context: Optional[Mapping[str, Any]] = None,
+    *,
+    view: Optional[Mapping[str, Any]] = None,
+) -> str:
+    """Render the HTML string that `render_report` feeds to WeasyPrint."""
+    import jinja2
+
+    resolved = dict(view) if view is not None else build_report_view(snapshot, report_context)
+    try:
+        env = jinja2.Environment(
+            loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
+            autoescape=True,
+        )
+        template = env.get_template("report.html")
+        return template.render(**resolved)
+    except Exception as exc:
+        raise ReportRenderError(
+            f"Falha ao compor HTML do relatório: {type(exc).__name__}: {exc}",
+            code="C08_HTML_COMPOSE_FAILED",
+            evidence={"exception_type": type(exc).__name__},
+        ) from exc
+
+
+def _write_pdf(html_content: str) -> bytes:
+    try:
+        import weasyprint
+    except Exception as exc:
+        raise ReportRenderError(
+            f"Motor de PDF indisponível: {type(exc).__name__}: {exc}",
+            code="C08_PDF_ENGINE_UNAVAILABLE",
+            evidence={"exception_type": type(exc).__name__},
+        ) from exc
+    try:
+        pdf_bytes = weasyprint.HTML(string=html_content, encoding="utf-8").write_pdf()
+    except Exception as exc:
+        raise ReportRenderError(
+            f"Falha ao renderizar PDF: {type(exc).__name__}: {exc}",
+            code="C08_PDF_ENGINE_FAILED",
+            evidence={"exception_type": type(exc).__name__, "exception_message": str(exc)},
+        ) from exc
+    if pdf_bytes is None:
+        raise ReportRenderError(
+            "Motor de PDF devolveu None — documento não entregue",
+            code="C08_PDF_EMPTY",
+        )
+    pdf_bytes = bytes(pdf_bytes)
+    if not pdf_bytes:
+        raise ReportRenderError(
+            "Motor de PDF devolveu documento vazio — documento não entregue",
+            code="C08_PDF_EMPTY",
+        )
+    if not pdf_bytes.startswith(b"%PDF"):
+        raise ReportRenderError(
+            "Motor de PDF devolveu bytes que não são PDF — documento não entregue",
+            code="C08_PDF_INVALID",
+            evidence={"prefix": pdf_bytes[:8].decode("latin-1", errors="replace")},
+        )
+    return pdf_bytes
+
+
+def render_report(
+    snapshot: Mapping[str, Any],
+    report_context: Optional[Mapping[str, Any]] = None,
+) -> bytes:
+    """Build the review-ready PDF from an MP/1 ResultSnapshot.
+
+    Returns PDF bytes. Never returns None. Raises ReportRenderError on failure.
+    Does not fit or recalculate a regression.
+    """
+    view = build_report_view(snapshot, report_context)
+    if (
+        view.get("case_release_status") == "signed_integrity_verified"
+        and view.get("document_is_final")
+    ):
+        raise ReportRenderError(
+            "A revisão assinada não pode ser renderizada novamente; entregue os bytes assinados já vinculados.",
+            code="C03_SIGNED_REVISION_IMMUTABLE",
+            origin="C03",
+            evidence={"result_fingerprint": view.get("result_fingerprint")},
+        )
+    view = _attach_charts(view, report_context)
+    html_content = compose_report_html(snapshot, report_context, view=view)
+    return _write_pdf(html_content)
+
+
+def _legacy_model_result_to_snapshot(
+    model_result: ModelResult,
+    *,
+    target_col: str = "",
+    avaliando_raw: Optional[Dict[str, float]] = None,
+    solicitante: str = "",
+    finalidade: str = "",
+    exhaustive: Optional[bool] = None,
+    combinations_tested: Optional[int] = None,
+    search_message: str = "",
+    market_summary: Optional[dict] = None,
+    market_data: Optional[pd.DataFrame] = None,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Adapt a legacy ModelResult into an MP/1-shaped snapshot + context.
+
+    Copies stored fields only. Does not invert campo-de-arbítrio bounds to
+    recover a point estimate, and does not stamp datetime.now() as data-base.
+    """
+    validation_result = getattr(model_result, "validation_result", None)
+    details = dict(getattr(validation_result, "details", None) or {}) if validation_result else {}
+
+    # Point must already be stored; never reconstruct from interval strings.
+    point = details.get("central_estimate")
+    if point is None:
+        point = details.get("point")
+    if point is None:
+        point = details.get("predicted_mean")
+    point = _as_finite_number(point)
+
+    ic_lo = _as_finite_number(details.get("ic80_inferior"))
+    ic_hi = _as_finite_number(details.get("ic80_superior"))
+    arb_lo = _as_finite_number(details.get("campo_arbitrio_inferior"))
+    arb_hi = _as_finite_number(details.get("campo_arbitrio_superior"))
+    adm_lo = _as_finite_number(
+        getattr(validation_result, "valores_admissiveis_inferior", None) if validation_result else None
+    )
+    adm_hi = _as_finite_number(
+        getattr(validation_result, "valores_admissiveis_superior", None) if validation_result else None
+    )
+
+    issues: List[Dict[str, Any]] = []
+    if validation_result:
+        for warning in getattr(validation_result, "warnings", None) or []:
+            issues.append(
+                {
+                    "code": "LEGACY_VALIDATION_WARNING",
+                    "severity": "warning",
+                    "origin": "normative",
+                    "message": str(warning),
+                    "affected_ids": [],
+                    "evidence": {},
+                }
+            )
+        for message in getattr(validation_result, "messages", None) or []:
+            issues.append(
+                {
+                    "code": "LEGACY_VALIDATION_MESSAGE",
+                    "severity": "info",
+                    "origin": "normative",
+                    "message": str(message),
+                    "affected_ids": [],
+                    "evidence": {},
+                }
+            )
+
+    grau_precisao = getattr(validation_result, "grau_precisao", None) if validation_result else None
+    amplitude_pct = (
+        getattr(validation_result, "precisao_amplitude_pct", None) if validation_result else None
+    )
+    if grau_precisao is not None:
+        precisao_status = "classified"
+    elif amplitude_pct is not None:
+        precisao_status = "unclassified"
+    else:
+        precisao_status = "not_computed"
+
+    item_scores = []
+    if validation_result and getattr(validation_result, "item_scores", None):
+        for item in sorted(validation_result.item_scores, key=lambda i: i.item):
+            item_scores.append(
+                {
+                    "item": item.item,
+                    "description": item.description,
+                    "grade": item.grau_achieved,
+                    "detail": item.detail,
+                    "evidence_status": "declared",
+                }
+            )
+
+    mm = getattr(model_result, "model_metrics", None)
+    metrics = {}
+    if mm:
+        metrics = {
+            "r2": mm.r2,
+            "r2_adjusted": mm.r2_adjusted,
+            "f_statistic": mm.f_statistic,
+            "f_pvalue": mm.f_pvalue,
+            "durbin_watson": mm.autocorrelation_durbin_watson,
+        }
+
+    used_rows = []
+    used_ids = []
+    if market_data is not None and not getattr(market_data, "empty", True):
+        display_df = market_data
+        columns = [str(c) for c in display_df.columns]
+        for idx, row in enumerate(display_df.itertuples(index=True)):
+            raw_index = row[0]
+            values = {}
+            for col, val in zip(columns, row[1:]):
+                values[col] = "" if pd.isna(val) else val
+            rid = None
+            for key in ("row_id", "id"):
+                if key in values and values[key] not in (None, ""):
+                    rid = str(values[key])
+                    break
+            if rid is None:
+                rid = str(raw_index)
+            used_ids.append(rid)
+            used_rows.append(
+                {
+                    "row_id": rid,
+                    "source": "planilha de mercado (adaptador legado)",
+                    "justification": "Registro fornecido em market_data",
+                    "values": values,
+                    "label": str(values.get("nome") or values.get("endereco") or ""),
+                }
+            )
+
+    generated_at = None
+    timestamp = getattr(model_result, "timestamp", None)
+    if isinstance(timestamp, datetime):
+        generated_at = timestamp.isoformat()
+    elif timestamp:
+        generated_at = str(timestamp)
+
+    snapshot = {
+        "schema_version": "MP/1",
+        "job_id": "legacy-adapter",
+        "project_id": None,
+        "input_sha256": "",
+        "code_sha": "",
+        "reference_date": None,
+        "inspection_date": None,
+        "generated_at": generated_at,
+        "target": {
+            "column": target_col or "",
+            "unit": "",
+            "estimand": "estimativa pontual da média condicional (legado, unidade não confirmada)",
+        },
+        "value": {
+            "point": point,
+            "mean_ci80": {"lower": ic_lo, "upper": ic_hi} if ic_lo is not None or ic_hi is not None else None,
+            "prediction_interval": None,
+            "arbitration_interval": {"lower": arb_lo, "upper": arb_hi}
+            if arb_lo is not None or arb_hi is not None
+            else None,
+            "admissible_interval": {"lower": adm_lo, "upper": adm_hi}
+            if adm_lo is not None or adm_hi is not None
+            else None,
+        },
+        "sample": {
+            "received": len(used_ids) if used_ids else None,
+            "observed_target": len(used_ids) if used_ids else None,
+            "prepared": len(used_ids) if used_ids else None,
+            "used": len(used_ids) if used_ids else None,
+            "excluded": 0,
+            "used_row_ids": used_ids,
+            "excluded_row_ids": [],
+        },
+        "validation": {
+            "fundamentacao": {
+                "grade": getattr(validation_result, "grau_fundamentacao", None) if validation_result else None,
+                "points": getattr(validation_result, "grau_fundamentacao_pontos", None)
+                if validation_result
+                else None,
+                "items": item_scores,
+            },
+            "precisao": {
+                "status": precisao_status,
+                "grade": grau_precisao,
+                "amplitude_pct": amplitude_pct,
+            },
+            "statistical": {},
+            "documentary": {"declared": [], "present": [], "verified": []},
+            "issuance": {
+                "status": "review_required",
+                "reasons": [
+                    "Adaptador legado: ModelResult não é um ResultSnapshot MP/1 completo",
+                    "Data-base e unidade do alvo não persistidas no resultado legado",
+                ],
+            },
+        },
+        "issues": issues,
+        "model": {
+            "model_id": "legacy-ModelResult",
+            "revision": None,
+            "formula": getattr(model_result, "formula", "") or "",
+            "coefficients": dict(getattr(model_result, "coefficients", None) or {}),
+            "pvalues": dict(getattr(model_result, "pvalues", None) or {}),
+            "vif": dict(getattr(model_result, "vif", None) or {}),
+            "metrics": metrics,
+        },
+        "search": {
+            "exhaustive": exhaustive,
+            "mode": None if exhaustive is None else ("exhaustive" if exhaustive else "approximate"),
+            "combinations_tested": combinations_tested,
+            "message": search_message or "",
+            "limitations": []
+            if exhaustive is not False
+            else [
+                "Busca aproximada: o espaço excedeu o limite combinatório e recorreu ao fallback documentado."
+            ],
+        },
+        "alternatives": [],
+        "next_actions": [
+            {
+                "code": "PROVIDE_MP1_SNAPSHOT",
+                "priority": "high",
+                "reason": "Este PDF veio do adaptador legado generate_pdf_report",
+                "next_step": "C10 deve chamar render_report com ResultSnapshot e report_context integrais",
+                "evidence_refs": [],
+                "limitations": "O adaptador não reconstrói o ponto a partir do campo de arbítrio",
+            }
+        ],
+        "provenance": {
+            "adapter": "generate_pdf_report",
+            "source": "ModelResult",
+        },
+        "applicant": solicitante,
+        "purpose": finalidade,
+    }
+
+    descriptive = None
+    if market_summary and market_summary.get("variables"):
+        descriptive = {
+            "n": market_summary.get("n"),
+            "variables": list(market_summary["variables"]),
+        }
+
+    context = {
+        "applicant": solicitante,
+        "purpose": finalidade,
+        "used_rows": used_rows,
+        "excluded_rows": [],
+        "market_descriptive": descriptive,
+        "subject": dict(avaliando_raw) if avaliando_raw else {},
+        "documents": [],
+        "sources": [],
+        "inference_limitations": [
+            "Adaptador legado: estimativa pontual só aparece se já estiver persistida no ModelResult; "
+            "não é recuperada por inversão de intervalos."
+        ],
+    }
+    return snapshot, context
+
+
 class ResultsGenerator:
     @staticmethod
     def generate_charts(model_result: ModelResult) -> Dict[str, str]:
-        """
-        Generates charts for the model result and returns them as base64 strings.
-        """
-        charts = {}
-        
-        if not model_result.success or not model_result.model_metrics:
+        """Generate print-sized residual charts with Portuguese legends."""
+        charts: Dict[str, str] = {}
+        if not model_result or not getattr(model_result, "success", False) or not model_result.model_metrics:
             return charts
-            
         try:
-            # 1. Residuals vs Fitted
-            plt.figure(figsize=(10, 6))
-            sns.scatterplot(x=model_result.fitted_values, y=model_result.residuals)
-            plt.axhline(y=0, color='r', linestyle='--')
-            plt.xlabel('Fitted Values')
-            plt.ylabel('Residuals')
-            plt.title('Residuals vs Fitted')
-            
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            buf.seek(0)
-            charts['residuals_vs_fitted'] = base64.b64encode(buf.getvalue()).decode('utf-8')
-            plt.close()
-            
-            # 2. Histogram of Residuals
-            plt.figure(figsize=(10, 6))
-            sns.histplot(model_result.residuals, kde=True)
-            plt.title('Histogram of Residuals')
-            
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            buf.seek(0)
-            charts['residuals_hist'] = base64.b64encode(buf.getvalue()).decode('utf-8')
-            plt.close()
-            
-            # 3. Observado vs. Estimado (NBR 14653-2, §8.2.1.4.1 e §10.1-k)
-            fitted = np.asarray(model_result.fitted_values, dtype=float)
-            residuals = np.asarray(model_result.residuals, dtype=float)
-            observed = fitted + residuals
-
-            plt.figure(figsize=(10, 6))
-            sns.scatterplot(x=observed, y=fitted)
-
-            min_val = float(min(observed.min(), fitted.min()))
-            max_val = float(max(observed.max(), fitted.max()))
-            plt.plot([min_val, max_val], [min_val, max_val], color='r', linestyle='--', label='Bissetriz (y = x)')
-
-            plt.xlabel('Preços Observados')
-            plt.ylabel('Valores Estimados pelo Modelo')
-            plt.title('Observado vs. Estimado')
-            plt.legend()
-
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            buf.seek(0)
-            charts['observed_vs_estimated'] = base64.b64encode(buf.getvalue()).decode('utf-8')
-            plt.close()
-
-            # 4. QQ Plot
-            # Requires statsmodels or scipy
-            # Skipping for brevity in this initial pass, but easy to add
-
-        except Exception as e:
-            logger.error(f"Error generating charts: {str(e)}")
-            
-        return charts
+            return _charts_from_series(
+                model_result.fitted_values,
+                model_result.residuals,
+            )
+        except Exception as exc:
+            logger.error("Error generating charts: %s", exc)
+            return charts
 
     @staticmethod
     def build_market_summary(
         df: pd.DataFrame, variable_cols: Optional[List[str]] = None
     ) -> Optional[dict]:
-        """
-        Builds the `market_summary` dict consumed by generate_pdf_report's
-        "Diagnóstico do Mercado" section (NBR 14653-2 §10.1-f): sample size
-        n plus min/mean/max for each candidate base variable, computed
-        directly from the real data (never fabricated text).
+        """Optional descriptive min/mean/median/max helper for the adapter.
 
-        Design decision: this is an OPTIONAL convenience helper, not a step
-        generate_pdf_report performs internally. The caller (e.g. the
-        worker) already knows exactly which columns are the actual
-        variáveis-base used as model input; results_generator.py would
-        otherwise have to reverse-engineer that from transformed column
-        names on the fitted model (e.g. mapping "ln(area)" back to "area"),
-        which the caller can trivially avoid by just passing its own column
-        list. If None is returned (or market_summary is never passed to
-        generate_pdf_report), the report simply omits the section.
+        This is a sample descriptive, not a complete market diagnosis.
         """
         if df is None or df.empty:
             return None
@@ -123,15 +2370,18 @@ class ResultsGenerator:
         for col in cols:
             if col not in df.columns:
                 continue
-            series = pd.to_numeric(df[col], errors='coerce')
+            series = pd.to_numeric(df[col], errors="coerce")
             if series.notna().sum() == 0:
                 continue
-            variables.append({
-                "name": col,
-                "min": float(series.min()),
-                "mean": float(series.mean()),
-                "max": float(series.max()),
-            })
+            variables.append(
+                {
+                    "name": col,
+                    "min": float(series.min()),
+                    "mean": float(series.mean()),
+                    "median": float(series.median()),
+                    "max": float(series.max()),
+                }
+            )
         if not variables:
             return None
         return {"n": len(df), "variables": variables}
@@ -150,229 +2400,47 @@ class ResultsGenerator:
         charts: Optional[Dict[str, str]] = None,
         market_data: Optional[pd.DataFrame] = None,
     ) -> Optional[bytes]:
-        """
-        Generates the NBR 14653-2 §10.2 (simplified report) PDF for the given
-        model, covering items a)-h) and k) of §10.1: identificação do
-        solicitante, finalidade, objetivo, pressupostos/ressalvas, método e
-        procedimento, especificação da avaliação (Tabela 1, grau de
-        fundamentação/precisão), and tratamento dos dados e identificação do
-        resultado (fórmula, coeficientes, métricas, gráfico Observado vs.
-        Estimado). When avaliando_raw is provided, also reports the point
-        estimate, the 80% confidence interval, the campo de arbítrio (±15%)
-        and the resulting "valores admissíveis" (Anexo A.10.1.1). When
-        exhaustive is False, also discloses that the variable/transformation
-        search degraded to the top-N-correlation fallback heuristic and that
-        the guarantee of global optimality does not apply to this result
-        (transparência metodológica, Anexo A) - pass it (together with
-        combinations_tested / search_message) from
-        OptimalCombinationResult.exhaustive; leave it as None if that
-        information is unavailable.
+        """Legacy adapter: ModelResult → render_report.
 
-        market_summary: optional dict (see build_market_summary) rendering
-        the "Diagnóstico do Mercado" section (NBR 14653-2 §10.1-f - sample
-        size n plus min/mean/max per candidate base variable). Omitted from
-        the report entirely when None.
-
-        charts: optional dict of already-generated base64 chart strings
-        (same shape as generate_charts()'s return value). When provided, it
-        is reused instead of calling generate_charts() again internally -
-        avoiding computing the same 3 charts twice per analysis (once for
-        the websocket payload, once for the PDF). When None (e.g. standalone
-        /test use), generate_charts() is still called internally as before.
-
-        market_data: optional DataFrame with the original market data
-        (including identification columns like endereço, if the caller
-        merges DataLoadResult.identification_df in) rendered as the
-        "Planilha dos Dados de Mercado Utilizados" table (NBR §10.1-i).
-        Best-effort/minimal implementation: capped at the first 200 rows to
-        keep the PDF a manageable size, with a note when truncated; a
-        properly paginated, full planilha is left for a future round.
-        Omitted from the report entirely when None.
-
-        Returns the PDF as bytes, or None if generation fails (logged).
+        Invalid/incomplete ModelResult still returns None so C16 and the
+        current worker path keep their documented behaviour. MP/1 callers
+        must use `render_report`, which never returns None.
         """
         try:
-            import jinja2
-            import weasyprint
-
-            validation_result = model_result.validation_result
-
-            # --- Especificação da avaliação (Tabela 1) ---
-            grau_fundamentacao_label = GRAU_LABELS.get(
-                validation_result.grau_fundamentacao if validation_result else None,
-                "Não classificado",
+            if model_result is None or not hasattr(model_result, "validation_result"):
+                logger.error("Error generating PDF report: invalid ModelResult")
+                return None
+            snapshot, context = _legacy_model_result_to_snapshot(
+                model_result,
+                target_col=target_col,
+                avaliando_raw=avaliando_raw,
+                solicitante=solicitante,
+                finalidade=finalidade,
+                exhaustive=exhaustive,
+                combinations_tested=combinations_tested,
+                search_message=search_message,
+                market_summary=market_summary,
+                market_data=market_data,
             )
-            grau_precisao_label = GRAU_LABELS.get(
-                validation_result.grau_precisao if validation_result else None,
-                "Não calculado",
+            view = build_report_view(snapshot, context)
+            view = _attach_charts(
+                view,
+                context,
+                model_result=model_result,
+                provided_charts=charts,
             )
-
-            # When grau_precisao is None, distinguish WHY: was the IC 80%
-            # amplitude computed but out of range for every faixa of Tabela
-            # 5 (needs a market-diagnosis-based justification, per the NOTA
-            # of Tabela 5), or was it never computed at all (no avaliando
-            # informed)?
-            grau_precisao_note = None
-            amplitude_pct = validation_result.precisao_amplitude_pct if validation_result else None
-            if validation_result and validation_result.grau_precisao is None:
-                if amplitude_pct is not None and amplitude_pct > 50:
-                    grau_precisao_note = (
-                        f"Amplitude do IC 80% = {_fmt(amplitude_pct, 1)}% — não classificável "
-                        f"quanto à precisão (Tabela 5). Requer justificativa no laudo com base "
-                        f"no diagnóstico do mercado (NBR 14653-2, NOTA da Tabela 5)."
-                    )
-                elif amplitude_pct is None:
-                    grau_precisao_note = (
-                        "Não calculado — informe as características do imóvel avaliando para "
-                        "obter o grau de precisão."
-                    )
-
-            item_scores = []
-            if validation_result and validation_result.item_scores:
-                for it in sorted(validation_result.item_scores, key=lambda i: i.item):
-                    item_scores.append({
-                        "item": it.item,
-                        "description": it.description,
-                        "grau_label": GRAU_LABELS.get(it.grau_achieved, "Não atingido"),
-                        "detail": it.detail,
-                    })
-
-            # --- Fórmula e coeficientes ---
-            coef_rows = []
-            for var, coef in (model_result.coefficients or {}).items():
-                coef_rows.append({
-                    "variable": var,
-                    "coefficient": _fmt(coef, 6),
-                    "pvalue": _fmt((model_result.pvalues or {}).get(var), 4),
-                    "vif": _fmt((model_result.vif or {}).get(var), 3) if var != "const" else "—",
-                })
-
-            # --- Métricas do modelo ---
-            mm = model_result.model_metrics
-            metrics = {
-                "r2": _fmt(mm.r2, 4) if mm else "—",
-                "r2_adjusted": _fmt(mm.r2_adjusted, 4) if mm else "—",
-                "f_statistic": _fmt(mm.f_statistic, 3) if mm else "—",
-                "f_pvalue": _fmt(mm.f_pvalue, 4) if mm else "—",
-                "durbin_watson": _fmt(mm.autocorrelation_durbin_watson, 3) if mm else "—",
-            }
-
-            # --- Gráfico Observado vs. Estimado ---
-            # Reuse caller-provided charts (already generated once for the
-            # websocket payload) instead of paying for generate_charts()
-            # again; only fall back to generating internally when nothing
-            # was supplied (standalone/test use).
-            resolved_charts = charts if charts is not None else ResultsGenerator.generate_charts(model_result)
-            chart_b64 = resolved_charts.get("observed_vs_estimated") if resolved_charts else None
-
-            # --- Imóvel avaliando (Anexo A.10.1.1) ---
-            has_avaliando = bool(avaliando_raw)
-            avaliando_items = list(avaliando_raw.items()) if avaliando_raw else []
-            central_estimate = ic80_inferior = ic80_superior = None
-            campo_arbitrio_inferior = campo_arbitrio_superior = None
-            valores_admissiveis_inferior = valores_admissiveis_superior = None
-
-            if has_avaliando and validation_result:
-                details = validation_result.details or {}
-                ic80_inferior = details.get("ic80_inferior")
-                ic80_superior = details.get("ic80_superior")
-                campo_arbitrio_inferior = details.get("campo_arbitrio_inferior")
-                campo_arbitrio_superior = details.get("campo_arbitrio_superior")
-                valores_admissiveis_inferior = validation_result.valores_admissiveis_inferior
-                valores_admissiveis_superior = validation_result.valores_admissiveis_superior
-
-                # central_estimate is not stored directly; derive it from the
-                # campo de arbítrio bounds already computed by
-                # NBRValidator.finalize_precision_and_extrapolation
-                # (campo_arbitrio_inf/sup = central * (1 -/+ CAMPO_ARBITRIO)).
-                estimates = []
-                if campo_arbitrio_inferior is not None:
-                    estimates.append(campo_arbitrio_inferior / (1 - config.CAMPO_ARBITRIO))
-                if campo_arbitrio_superior is not None:
-                    estimates.append(campo_arbitrio_superior / (1 + config.CAMPO_ARBITRIO))
-                if estimates:
-                    central_estimate = sum(estimates) / len(estimates)
-
-            # --- Diagnóstico do Mercado (NBR 14653-2 §10.1-f) ---
-            market_summary_rows = []
-            market_summary_n = None
-            if market_summary and market_summary.get("variables"):
-                market_summary_n = market_summary.get("n")
-                for v in market_summary["variables"]:
-                    market_summary_rows.append({
-                        "name": v.get("name"),
-                        "min": _fmt(v.get("min"), 2),
-                        "mean": _fmt(v.get("mean"), 2),
-                        "max": _fmt(v.get("max"), 2),
-                    })
-
-            # --- Planilha dos Dados de Mercado Utilizados (NBR §10.1-i) ---
-            # Best-effort/minimal: capped at 200 rows so a large dataset
-            # cannot blow up the PDF; a properly paginated full planilha is
-            # left for a future round (see docstring).
-            market_data_table = None
-            if market_data is not None and not market_data.empty:
-                MAX_MARKET_DATA_ROWS = 200
-                display_df = market_data.head(MAX_MARKET_DATA_ROWS)
-                market_data_table = {
-                    "columns": [str(c) for c in display_df.columns],
-                    "rows": [
-                        ["" if pd.isna(v) else v for v in row]
-                        for row in display_df.itertuples(index=False)
-                    ],
-                    "truncated": len(market_data) > MAX_MARKET_DATA_ROWS,
-                    "shown_rows": len(display_df),
-                    "total_rows": len(market_data),
-                }
-
-            context = {
-                "app_name": config.APP_NAME,
-                "data_referencia": datetime.now().strftime("%d/%m/%Y"),
-                "solicitante": solicitante,
-                "finalidade": finalidade,
-                "target_col": target_col,
-                "grau_fundamentacao_label": grau_fundamentacao_label,
-                "grau_precisao_label": grau_precisao_label,
-                "grau_precisao_note": grau_precisao_note,
-                "item_scores": item_scores,
-                "formula": model_result.formula,
-                "coef_rows": coef_rows,
-                "metrics": metrics,
-                "chart_b64": chart_b64,
-                "has_avaliando": has_avaliando,
-                "avaliando_items": avaliando_items,
-                "central_estimate": _fmt(central_estimate, 2),
-                "ic80_inferior": _fmt(ic80_inferior, 2),
-                "ic80_superior": _fmt(ic80_superior, 2),
-                "campo_arbitrio_inferior": _fmt(campo_arbitrio_inferior, 2),
-                "campo_arbitrio_superior": _fmt(campo_arbitrio_superior, 2),
-                "valores_admissiveis_inferior": _fmt(valores_admissiveis_inferior, 2),
-                "valores_admissiveis_superior": _fmt(valores_admissiveis_superior, 2),
-                "market_summary_rows": market_summary_rows,
-                "market_summary_n": market_summary_n,
-                "market_data_table": market_data_table,
-                # Transparência metodológica (Anexo A): only rendered when
-                # the search's exhaustiveness is actually known.
-                # exhaustive=False means the search degraded to the
-                # top-N-correlation fallback heuristic and the guarantee of
-                # global optimality over the full search space does NOT
-                # apply to this result - this must reach the report, not
-                # just server logs.
-                "exhaustive": exhaustive,
-                "combinations_tested": combinations_tested,
-                "search_message": search_message,
-            }
-
-            env = jinja2.Environment(
-                loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
-                autoescape=True,
-            )
-            template = env.get_template("report.html")
-            html_content = template.render(**context)
-
-            pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
-            return pdf_bytes
-
-        except Exception as e:
-            logger.error(f"Error generating PDF report: {str(e)}")
+            html_content = compose_report_html(snapshot, context, view=view)
+            return _write_pdf(html_content)
+        except ReportRenderError as exc:
+            logger.error("Error generating PDF report: %s", exc)
             return None
+        except Exception as exc:
+            logger.error("Error generating PDF report: %s", exc)
+            return None
+
+    @staticmethod
+    def render_report(
+        snapshot: Mapping[str, Any],
+        report_context: Optional[Mapping[str, Any]] = None,
+    ) -> bytes:
+        return render_report(snapshot, report_context)

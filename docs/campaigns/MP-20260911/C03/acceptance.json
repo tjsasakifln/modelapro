@@ -1,0 +1,68 @@
+{
+  "campaign_id": "C03",
+  "head_sha": "f3c9409f7eeedd9da271f740e2286904b12fce6e",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "INTEGRATION_PENDING",
+  "criteria": [
+    {
+      "id": "C03-A01",
+      "status": "pass",
+      "evidence": "tests/c03_normative/test_a01_item4_boundary_delta.py and composed OLS callback; independent |ŷ(150)-ŷ(100)|/|ŷ(100)|=50% from y=10000×área; item 4 grade 0 despite faixa [25,200]. Fresh consumer launch: boundary_delta_pct=50.0 grade=0."
+    },
+    {
+      "id": "C03-A02",
+      "status": "pass",
+      "evidence": "tests/c03_normative/test_a02_frontiers.py: on-frontier Grau III; 2×max and 0.5×min; 15%/20% exact and epsilon; two variables per-si+simultaneous; m²↔cm² same conclusion; dichotomous/allocated/adjusted/categorical without invented faixa."
+    },
+    {
+      "id": "C03-A03",
+      "status": "pass",
+      "evidence": "tests/c03_normative/test_a03_transforms.py: ln/exp pipeline still 50% original-unit; zero denominator, NaN, inf, exception → grade null; mixed unsupported axes not approved."
+    },
+    {
+      "id": "C03-A04",
+      "status": "pass",
+      "evidence": "tests/c03_normative/test_a04_classifiers.py with edition ABNT NBR 14653-2:2011; tests/test_nbr14653.py crystallized item-4 cases no longer expect Grau II/I from faixa ampliada alone."
+    },
+    {
+      "id": "C03-A05",
+      "status": "pass",
+      "evidence": "tests/c03_normative/test_a05_precisao_documentary.py: not_computed/classified/unclassified/error distinct; documentary without provenance is declared not verified; VIF/R² warnings only; IC/PI/campo/admissíveis separated; grau_nao_e_emissao issue."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/test_nbr14653.py tests/c03_normative/ -q",
+      "exit_code": 0,
+      "runs": 2,
+      "result": "80 passed",
+      "python": "3.12.3",
+      "pytest": "9.1.1"
+    },
+    {
+      "command": "python3 fresh-consumer assess_normative A01 context (twice)",
+      "exit_code": 0,
+      "runs": 2,
+      "result": "boundary_delta_pct=50.0 item4.grade=0 precisao.status=classified verification_status=verified_rules_listed"
+    }
+  ],
+  "unmet_dependencies": [
+    "C04 must pass predict_original and effective n/k/intercept into assess_normative / finalize_precision_and_extrapolation",
+    "C05 ranking should consume the new item-4 (a)+(b) result",
+    "C10 additive snapshot mapping of precisao.status and documentary evidence_status; C03 did not edit modules/results.py"
+  ],
+  "deferred_items": [
+    "9.2.1.1 extras, 9.2.1.6.1 homogeneous sample, Anexo A.2 n_i, Tabelas 3–4 fatores, métodos custo/involutivo/evolutivo, A.8 agrupamentos, A.10.1.2 valor arbitrado — see unverified_rules.md"
+  ],
+  "review_findings": [
+    {
+      "severity": "info",
+      "finding": "Self-review: legacy finalize still fills valores_admissiveis_* as A.10.1.1 IC∩campo candidate for C04/C08 compatibility when estimand is undeclared, with an explicit warning. assess_normative.intervals keeps admissible pending until use-condition is declared."
+    },
+    {
+      "severity": "info",
+      "finding": "Self-review: ItemScore.grau_achieved cannot be null; pending item 4 is stored as 0 on the adapter. assess_normative uses null + pending."
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "campaign_id": "C04",
+  "head_sha": "6194a020ad28e5ea6b0970e15b1190338b2e6252",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "component_status": "INTEGRATION_PENDING",
+  "criteria": [
+    {
+      "id": "C04-A01",
+      "status": "passed",
+      "evidence": "tests/c04_fitting/test_a01_influence_exclusion.py: principal keeps influential id, diagnostics.influence reports it, documented exclusion has id/reason/author/origin and separate counts, exploratory is a different scenario, build_model(remove_outliers=True) keeps n and warns."
+    },
+    {
+      "id": "C04-A02",
+      "status": "passed",
+      "evidence": "tests/c04_fitting/test_a02_common_sample.py: two CandidateSpec share used_row_ids; ln-domain invalid rows diverge with r2_naive_comparison_blocked; reviewed exclusion applies to both candidates."
+    },
+    {
+      "id": "C04-A03",
+      "status": "passed",
+      "evidence": "tests/c04_fitting/test_a03_design_diagnostics.py: constant already present not doubled; intercept=False; collinear dummy group rejected rank_deficient pinv_used=false; duplicate index diagnosed / duplicate row_ids rejected; singular rejected without coefficients; insufficient n rejected; numerical_failure status=error distinct from rejected."
+    },
+    {
+      "id": "C04-A04",
+      "status": "passed",
+      "evidence": "tests/c04_fitting/test_a04_prediction_intervals.py: independent statsmodels QR-OLS on the same effective design matches value.point and mean_ci80 within atol=rtol=1e-8; mean_ci80 width < prediction_interval width; missing C06 errors; labeled C06 inverse with interval_method_validated=false leaves mean_ci80 null and precisao.status=not_computed."
+    },
+    {
+      "id": "C04-A05",
+      "status": "passed",
+      "evidence": "tests/c04_fitting/test_a05_frozen_evaluation.py: second subject does not change coefficients/encoder/used_row_ids; C03 callback receives effective used ids and axes.sample_max from the revised sample; cancel does not mutate fit; progress in [0,1]."
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c04_fitting tests/test_model_builder.py -q",
+      "exit_code": 0,
+      "runs": 2,
+      "result": "29 passed"
+    },
+    {
+      "command": "python3 tests/c04_fitting/consumer_launch.py",
+      "exit_code": 0,
+      "runs": 2,
+      "result": "OK status fitted point 798.8934116584857 n 30 sha 45eaf92fe642"
+    }
+  ],
+  "unmet_dependencies": [
+    {
+      "id": "C02",
+      "interface": "modules.preprocessing.fit_dataset / transform_subject",
+      "note": "Published on sibling branch/PR #2; not in this tree. Tests use labeled contract fixtures. Lazy import when present."
+    },
+    {
+      "id": "C03",
+      "interface": "modules.nbr14653_validation.assess_normative",
+      "note": "Published on sibling branch/PR #5; not in this tree. evaluate_fitted returns pending NormativeAssessment if missing."
+    },
+    {
+      "id": "C06",
+      "interface": "modules.target_transform.fit_target_transform / inverse_target_prediction",
+      "note": "Published on sibling branch/PR #1; not in this tree. y_transformation other than identity errors with c06_not_available unless the module is importable."
+    },
+    {
+      "id": "C10",
+      "interface": "ResultSnapshot freeze / worker composition",
+      "note": "C04 exports serializable CandidateFit/CandidateAssessment; does not freeze JSON."
+    },
+    {
+      "id": "C05",
+      "interface": "search_models using fit_candidate",
+      "note": "C05 still calls legacy build_model(remove_outliers=True); adapter no longer drops."
+    }
+  ],
+  "deferred_items": [
+    "Composed worktree test against live C02+C03+C06 is integration (C17), not copied into this PR.",
+    "Legacy callers C05/C03/C16 tests that assumed silent Cook drops remain red until those owners adopt the handoff."
+  ],
+  "review_findings": [
+    {
+      "severity": "info",
+      "author": "self",
+      "finding": "Legacy detect_outliers still uses Cook>1.0 / |r|>2.5; fit_candidate reports influence with 4/n as well so A01's planted point is flagged even when Cook<1."
+    },
+    {
+      "severity": "info",
+      "author": "self",
+      "finding": "CandidateFit.X_design/y_design are extra in-memory fields for the adapter; to_serializable() omits them and model_object/base_frame."
+    },
+    {
+      "severity": "warning",
+      "author": "self",
+      "finding": "No independent reviewer in this session. Foreign tests (C16 outlier R², C03 item-4 post-drop range) fail by design; owners must integrate."
+    }
+  ]
+}

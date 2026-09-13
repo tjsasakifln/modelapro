@@ -1,0 +1,98 @@
+{
+  "schema": "MP-C06-EVIDENCE/1",
+  "pr_head_sha": "c60fbebd11816e358756a50ca8a09b74a815aa34",
+  "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "tested_commit_sha": "151d63b648d0aab08afce8eb79a21d266477fbfb",
+  "tree_sha": "f8cfc683daf029b93493c9771119f8d81c9f45b3",
+  "parents": [
+    "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+    "c60fbebd11816e358756a50ca8a09b74a815aa34"
+  ],
+  "event": "pull_request",
+  "run_id": "34716312436",
+  "run_attempt": "1",
+  "job": "wide-suite-linux",
+  "source_dirty": false,
+  "tracked_source_dirty_after": false,
+  "status": "FAILURE_HISTORICAL_NOT_APPROVAL_OF_CURRENT_HEAD",
+  "wide_result": {
+    "passed": 1703,
+    "failed": 1,
+    "skipped": 1,
+    "failed_nodeid": "tests/pro_workflow/p02/test_a01_playwright.py::test_a01_playwright_real_path_or_record_unavailability"
+  },
+  "inspected_artifact_inventories": [
+    {
+      "namespace": "c06-document-flow",
+      "inventory_sha256": "fc1760b76565c930de8c741b5102ac92be1ee088992ae883e2ad5ad6074e5c62",
+      "files": [
+        {
+          "path": "SYNTHETIC_TEST_signed_report.pdf",
+          "size": 198089,
+          "sha256": "061c6cc7b5dd069328331b5597eb84e04ecfea8582a4152ac8b96470b8e88438"
+        },
+        {
+          "path": "SYNTHETIC_TEST_unsigned_report.pdf",
+          "size": 192060,
+          "sha256": "1026cab2091cb99ee3905519bf8fa6ded9d5f9d6ae939ab3f01405546fc06520"
+        },
+        {
+          "path": "store/jobs/job_bd15228204644dd48a81b4d587c82627/artifacts/document_history.zip",
+          "size": 1086904,
+          "sha256": "2d5ae29fa0e4091b867c946170bff5b155a4877f2c1c2b0883a4e0afae9cfadb"
+        },
+        {
+          "path": "store/jobs/job_bd15228204644dd48a81b4d587c82627/artifacts/evidence_bundle.zip",
+          "size": 409599,
+          "sha256": "630492d072fd237595451ed35fa730f4d9302bebeeddd24012824e960c1a010b"
+        },
+        {
+          "path": "store/jobs/job_bd15228204644dd48a81b4d587c82627/artifacts/report.docx",
+          "size": 7024,
+          "sha256": "9d25bf5b48f9af5c0a873c934f3be2d38b0a243901338d4663e34247756a0b73"
+        },
+        {
+          "path": "store/jobs/job_bd15228204644dd48a81b4d587c82627/artifacts/report.pdf",
+          "size": 192060,
+          "sha256": "1026cab2091cb99ee3905519bf8fa6ded9d5f9d6ae939ab3f01405546fc06520"
+        },
+        {
+          "path": "store/jobs/job_bd15228204644dd48a81b4d587c82627/artifacts/signature_request.json",
+          "size": 694,
+          "sha256": "cf1d193a29897700dc789b4875b0770573446c5850d4f55ea92d42395936248a"
+        },
+        {
+          "path": "store/jobs/job_bd15228204644dd48a81b4d587c82627/artifacts/signed_report.pdf",
+          "size": 198089,
+          "sha256": "061c6cc7b5dd069328331b5597eb84e04ecfea8582a4152ac8b96470b8e88438"
+        },
+        {
+          "path": "store/jobs/job_bd15228204644dd48a81b4d587c82627/artifacts/submission.zip",
+          "size": 772565,
+          "sha256": "55a48da462f062c169f4d62daee6adaedab5084ad34d22383229728e368b5eac"
+        },
+        {
+          "path": "store/jobs/job_bd15228204644dd48a81b4d587c82627/evidence/artifacts/report.pdf",
+          "size": 191394,
+          "sha256": "e3c3a78853e297fb7a1a2da025180671eb50e366daa621e2b8050702fb28263f"
+        }
+      ]
+    },
+    {
+      "namespace": "c06-cost-flow",
+      "inventory_sha256": "55a675437a652dfe5f2a0b04d32341a44760066ca36af57df54691efa43a8fce",
+      "files": [
+        {
+          "path": "store/jobs/job_09be80246205451c90d2e862de1141a2/artifacts/evidence_bundle.zip",
+          "size": 76887,
+          "sha256": "6e5e2e7f92f7e4d6efb88948d489c14daffe9b599faf7d6018482f74151573b7"
+        },
+        {
+          "path": "store/jobs/job_09be80246205451c90d2e862de1141a2/artifacts/report.pdf",
+          "size": 58637,
+          "sha256": "ff1af788959039355b6fe88db807d1141e82d4b4d3783a60b4f4a90cef9eb2e7"
+        }
+      ]
+    }
+  ]
+}

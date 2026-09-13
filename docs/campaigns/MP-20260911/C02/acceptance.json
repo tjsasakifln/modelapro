@@ -1,0 +1,72 @@
+{
+  "campaign_id": "C02",
+  "status": "READY_COMPONENT",
+  "head_sha": "797c75dbec8d0b34739bca40bbcf90dcf4164b94",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "criteria": [
+    {
+      "id": "C02-A01",
+      "status": "pass",
+      "evidence": "tests/c02_schema/test_a01_shared_encoder.py::test_a01_bairro_and_formatted_numeric_share_encoder — bairro group present with Centro as reference, subject {bairro: Centro, area: '1.234,56'} shares encoder, identifier/date out of X, expected area 1234.56"
+    },
+    {
+      "id": "C02-A02",
+      "status": "pass",
+      "evidence": "tests/c02_schema/test_a02_distinct_states.py — unknown_category vs predictor_missing vs group_no_support vs constant_column vs collinear_columns; unknown/missing X is NaN not reference zeros"
+    },
+    {
+      "id": "C02-A03",
+      "status": "pass",
+      "evidence": "tests/c02_schema/test_a03_no_leakage.py — reserved ZonaReservada/1e6 excluded from categories and mean; independent train mean (10+20+30)/3=20.0; missing target not filled; candidate_cols=[] error empty_candidates"
+    },
+    {
+      "id": "C02-A04",
+      "status": "pass",
+      "evidence": "tests/c02_schema/test_a04_persist_restore.py — dumps_encoder_artifacts/loads_encoder_artifacts JSON roundtrip; SubjectDesign.X columns, order and values identical"
+    },
+    {
+      "id": "C02-A05",
+      "status": "pass",
+      "evidence": "tests/c02_schema/test_a05_atomic_groups.py — 3-level bairro → one group, 2 indicators, n_free_slopes=3, ledger received=used=7"
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c02_schema/ -v --tb=short",
+      "exit_code": 0,
+      "result": "8 passed, 1 skipped"
+    },
+    {
+      "command": "python3 tests/c02_schema/launch_consumer.py",
+      "exit_code": 0,
+      "result": "run1 ok=True train_mean=20.0 supported=True"
+    },
+    {
+      "command": "python3 tests/c02_schema/launch_consumer.py",
+      "exit_code": 0,
+      "result": "run2 identical to run1, same dataset_sha256"
+    }
+  ],
+  "unmet_dependencies": [
+    "C01 ingest_market is not on SHA c92949e; tests/c02_schema/test_c01_real_bundle.py is skip-gated and is not a fixture substitute",
+    "C09 forms.py still numeric-only for avaliando (handoff, not edited by C02)",
+    "C10 worker.py still expands one-hot dummy names after legacy load_data (handoff, not edited by C02)"
+  ],
+  "deferred_items": [
+    "Composition with published C01/C04/C09/C10 is C17; local status is READY_COMPONENT, not PASS_E2E",
+    "Wiring Streamlit/FastAPI entry points to fit_dataset/transform_subject belongs to those owners"
+  ],
+  "review_findings": [
+    {
+      "source": "self-review",
+      "severity": "info",
+      "finding": "constant_column may be emitted twice (encoder fit and design-matrix diagnose). States remain distinct from unknown/missing/group_no_support."
+    },
+    {
+      "source": "self-review",
+      "severity": "info",
+      "finding": "Legacy DataLoader.load_data on the audited SHA still one-hots and mean-fills the full frame including target. C02 does not change that file."
+    }
+  ]
+}

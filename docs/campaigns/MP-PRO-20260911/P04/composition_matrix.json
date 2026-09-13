@@ -1,0 +1,85 @@
+{
+  "campaign_id": "MP-PRO-20260911/P04",
+  "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "p04_first_increment": "079b05d29fdf409afeeba884ddade7bc1868016b",
+  "note": "Prior incorporation of P01 18a2dc0 / P02 a0b4b4a / P03 4cb6937 was invalidated (REOPENED). Current SEALED HEADs merged --no-ff: P01 ec691bd, P03 ec7b8db, P02 b8e846c.",
+  "invalidated_incorporation": [
+    {
+      "id": "P01",
+      "old_head": "18a2dc0a6b5b315d3e3a5707fa186f6cc0820ad1",
+      "reopened_comment": "https://github.com/tjsasakifln/modelapro/pull/19#issuecomment-5641039231",
+      "reason": "REOPENED then later 03edfa3 also REOPENED; current SEALED packs subject_x before zip"
+    },
+    {
+      "id": "P02",
+      "old_head": "a0b4b4a8767372ce83d7a42b00d80aa488767194",
+      "reopened_comment": "https://github.com/tjsasakifln/modelapro/pull/18#issuecomment-5641016660",
+      "reason": "GET /revisions 405 + reopen-revision"
+    },
+    {
+      "id": "P03",
+      "old_head": "4cb69374799444b9c06ffff8f72cc59caafe597f",
+      "reopened_comment": "https://github.com/tjsasakifln/modelapro/pull/21#issuecomment-5641110835",
+      "reason": "chart series length mismatch refusal"
+    }
+  ],
+  "rows": {
+    "P01": {
+      "id": "P01",
+      "prefix": "[MP-PRO-20260911/P01]",
+      "branch": "mp-pro-20260911/p01-nucleo-reuso",
+      "pr": 19,
+      "url": "https://github.com/tjsasakifln/modelapro/pull/19",
+      "head": "ec691bd8d1cf05f2da31105f59a94bedfa80757f",
+      "base": "mp-20260911/integracao-final",
+      "sealed": true,
+      "sealed_comment": "https://github.com/tjsasakifln/modelapro/pull/19#issuecomment-5641179767",
+      "incorporated_on_p04": true,
+      "contracts": [
+        "MP/1 RequestSpec/ResultSnapshot",
+        "MP-PRO/1 provenance.workflow_context",
+        "search_policy.minimum_fundamentacao_grade",
+        "subject_x in dossier residual before zip"
+      ],
+      "evidence": ["docs/campaigns/MP-PRO-20260911/P01/"]
+    },
+    "P02": {
+      "id": "P02",
+      "prefix": "[MP-PRO-20260911/P02]",
+      "branch": "mp-pro-20260911/p02-rotina-interface",
+      "pr": 18,
+      "url": "https://github.com/tjsasakifln/modelapro/pull/18",
+      "head": "b8e846c73e8d1ae5d9b3e83f377033e31ab6b618",
+      "base": "mp-20260911/integracao-final",
+      "sealed": true,
+      "sealed_comment": "https://github.com/tjsasakifln/modelapro/pull/18#issuecomment-5641053274",
+      "incorporated_on_p04": true,
+      "contracts": [
+        "MP/1 HTTP jobs/preview",
+        "canonical minimum_fundamentacao_grade emission",
+        "GET /projects/{id}/revisions 405 handoff",
+        "reopen_revision recovers job result"
+      ],
+      "evidence": ["docs/campaigns/MP-PRO-20260911/P02/"]
+    },
+    "P03": {
+      "id": "P03",
+      "prefix": "[MP-PRO-20260911/P03]",
+      "branch": "mp-pro-20260911/p03-relatorio-tecnico",
+      "pr": 21,
+      "url": "https://github.com/tjsasakifln/modelapro/pull/21",
+      "head": "ec7b8dba2b4a0ff575a1933251f03801ffeea0a5",
+      "base": "mp-20260911/integracao-final",
+      "sealed": true,
+      "sealed_comment": "https://github.com/tjsasakifln/modelapro/pull/21#issuecomment-5641169977",
+      "incorporated_on_p04": true,
+      "contracts": [
+        "report_context series",
+        "PDF frozen MP1_* lines",
+        "recommend_next_actions vs workflow_context",
+        "REPORT_CHARTS_LENGTH_MISMATCH"
+      ],
+      "evidence": ["docs/campaigns/MP-PRO-20260911/P03/"]
+    }
+  }
+}

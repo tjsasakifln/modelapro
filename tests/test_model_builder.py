@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from modules.model_builder import ModelBuilder
+from modules.model_builder import ModelBuilder, fit_candidate, evaluate_fitted
 
 class TestModelBuilder:
     def test_simple_linear_regression(self):
@@ -34,3 +34,19 @@ class TestModelBuilder:
         # grau_fundamentacao/target_degree, computed by a later step.
         assert not any("R²" in m for m in result.validation_result.messages)
         assert any("R²" in w for w in result.validation_result.warnings)
+
+    def test_legacy_remove_outliers_flag_keeps_sample(self):
+        np.random.seed(0)
+        X = pd.DataFrame({'x': np.linspace(1, 10, 25)})
+        y = 2 * X['x'] + 1 + np.random.normal(0, 0.1, 25)
+        y.iloc[-1] = 80.0
+        builder = ModelBuilder()
+        result = builder.build_model(X, y, remove_outliers=True)
+        assert result.success is True
+        assert result.outliers_removed == []
+        assert len(result.residuals) == len(X)
+
+    def test_public_mp1_exports_exist(self):
+        assert callable(fit_candidate)
+        assert callable(evaluate_fitted)
+

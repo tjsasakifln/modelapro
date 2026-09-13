@@ -1,0 +1,5 @@
+{
+  "status": "BLOCKED",
+  "reason": "playwright import failed: No module named 'playwright'",
+  "note": "A01 não foi fabricado. Unitários e AppTest cobrem o restante neste ambiente."
+}

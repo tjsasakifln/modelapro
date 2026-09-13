@@ -3,8 +3,15 @@ docs/normas/
 
 # Ambiente / segredos
 .env
+.env.*
+!.env.example
 venv/
 .venv/
+*.pem
+*.key
+id_rsa*
+credentials.json
+secrets.json
 
 # Python
 __pycache__/
@@ -14,18 +21,31 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+pip-wheel-metadata/
+wheels/
+*.whl
 
-# Dados/execução local (não versionar uploads/relatórios gerados em runtime)
+# Dados/execução local (não versionar uploads/relatórios/logs gerados em runtime)
 uploads/*
 !uploads/.gitkeep
 reports/*
 !reports/.gitkeep
+logs/
+data/
+*.log
 .benchmarks/
 
 # Editor/OS
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
 
 # Playwright MCP test artifacts (browser snapshots/logs from manual QA)
 .playwright-mcp/

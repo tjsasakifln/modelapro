@@ -1,0 +1,5 @@
+# The sha256 values recorded in ../PROVENANCE.md and ../datasets.py are of the
+# bytes NIST serves, CRLF line endings included. Git must not translate them:
+# any eol normalisation here silently breaks
+# tests/pro_workflow/p04/test_nist_strd.py::test_vendored_dat_files_match_the_recorded_sha256
+*.dat -text

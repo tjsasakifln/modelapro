@@ -1,0 +1,109 @@
+[build-system]
+requires = ["setuptools>=69.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modelapro"
+version = "0.1.0"
+description = "CONFENGE MODELA PRO - Sistema de Avaliação Imobiliária com IA"
+authors = [{ name = "CONFENGE" }]
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+# Canonical direct runtime dependencies. requirements.txt must not diverge:
+# it installs this project with constraints/linux-py3.txt. CI test
+# tests/c15_packaging/test_dependency_sync.py enforces that.
+dependencies = [
+    "streamlit>=1.30.0",
+    "httpx>=0.26.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "scipy>=1.12.0",
+    "statsmodels>=0.14.1",
+    "matplotlib>=3.8.2",
+    "seaborn>=0.13.1",
+    "python-multipart>=0.0.6",
+    "jinja2>=3.1.3",
+    "weasyprint>=60.2",
+    "python-dotenv>=1.0.0",
+    "websockets>=12.0",
+    "psutil>=5.9.8",
+    "requests>=2.31.0",
+    "openpyxl>=3.1.2",
+    "xlrd>=2.0.1",
+    "cryptography>=42.0.0",
+    "pyHanko>=0.37.0,<0.38.0",
+    "pypdf>=5.0.0",
+]
+
+[project.optional-dependencies]
+# Redis *server* is never required for local use. The Python package is an
+# extra because modules/cache_manager.py (unowned, currently unreferenced)
+# imports it at module level. Install modelapro[redis] only if that path is used.
+redis = ["redis>=5.0.1"]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.1.0",
+    "flake8>=7.0.0",
+    "mypy>=1.8.0",
+    "build>=1.0.0",
+    "wheel>=0.42.0",
+    "setuptools>=69.0.0",
+    "playwright>=1.40.0",
+]
+# Tools used only by the controlled release build.  They are intentionally not
+# runtime dependencies and are pinned by constraints/commercial-build.txt.
+commercial-build = [
+    "pyinstaller==6.22.2",
+    "pip-audit==2.10.1",
+]
+
+[project.scripts]
+modelapro = "c15_local.launcher:main"
+modelapro-api = "c15_local.launcher:main_api"
+modelapro-frontend = "c15_local.launcher:main_frontend"
+
+[tool.setuptools]
+include-package-data = true
+packages = [
+    "backend",
+    "modules",
+    "frontend",
+    "frontend.components",
+    "c15_local",
+    "modules.operacao_local",
+    "modules.commercial_license",
+    "modules.cost_valuation",
+    "modules.qualification_profile",
+    "modules.pro_workflow",
+    "modules.report_export",
+    "modules.report_presenter",
+    "modules.digital_signatures",
+    "modules.valuation_policy",
+    "profiles",
+    "profiles.normative",
+    "profiles.institutions",
+]
+
+[tool.setuptools.package-dir]
+c15_local = "scripts/c15_local"
+
+[tool.setuptools.package-data]
+modules = ["templates/*.html"]
+frontend = ["assets/*.css", "assets/*.md"]
+"profiles.normative" = ["*.json"]
+"profiles.institutions" = ["*.json"]
+"modules.commercial_license" = ["trusted_vendor_anchor.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]

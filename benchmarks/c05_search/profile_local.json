@@ -1,0 +1,14 @@
+{
+  "labeled": "local_profile",
+  "mode": "approximate",
+  "possible": 511,
+  "evaluated": 57,
+  "profile": {
+    "elapsed_s": 0.7929289079997943,
+    "rss_bytes_before": 215252992,
+    "rss_bytes_after": 217665536,
+    "host": "this_process_only",
+    "disclaimer": "Measurements for this local run only; not a speed claim for other machines."
+  },
+  "winner_id": "x0:linear|x1:inv_sqr|x2:inv_sqrt|y:identity|int:1"
+}

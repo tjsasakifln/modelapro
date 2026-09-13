@@ -1,0 +1,66 @@
+{
+  "id": "bcb-res-4676-garantia-imobiliaria",
+  "version": "0.1.1",
+  "kind": "institution",
+  "state": "verified",
+  "label": "Resolução CMN nº 4.676/2018 — avaliação do imóvel em garantia (moldura regulatória)",
+  "recipient_id": "instituicoes-autorizadas-pelo-bcb",
+  "purpose": "garantia",
+  "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
+  "value_basis": "valor_de_mercado",
+  "method": "metodo_comparativo_direto_regressao",
+  "technical_choice_provenance": "Composição de produto com perfil técnico de regressão para valor de mercado. A Resolução CMN 4.676 não prescreve essa base nem esse método; estes campos não são atribuídos ao regulador.",
+  "asset_scope": "imovel_urbano",
+  "act_type_established": "regra_contratual_ou_regulatoria",
+  "sources": [
+    {
+      "id": "bcb-res-4676-v17",
+      "kind": "ato_regulatorio",
+      "title": "Resolução CMN nº 4.676, de 31 de julho de 2018 — texto consolidado oficial",
+      "edition_or_version": "Res_4676_v17_P.pdf (consolidação oficial, 28 páginas)",
+      "url": "https://normativos.bcb.gov.br/Lists/Normativos/Attachments/50628/Res_4676_v17_P.pdf",
+      "official_record_url": "https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?numero=4676&tipo=RESOLU%C3%87%C3%83O",
+      "md5": "e6da578838796155c6b9f6931f092fd3",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "art. 1º-A XI e art. 6º (valor de avaliação); art. 11 I 'b' e §4º III (independência do avaliador); art. 11-A I; limites de LTV e de valor do imóvel",
+      "currency_status": "conferido_como_consolidacao_v17_ficha_oficial_nao_obtida"
+    }
+  ],
+  "minimum_fundamentacao_grade": null,
+  "decisive_rules": [
+    "bcb.valor_de_avaliacao",
+    "bcb.independencia_do_avaliador"
+  ],
+  "binding_scope": "Vincula apenas INSTITUIÇÕES AUTORIZADAS a funcionar pelo Banco Central. Não vincula o avaliador nem o software diretamente, e não cria obrigação para quem não é instituição financeira.",
+  "what_this_profile_is_not": [
+    "Não homologa, certifica nem credencia software de avaliação: a extração integral do texto consolidado não retorna nenhuma ocorrência de 'homolog*', 'credenci*', 'ABNT', 'NBR', '14653', 'engenheir*', 'arquitet*', 'perito', 'CREA' ou 'CAU'.",
+    "Não nomeia a base de valor em termos técnicos da ABNT."
+  ],
+  "requirements": [
+    {
+      "id": "bcb.valor_de_avaliacao",
+      "clause": "art. 1º-A, XI e art. 6º",
+      "requirement": "A operação se refere ao 'valor de avaliação do imóvel dado em garantia, apurado na data da contratação'. A norma não qualifica a base em termos técnicos (não diz valor de mercado, custo de reedição, valor em risco nem saldo devedor).",
+      "verification": "documental",
+      "criterion_ref": "A data de referência da avaliação é a data da contratação."
+    },
+    {
+      "id": "bcb.independencia_do_avaliador",
+      "clause": "art. 11, I, 'b' e art. 11, § 4º, III",
+      "requirement": "Independência funcional de quem avalia o imóvel — e, no caso de modelos de precificação, dos profissionais responsáveis. É o único requisito de qualificação do avaliador nesta Resolução.",
+      "verification": "professional_evidenced"
+    }
+  ],
+  "numeric_scope_note": "Os números desta Resolução só podem ser citados com o escopo colado: 80% / 90% (SAC-Sacre) / 60% de LTV apenas para crédito residencial a pessoa natural e home equity; R$ 2.250.000,00 apenas 'no âmbito do SFH'; R$ 500.000,00 apenas para o multiplicador de direcionamento de poupança do art. 20. Nenhum deles é limiar técnico de avaliação.",
+  "blocked_external_evidence": {
+    "exact_material": [
+      "Ficha oficial do normativo no BCB para a Resolução CMN nº 4.676/2018: campo 'Situação' e lista autoritativa de 'Normativos que alteram'."
+    ],
+    "why": "todas as rotas de máquina falharam (exibenormativo, /api/search/app/.../buscanormativos e o OData de Normativos retornaram erro).",
+    "consequence": "o texto consolidado v17 está conferido byte a byte; a redação deve permanecer 'conforme consolidado na v17', nunca 'vigente'.",
+    "triage": "decorativo para os critérios desta frente: nenhum aceite depende do campo 'Situação'.",
+    "responsible": "titular do projeto, por navegador em bcb.gov.br"
+  },
+  "source_set_sha256": "9a7e6d0827d5a3d03f5a88eb50bec36e153230829b67cf6690d0bf409601854f"
+}

@@ -1,0 +1,489 @@
+name: C15 packaging CI
+
+on:
+  push:
+    branches:
+      - mp-20260911/c15-instalacao_ci_local
+      - mp-20260911/integracao-final
+      - mp-pro-20260911/p04-referencia-consolidacao
+      - main
+  pull_request:
+    branches:
+      - main
+      - mp-20260911/integracao-final
+      - mp-pro-20260911/p04-referencia-consolidacao
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c15-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MODELA_SKIP_DOTENV: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: Lint owned C15 paths
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install flake8
+        run: python -m pip install flake8
+      - name: flake8
+        run: >
+          python -m flake8 --max-line-length=120 --extend-ignore=E203,W503
+          setup.py
+          modules/config_manager.py
+          modules/logging_manager.py
+          backend/monitor.py
+          backend/__init__.py
+          modules/__init__.py
+          frontend/__init__.py
+          frontend/components/__init__.py
+          scripts/c15_local
+          scripts/pro_workflow
+          tests/c15_packaging
+          tests/pro_workflow/p04
+          tests/fixtures/pro_workflow
+
+  c15-tests-linux:
+    name: C15 tests (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Record source identity before execution
+        run: python scripts/c15_local/evidence_identity.py start --output artifacts
+      - name: Native PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install package with lock
+        run: python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+      - name: C15 packaging tests
+        run: python -m pytest tests/c15_packaging -q --tb=short --junitxml=artifacts/c15-linux.junit.xml
+      - name: Seal evidence including failures
+        if: ${{ !cancelled() }}
+        run: python scripts/c15_local/evidence_identity.py seal --output artifacts
+      - name: Upload C15 Linux evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: c15-linux-evidence
+          path: artifacts/
+          if-no-files-found: error
+
+  build-sdist-wheel:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Record source identity before execution
+        run: python scripts/c15_local/evidence_identity.py start --output dist
+      - name: Build
+        run: |
+          python -m pip install build
+          python -m build
+      - name: Seal evidence including failures
+        if: ${{ !cancelled() }}
+        run: python scripts/c15_local/evidence_identity.py seal --output dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  install-eval-linux:
+    name: Clean venv evaluation (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    needs: [build-sdist-wheel]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Record source identity before execution
+        run: python scripts/c15_local/evidence_identity.py start --output artifacts
+      - name: Native PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install wheel in a venv outside the checkout
+        run: |
+          python -m venv "$HOME/c15-smoke-venv"
+          "$HOME/c15-smoke-venv/bin/python" -m pip install -U pip
+          WHEEL=$(ls dist/modelapro-*.whl | head -n 1)
+          "$HOME/c15-smoke-venv/bin/python" -m pip install -c constraints/linux-py3.txt "$WHEEL"
+          echo "$WHEEL" > "$HOME/c15-smoke-venv/wheel-path.txt"
+          sha256sum "$WHEEL" | tee "$HOME/c15-smoke-venv/wheel.sha256"
+      - name: Clean-venv wheel install smoke (boots /health off the installed dist)
+        env:
+          C15_INSTALL_SMOKE: "1"
+          C15_WHEEL_DIR: ${{ github.workspace }}/dist
+        run: |
+          # The runner interpreter needs the dev extras, not because the smoke
+          # test wants the product importable -- it builds its own wheel and its
+          # own venv under $HOME -- but because tests/conftest.py imports
+          # matplotlib at module level, so bare pytest cannot even load the
+          # conftest (exit 4, no junit, and the upload below then fails).
+          # The clean-venv guarantee lives in the smoke test's own venv, which
+          # this install does not touch.
+          python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+          export C15_WHEEL_PATH="$(find dist -maxdepth 1 -name 'modelapro-*.whl' -print -quit)"
+          python -m pytest tests/c15_packaging/test_wheel_install_smoke.py -q --tb=short \
+            --junitxml=artifacts/install-smoke.junit.xml
+      - name: Evaluate from installed package until document
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ""
+          MODELA_SKIP_DOTENV: "1"
+        run: |
+          "$HOME/c15-smoke-venv/bin/python" - <<'PY'
+          import os, json, hashlib
+          from pathlib import Path
+          assert not os.environ.get("PYTHONPATH")
+          import backend, modules
+          from backend.worker import compose_valuation_job, resolve_peers
+          from modules.evidence_bundle import MANIFEST_NAME, reproduce_from_bundle
+          from modules.job_store import JobStore
+          expected = 735000.0  # 10000 × 73.5; 73.5 is not on the 50,52,… sample grid
+          csv = (
+              "id;bairro;area;preco\n"
+              + "\n".join(
+                  f"IM-{i:02d};Centro;{50+2*i:.2f};{(50+2*i)*10000:.2f}".replace(".", ",")
+                  for i in range(24)
+              )
+          ).encode()
+          spec = {
+              "schema_version": "MP/1",
+              "target_col": "preco",
+              "candidate_cols": ["area"],
+              "roles": {"preco": "target", "area": "predictor", "id": "identifier", "bairro": "excluded"},
+              "units": {"area": "m2", "preco": ""},
+              "import_options": {"locale": "pt-BR", "delimiter": ";", "encoding": "utf-8"},
+              "missing_policy": {"target": "never_impute", "predictors": "complete_case"},
+              "outlier_policy": {"mode": "report_only", "reviewed_exclusions": []},
+              "search_policy": {"mode": "exact", "budget": 16, "objective": "aic", "seed": 17, "y_transformations": ["identity"]},
+              "evaluation_policy": {"method": "none", "partitions": None, "groups": None, "seed": 17},
+              "reference_date": "2024-06-01",
+              "inspection_date": "2024-06-15",
+              "target_unit": "",
+              "applicant": "wheel-eval",
+              "purpose": "install-eval",
+          }
+          root = Path.home() / "c15-smoke-store"
+          store = JobStore(root)
+          rec = store.create(payload={"filename": "mercado.csv"})
+          ctx = compose_valuation_job(
+              job_id=rec["job_id"],
+              file_bytes=csv,
+              filename="mercado.csv",
+              request_spec=spec,
+              subject_raw={"area": 73.5},
+              project_id=None,
+              peers=resolve_peers(),
+              job_store=store,
+          )
+          snap = ctx["snapshot"]
+          point = snap["value"]["point"]
+          assert point is not None and abs(float(point) - expected) < 1.0, point
+          pdf = ctx["artifact_bytes"].get("report.pdf") or store.get_artifact(rec["job_id"], "report.pdf")
+          assert pdf and pdf[:4] == b"%PDF"
+          evidence = root / "jobs" / rec["job_id"] / "evidence"
+          assert (evidence / MANIFEST_NAME).is_file(), list(evidence.glob("*")) if evidence.exists() else "no evidence dir"
+          repro = reproduce_from_bundle(evidence)
+          assert repro.get("point") is not None
+          assert abs(float(repro["point"]) - expected) < 1.0, repro
+          integrity = (repro.get("integrity") or {}).get("ok")
+          assert integrity is True, repro
+          # P01 SEALED: integrity vs interval reconstruction are distinct.
+          if repro.get("ok") is not True:
+              limits = " ".join(repro.get("limitations") or [])
+              assert "interval" in limits.lower() or "t_crit" in limits.lower(), repro
+          assert abs(float(repro["point"]) - expected) < 1.0, repro
+          assert (repro.get("comparison") or {}).get("point_within_tolerance") is True
+          wheel_files = list((Path(os.environ["GITHUB_WORKSPACE"]) / "dist").glob("*.whl"))
+          assert len(wheel_files) == 1
+          assert "site-packages" in str(backend.__file__)
+          installed_evidence = {
+              "status": "PASS", "point": point, "reproduced_point": repro["point"],
+              "tested_commit_sha": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
+              "wheel_sha256": hashlib.sha256(wheel_files[0].read_bytes()).hexdigest(),
+              "pdf_sha256": hashlib.sha256(pdf).hexdigest(), "backend": backend.__file__,
+          }
+          (Path(os.environ["GITHUB_WORKSPACE"]) / "artifacts" / "installed-eval.json").write_text(json.dumps(installed_evidence))
+          print("wheel_eval_ok", point, repro["point"], backend.__file__, modules.__file__, evidence)
+          PY
+
+      - name: Seal evidence including failures
+        if: ${{ !cancelled() }}
+        run: python scripts/c15_local/evidence_identity.py seal --output artifacts
+      - name: Upload install-smoke evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-smoke
+          path: artifacts/
+          if-no-files-found: error
+
+  c15-tests-windows:
+    name: C15 tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Record source identity before execution
+        shell: pwsh
+        run: python scripts/c15_local/evidence_identity.py start --output artifacts
+      - name: Install package (lock first, ranges if Windows pins fail)
+        shell: pwsh
+        run: |
+          python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Linux lock did not apply on Windows; installing pyproject ranges"
+            python -m pip install -e ".[dev]"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: C15 packaging tests
+        shell: pwsh
+        run: python -m pytest tests/c15_packaging -q --tb=short --junitxml=artifacts/c15-windows.junit.xml
+      - name: Record WeasyPrint native status (not claimed)
+        shell: pwsh
+        run: python -m c15_local.launcher --check-pdf
+        continue-on-error: true
+
+      - name: Seal Windows evidence
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: python scripts/c15_local/evidence_identity.py seal --output artifacts
+      - name: Upload Windows evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: c15-windows-evidence
+          path: artifacts/
+          if-no-files-found: error
+
+  wide-suite-linux:
+    name: Mandatory wide suite (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Record source identity before execution
+        run: python scripts/c15_local/evidence_identity.py start --output artifacts
+      - name: Native PDF and browser libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install package with lock
+        run: python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Run mandatory tests
+        env:
+          C17_UI_EVIDENCE: artifacts/ui-e2e
+        run: |
+          mkdir -p artifacts/ui-e2e
+          set -o pipefail
+          python -m c15_local.test_inventory | tee artifacts/inventory-check.log
+          C06_COLLECTION_OUTPUT=artifacts/collection.json python -m pytest -p c15_local.collection_evidence tests -q --tb=line --junitxml=artifacts/wide.junit.xml | tee artifacts/wide.log
+      - name: Seal evidence including failures
+        if: ${{ !cancelled() }}
+        run: python scripts/c15_local/evidence_identity.py seal --output artifacts
+      - name: Upload wide evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wide-suite-linux
+          path: artifacts/
+          if-no-files-found: error
+
+  c16-harness:
+    name: C16 independent harness
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Record source identity before execution
+        run: python scripts/c15_local/evidence_identity.py start --output artifacts
+      - name: Native PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install
+        run: python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Run C16 harness
+        run: |
+          mkdir -p artifacts
+          python scripts/c16_acceptance/run_harness.py --output artifacts/c16.json | tee artifacts/c16.log
+      - name: Seal evidence including failures
+        if: ${{ !cancelled() }}
+        run: python scripts/c15_local/evidence_identity.py seal --output artifacts
+      - name: Upload C16 evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: c16-harness
+          path: artifacts/
+          if-no-files-found: error
+
+  p04-harness:
+    name: P04 independent corpus and runner
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Record source identity before execution
+        run: python scripts/c15_local/evidence_identity.py start --output artifacts/p04
+      - name: Native PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info fonts-dejavu-core
+      - name: Install
+        run: python -m pip install -c constraints/linux-py3.txt -e ".[dev]"
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Accept candidate with strict extensions (P04 core twice)
+        env:
+          P04_FINDINGS_DIR: artifacts/p04/findings
+        run: |
+          mkdir -p artifacts/p04
+          python scripts/pro_workflow/run.py --mode accept-candidate --output artifacts/p04 | tee artifacts/p04/console.log
+          python scripts/pro_workflow/measure.py --phase before --sha "$(git rev-parse HEAD)" --output artifacts/p04/metrics-before.json --run-json artifacts/p04/run.json
+      - name: Prove the runner status survived the pipe
+        run: |
+          test -f artifacts/p04/run.json
+          python - <<'PYCHK'
+          import json, sys
+          from pathlib import Path
+          data = json.loads(Path("artifacts/p04/run.json").read_text(encoding="utf-8"))
+          if data.get("mode") != "accept-candidate" or data.get("exit_code") != 0:
+              print("R20-A guard: runner artifact disagrees with a green step:", data.get("mode"), data.get("exit_code"))
+              sys.exit(1)
+          PYCHK
+      - name: Seal evidence including failures
+        if: ${{ !cancelled() }}
+        run: python scripts/c15_local/evidence_identity.py seal --output artifacts/p04
+      - name: Upload P04 evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p04-harness
+          path: artifacts/p04/
+          if-no-files-found: error
+
+  acceptance:
+    name: Required jobs aggregator
+    runs-on: ubuntu-latest
+    if: always()
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    needs:
+      - lint
+      - c15-tests-linux
+      - c15-tests-windows
+      - build-sdist-wheel
+      - install-eval-linux
+      - wide-suite-linux
+      - c16-harness
+      - p04-harness
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download every evidence artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: evidence
+          merge-multiple: false
+      - name: Require every mandatory job succeeded AND its evidence to agree
+        env:
+          # actions/checkout tests github.sha (the merge commit for pull_request).
+          CANDIDATE_SHA: ${{ github.sha }}
+          # --min-wide-tests is a RATCHET, never a target. Rule: after a green
+          # wide suite, it may be raised to that run's testcase count rounded
+          # down to the nearest hundred, and it is never lowered. 700 came from
+          # a 705-case suite; run 34667257642 on be464a2 measured 808 cases,
+          # 0 failures, so the floor moves to 800. Lowering it to make a build
+          # pass is the defect this number exists to catch.
+        run: >
+          python scripts/c15_local/aggregate_required.py
+          --required-jobs lint,c15-tests-linux,c15-tests-windows,build-sdist-wheel,install-eval-linux,wide-suite-linux,c16-harness,p04-harness
+          --results-json '${{ toJSON(needs) }}'
+          --artifacts-dir evidence
+          --expected-sha "$CANDIDATE_SHA"
+          --min-wide-tests 800
+          --p04-mode accept-candidate
+          --require-identity

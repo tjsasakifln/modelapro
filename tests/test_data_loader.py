@@ -33,30 +33,17 @@ class TestDataLoader:
         assert result.validation.is_valid is True
         assert any("Insufficient samples" in w for w in result.validation.warnings)
 
-    def test_high_cardinality_categorical_is_excluded_not_dropped_silently(self):
+    def test_high_cardinality_text_is_kept_capacity_reported_not_excluded(self):
         """
-        A categorical column with more unique values than
-        config.MAX_ONE_HOT_CATEGORIES (e.g. a free-text "Endereço" or
-        "Informante" column) is technically not one-hot-encodable. It must:
-          - NOT raise, and NOT affect the rest of the load (numeric columns
-            still load normally, sample survives);
-          - appear in excluded_columns with a documented reason;
-          - be surfaced as a warning in validation.warnings;
-          - have its ORIGINAL (untransformed) values preserved in
-            identification_df, aligned to the final dataframe's rows.
+        C01 does not treat high cardinality as a mathematical impossibility
+        and does not one-hot-encode here (C02 owns encoding). A free-text
+        column must remain in the dataframe, not be dummy-coded, and the
+        capacity limit is reported with a reason.
         """
-        n = 30
-        # nunique = n > MAX_ONE_HOT_CATEGORIES (default 50 is >= n in some
-        # envs, so force nunique explicitly above the configured limit by
-        # using a value per row - each row is unique, guaranteeing
-        # nunique == n regardless of the configured threshold, as long as
-        # the threshold is below n... to be robust, build enough rows).
         limit = config.MAX_ONE_HOT_CATEGORIES
         n = limit + 20
         col1 = list(range(1, n + 1))
         col2 = [float(i) * 2.0 for i in range(1, n + 1)]
-        # One free-text value per row => nunique == n > limit, guaranteed
-        # to exceed MAX_ONE_HOT_CATEGORIES.
         endereco = [f"Rua Exemplo, {i}, Bairro {i}" for i in range(n)]
 
         df = pd.DataFrame({"col1": col1, "col2": col2, "endereco": endereco})
@@ -67,32 +54,17 @@ class TestDataLoader:
 
         assert result.success is True
         assert result.error is None
-
-        # Excluded with a documented reason, never silently dropped.
-        assert "endereco" in result.excluded_columns
-        reason = result.excluded_columns["endereco"]
-        assert "MAX_ONE_HOT_CATEGORIES" in reason or str(limit) in reason
-
-        # Surfaced as a warning.
+        assert "endereco" not in result.excluded_columns
+        assert "endereco" in result.dataframe.columns
+        assert not any(c.startswith("endereco_") for c in result.dataframe.columns)
         assert any(
-            "endereco" in w and "excluída" in w.lower()
+            "endereco" in w and ("MAX_ONE_HOT_CATEGORIES" in w or str(limit) in w)
             for w in result.validation.warnings
         )
-
-        # Rest of the load is unaffected: numeric columns still present,
-        # sample size preserved.
         assert "col1" in result.dataframe.columns
         assert "col2" in result.dataframe.columns
-        assert "endereco" not in result.dataframe.columns
         assert len(result.dataframe) == n
-
-        # Original values preserved in identification_df, aligned to the
-        # surviving rows.
-        assert result.identification_df is not None
-        assert "endereco" in result.identification_df.columns
-        preserved = result.identification_df.loc[result.dataframe.index, "endereco"]
-        original_aligned = pd.Series(endereco, name="endereco").loc[result.dataframe.index]
-        assert list(preserved) == list(original_aligned)
+        assert list(result.dataframe["endereco"]) == endereco
 
     def test_numeric_text_column_is_converted_regardless_of_string_dtype(self):
         """
@@ -124,3 +96,19 @@ class TestDataLoader:
         assert pd.api.types.is_numeric_dtype(result.dataframe["preco"])
         # "1.100,10" -> 1100.10
         assert abs(float(result.dataframe["preco"].iloc[0]) - 1100.10) < 1e-6
+
+    def test_load_data_does_not_impute_missing_target_with_mean(self):
+        loader = DataLoader()
+        csv_content = b"preco,area\n600000,50\n800000,80\n,70\n"
+        result = loader.load_data(csv_content, "test.csv")
+        assert result.success is True
+        prices = list(result.dataframe["preco"])
+        assert 700000 not in prices
+        assert 700000.0 not in prices
+        assert any(pd.isna(v) for v in prices)
+
+    def test_uppercase_csv_extension_is_supported(self):
+        loader = DataLoader()
+        result = loader.load_data(b"col1,col2\n1,2\n3,4\n", "market.CSV")
+        assert result.success is True
+        assert len(result.dataframe) == 2

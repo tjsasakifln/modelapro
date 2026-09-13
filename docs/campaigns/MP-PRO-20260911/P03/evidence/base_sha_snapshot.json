@@ -1,0 +1,1394 @@
+{
+  "schema_version": "MP/1",
+  "job_id": "job_81b99ec68b6340fabbef3aa574b9b7fc",
+  "project_id": null,
+  "input_sha256": "d18380c34c0b3e299735c97463f0388076d4c799f4cd4ac17e5d723df1745d15",
+  "code_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "reference_date": "2024-06-01",
+  "generated_at": "2026-09-11T21:16:46+00:00",
+  "target": {
+    "column": "preco",
+    "unit": "BRL",
+    "estimand": "subject_prediction"
+  },
+  "value": {
+    "point": 734999.9999999998,
+    "mean_ci80": {
+      "lower": 734999.9999999997,
+      "upper": 734999.9999999999,
+      "level": 0.8,
+      "kind": "mean"
+    },
+    "prediction_interval": {
+      "lower": 734999.9999999993,
+      "upper": 735000.0000000002,
+      "level": 0.8,
+      "kind": "observation"
+    },
+    "arbitration_interval": null,
+    "admissible_interval": null
+  },
+  "sample": {
+    "received": 24,
+    "observed_target": 24,
+    "prepared": 24,
+    "used": 24,
+    "excluded": 0,
+    "used_row_ids": [
+      "R000000",
+      "R000001",
+      "R000002",
+      "R000003",
+      "R000004",
+      "R000005",
+      "R000006",
+      "R000007",
+      "R000008",
+      "R000009",
+      "R000010",
+      "R000011",
+      "R000012",
+      "R000013",
+      "R000014",
+      "R000015",
+      "R000016",
+      "R000017",
+      "R000018",
+      "R000019",
+      "R000020",
+      "R000021",
+      "R000022",
+      "R000023"
+    ],
+    "excluded_row_ids": []
+  },
+  "validation": {
+    "fundamentacao": {
+      "grade": null,
+      "points": 12,
+      "items": [
+        {
+          "item": 1,
+          "id": "tabela1.item1",
+          "description": "Caracterização do imóvel avaliando",
+          "grade": null,
+          "points": null,
+          "evidence_status": "pending",
+          "calculation": null,
+          "detail": "Item 1 documental não informado; ausência não vale aprovação. Um controle de UI sem proveniência não verifica este item.",
+          "source": {
+            "edition": "ABNT NBR 14653-2:2011",
+            "item": 1,
+            "clause": "Tabela 1 item 1",
+            "status": "verified"
+          },
+          "reasons": [],
+          "provenance": null
+        },
+        {
+          "item": 2,
+          "id": "tabela1.item2",
+          "description": "Quantidade mínima de dados de mercado",
+          "grade": 3,
+          "points": 3,
+          "evidence_status": "calculated",
+          "calculation": null,
+          "detail": "n=24, k=1. Mínimos: I=6, II=8, III=12.",
+          "source": {
+            "edition": "ABNT NBR 14653-2:2011",
+            "item": 2,
+            "clause": "Tabela 1 item 2",
+            "status": "verified"
+          },
+          "reasons": [],
+          "provenance": null
+        },
+        {
+          "item": 3,
+          "id": "tabela1.item3",
+          "description": "Identificação dos dados de mercado",
+          "grade": null,
+          "points": null,
+          "evidence_status": "pending",
+          "calculation": null,
+          "detail": "Item 3 documental não informado; ausência não vale aprovação. Um controle de UI sem proveniência não verifica este item.",
+          "source": {
+            "edition": "ABNT NBR 14653-2:2011",
+            "item": 3,
+            "clause": "Tabela 1 item 3",
+            "status": "verified"
+          },
+          "reasons": [],
+          "provenance": null
+        },
+        {
+          "item": 4,
+          "id": "tabela1.item4",
+          "description": "Extrapolação",
+          "grade": 3,
+          "points": 3,
+          "evidence_status": "calculated",
+          "calculation": {
+            "extrapolated": [],
+            "out_of_measure": [],
+            "in_sample": [
+              "area"
+            ],
+            "unsupported": [],
+            "forbidden": [],
+            "pending_axes": [],
+            "measure": {
+              "area": {
+                "value": 73.5,
+                "sample_min": 50.0,
+                "sample_max": 96.0,
+                "ext_min": 25.0,
+                "ext_max": 192.0,
+                "position": "in_sample",
+                "reasons": [],
+                "kind": "quantitative"
+              }
+            },
+            "per_si": {},
+            "simultaneous": null,
+            "boundary_delta_pct": null,
+            "y_subject": null
+          },
+          "detail": "Nenhuma extrapolação: todas as variáveis quantitativas no intervalo amostral [min, max].",
+          "source": {
+            "edition": "ABNT NBR 14653-2:2011",
+            "item": 4,
+            "clause": "Tabela 1 item 4 (a) e (b)",
+            "status": "verified"
+          },
+          "reasons": [],
+          "provenance": null
+        },
+        {
+          "item": 5,
+          "id": "tabela1.item5",
+          "description": "Nível de significância dos regressores (teste t)",
+          "grade": 3,
+          "points": 3,
+          "evidence_status": "calculated",
+          "calculation": null,
+          "detail": "Pior p-valor entre regressores: 0.0000.",
+          "source": {
+            "edition": "ABNT NBR 14653-2:2011",
+            "item": 5,
+            "clause": "Tabela 1 item 5",
+            "status": "verified"
+          },
+          "reasons": [],
+          "provenance": null
+        },
+        {
+          "item": 6,
+          "id": "tabela1.item6",
+          "description": "Nível de significância do modelo global (teste F)",
+          "grade": 3,
+          "points": 3,
+          "evidence_status": "calculated",
+          "calculation": null,
+          "detail": "F-prob (p-valor do teste F): 0.0000.",
+          "source": {
+            "edition": "ABNT NBR 14653-2:2011",
+            "item": 6,
+            "clause": "Tabela 1 item 6",
+            "status": "verified"
+          },
+          "reasons": [],
+          "provenance": null
+        }
+      ],
+      "detail": "Itens [1, 3] pendentes; enquadramento Tabela 2 não é aprovado por ausência (pontos conhecidos=12).",
+      "pending_items": [
+        1,
+        3
+      ]
+    },
+    "precisao": {
+      "status": "classified",
+      "grade": 3,
+      "amplitude_pct": 3.1677638592363227e-14,
+      "detail": "Amplitude 0.00% <= 30% (Grau III)."
+    },
+    "statistical": {
+      "n": 24,
+      "k": 1,
+      "rank": 2,
+      "parameters_free": 2,
+      "r2": 1.0,
+      "r2_adjusted": 1.0,
+      "f_pvalue": 0.0,
+      "significance_invalid": false,
+      "estimand": "conditional_mean",
+      "interval_method_validated": true,
+      "mean_ci_computed": true,
+      "prediction_interval_computed": true,
+      "influence": {
+        "cooks_distance": {
+          "R000000": 0.24693979638412647,
+          "R000001": 0.20727571314646714,
+          "R000002": 0.17397873587502333,
+          "R000003": 0.14606998357554044,
+          "R000004": 0.06906168813213688,
+          "R000005": 0.05821089116593585,
+          "R000006": 0.04934014897885745,
+          "R000007": 0.04223618881161849,
+          "R000008": 0.03673407937703466,
+          "R000009": 0.03270969386989301,
+          "R000010": 0.03007425458457526,
+          "R000011": 0.012786911025213944,
+          "R000012": 0.012786911025213935,
+          "R000013": 0.013366335370922314,
+          "R000014": 0.014537641719952407,
+          "R000015": 0.016326257500904228,
+          "R000016": 0.018771639471830352,
+          "R000017": 0.005482238775428579,
+          "R000018": 0.006467876796215067,
+          "R000019": 0.007673520903570725,
+          "R000020": 0.009129373973471237,
+          "R000021": 0.010873670992188913,
+          "R000022": 0.012954732071654153,
+          "R000023": 0.0
+        },
+        "studentized_residuals": {
+          "R000000": 1.6305040140383185,
+          "R000001": 1.6123193857790556,
+          "R000002": 1.5963052224062464,
+          "R000003": 1.582293169453937,
+          "R000004": 1.1776071915937436,
+          "R000005": 1.169803460630655,
+          "R000006": 1.1632366031080557,
+          "R000007": 1.1578478931401017,
+          "R000008": 1.153590432815658,
+          "R000009": 1.1504279797457215,
+          "R000010": 1.1483340699624929,
+          "R000011": 0.7648609290225608,
+          "R000012": 0.7648609290225606,
+          "R000013": 0.7655560466416619,
+          "R000014": 0.7669519864971475,
+          "R000015": 0.7690602885437718,
+          "R000016": 0.7718985954267342,
+          "R000017": 0.38774553436935183,
+          "R000018": 0.3899344868768849,
+          "R000019": 0.39253573053124774,
+          "R000020": 0.3955732923634842,
+          "R000021": 0.39907630560156154,
+          "R000022": 0.40307984644476386,
+          "R000023": 0.0
+        },
+        "leverage": {
+          "R000000": 0.15666666666666643,
+          "R000001": 0.13753623188405834,
+          "R000002": 0.12014492753623221,
+          "R000003": 0.10449275362318874,
+          "R000004": 0.0905797101449278,
+          "R000005": 0.07840579710144949,
+          "R000006": 0.0679710144927538,
+          "R000007": 0.05927536231884073,
+          "R000008": 0.052318840579710285,
+          "R000009": 0.0471014492753624,
+          "R000010": 0.04362318840579717,
+          "R000011": 0.04188405797101453,
+          "R000012": 0.04188405797101451,
+          "R000013": 0.0436231884057971,
+          "R000014": 0.047101449275362306,
+          "R000015": 0.052318840579710105,
+          "R000016": 0.05927536231884051,
+          "R000017": 0.06797101449275353,
+          "R000018": 0.07840579710144921,
+          "R000019": 0.09057971014492744,
+          "R000020": 0.10449275362318836,
+          "R000021": 0.1201449275362318,
+          "R000022": 0.13753623188405795,
+          "R000023": 0.15666666666666662
+        },
+        "influential_row_ids": [
+          "R000000",
+          "R000001",
+          "R000002"
+        ],
+        "high_leverage_row_ids": [],
+        "thresholds": {
+          "cooks_4_over_n": 0.16666666666666666,
+          "cooks_absolute": 1.0,
+          "studentized_abs": 2.5,
+          "leverage_2p_over_n": 0.16666666666666666
+        },
+        "influence_authorizes_exclusion": false,
+        "default_mode": "report_only",
+        "principal_keeps_influential_points": true,
+        "exploratory_replaces_principal": false
+      },
+      "r2_naive_comparison_blocked": false,
+      "scenario": "principal",
+      "intercept": true
+    },
+    "documentary": {
+      "item1": {
+        "grade": null,
+        "evidence_status": "pending",
+        "provenance": null,
+        "detail": "Item 1 documental não informado; ausência não vale aprovação. Um controle de UI sem proveniência não verifica este item."
+      },
+      "item3": {
+        "grade": null,
+        "evidence_status": "pending",
+        "provenance": null,
+        "detail": "Item 3 documental não informado; ausência não vale aprovação. Um controle de UI sem proveniência não verifica este item."
+      },
+      "note": "Pontuação documental declarada não se torna verificada por um selectbox. Proveniência é obrigatória para qualquer pretensão de evidência."
+    },
+    "issuance": {
+      "status": "draft",
+      "reasons": [
+        "no_automatic_report_approval",
+        "grau_is_not_issuance_readiness",
+        "documentary_declared_is_not_verified_proof"
+      ]
+    },
+    "normative_verification_status": "verified_rules_listed",
+    "normative_edition": "ABNT NBR 14653-2:2011",
+    "model_eligibility": {
+      "status": "eligible",
+      "reasons": [
+        "influence_reported_not_excluded"
+      ]
+    }
+  },
+  "issues": [
+    {
+      "code": "read_metadata",
+      "severity": "info",
+      "origin": "C01",
+      "message": "CSV lido: encoding=utf-8, delimiter=';', bom=False, bytes=717.",
+      "affected_ids": [],
+      "evidence": {
+        "filename": "mercado.csv",
+        "extension": ".csv",
+        "encoding": "utf-8",
+        "delimiter": ";",
+        "engine": "pandas.csv",
+        "bom": false,
+        "n_bytes": 717,
+        "n_rows": 0,
+        "n_cols": 0,
+        "sheet_name": null,
+        "max_file_bytes": 52428800
+      }
+    },
+    {
+      "code": "ingest_summary",
+      "severity": "info",
+      "origin": "C01",
+      "message": "Ingestão: 24 registros recebidos, 24 com alvo observado; nenhum alvo ausente foi imputado; preditores não imputados nesta camada.",
+      "affected_ids": [],
+      "evidence": {
+        "received": 24,
+        "observed_target": 24,
+        "authorized_predictors": [
+          "area"
+        ],
+        "target": "preco",
+        "locale": "pt-BR",
+        "filename": "mercado.csv",
+        "input_sha256": "d18380c34c0b3e299735c97463f0388076d4c799f4cd4ac17e5d723df1745d15"
+      }
+    },
+    {
+      "code": "identifier_excluded",
+      "severity": "info",
+      "origin": "c02.fit_dataset",
+      "message": "Identificador 'row_id' não entra em X.",
+      "affected_ids": [
+        "row_id"
+      ],
+      "evidence": {
+        "role": "identifier"
+      }
+    },
+    {
+      "code": "identifier_excluded",
+      "severity": "info",
+      "origin": "c02.fit_dataset",
+      "message": "Identificador 'id' não entra em X.",
+      "affected_ids": [
+        "id"
+      ],
+      "evidence": {
+        "role": "identifier"
+      }
+    },
+    {
+      "code": "role_excluded",
+      "severity": "info",
+      "origin": "c02.fit_dataset",
+      "message": "Coluna 'bairro' com papel 'excluded' não entra em X.",
+      "affected_ids": [
+        "bairro"
+      ],
+      "evidence": {
+        "role": "excluded"
+      }
+    },
+    {
+      "code": "grau_nao_e_emissao",
+      "severity": "info",
+      "origin": "C03",
+      "message": "O grau calculado (fundamentação/precisão) não autoriza emissão automática de laudo. issuance permanece a cargo do profissional (C10: draft / review_required / ready_for_professional_review).",
+      "affected_ids": [],
+      "evidence": {}
+    }
+  ],
+  "model": {
+    "candidate_id": "area:linear|y:identity|int:1",
+    "model_sha256": "5b8b70fe0792a1e15aabdf8fbf067c0ffbb9d470b8a35d753d745e01605d27c6",
+    "feature_schema_version": "MP/1",
+    "used_row_ids": [
+      "R000000",
+      "R000001",
+      "R000002",
+      "R000003",
+      "R000004",
+      "R000005",
+      "R000006",
+      "R000007",
+      "R000008",
+      "R000009",
+      "R000010",
+      "R000011",
+      "R000012",
+      "R000013",
+      "R000014",
+      "R000015",
+      "R000016",
+      "R000017",
+      "R000018",
+      "R000019",
+      "R000020",
+      "R000021",
+      "R000022",
+      "R000023"
+    ],
+    "transformations": {
+      "area": "linear"
+    },
+    "y_transformation": "identity",
+    "coefficients": {
+      "const": -9.505271223929316e-10,
+      "area": 10000.00000000001
+    },
+    "encoder_state_present": true,
+    "delivered_matches_used": true,
+    "used": {
+      "candidate_id": "area:linear|y:identity|int:1",
+      "model_sha256": "5b8b70fe0792a1e15aabdf8fbf067c0ffbb9d470b8a35d753d745e01605d27c6",
+      "used_row_ids": [
+        "R000000",
+        "R000001",
+        "R000002",
+        "R000003",
+        "R000004",
+        "R000005",
+        "R000006",
+        "R000007",
+        "R000008",
+        "R000009",
+        "R000010",
+        "R000011",
+        "R000012",
+        "R000013",
+        "R000014",
+        "R000015",
+        "R000016",
+        "R000017",
+        "R000018",
+        "R000019",
+        "R000020",
+        "R000021",
+        "R000022",
+        "R000023"
+      ],
+      "coefficient_names": [
+        "area",
+        "const"
+      ],
+      "y_transformation": "identity",
+      "encoder_fingerprint": "395d776b675615b168fe024e2550063c1a6e9376e860d18c7ce20a3f741f1b53",
+      "dataset_sha256": "7fbc517bb41d7d595d91e1673af1a3c02971fea928bdd61a847aeb9a5c946a1c"
+    },
+    "delivered": {
+      "candidate_id": "area:linear|y:identity|int:1",
+      "model_sha256": "5b8b70fe0792a1e15aabdf8fbf067c0ffbb9d470b8a35d753d745e01605d27c6",
+      "used_row_ids": [
+        "R000000",
+        "R000001",
+        "R000002",
+        "R000003",
+        "R000004",
+        "R000005",
+        "R000006",
+        "R000007",
+        "R000008",
+        "R000009",
+        "R000010",
+        "R000011",
+        "R000012",
+        "R000013",
+        "R000014",
+        "R000015",
+        "R000016",
+        "R000017",
+        "R000018",
+        "R000019",
+        "R000020",
+        "R000021",
+        "R000022",
+        "R000023"
+      ],
+      "coefficient_names": [
+        "area",
+        "const"
+      ],
+      "y_transformation": "identity",
+      "encoder_fingerprint": "395d776b675615b168fe024e2550063c1a6e9376e860d18c7ce20a3f741f1b53",
+      "dataset_sha256": "7fbc517bb41d7d595d91e1673af1a3c02971fea928bdd61a847aeb9a5c946a1c",
+      "point_finite": true
+    }
+  },
+  "search": {
+    "audit": {
+      "possible": 7,
+      "generated": 7,
+      "evaluated": 7,
+      "rejected": 6,
+      "rejection_reasons": {
+        "peer_fit_not_fitted": 6
+      },
+      "coverage": {
+        "enumeration": "exhaustive",
+        "ranking_objective": "full",
+        "exact_optimum_guaranteed": true,
+        "pruning_proof": null
+      },
+      "budget": {
+        "max_evaluations": 16,
+        "used": 7
+      },
+      "objective": {
+        "name": "aic",
+        "scale": "original",
+        "required_criteria": [
+          "original_rmse"
+        ],
+        "optional_criteria": [
+          "precision_amplitude_pct",
+          "stability",
+          "complexity"
+        ],
+        "tie_break": "candidate_id_lexicographic_asc",
+        "does_not_use": [
+          "r2_across_transformed_vs_original_scales",
+          "automatic_sample_row_removal"
+        ],
+        "full_objective_evaluated_on": "all_evaluated"
+      },
+      "mode": "exact",
+      "requested_mode": "exact",
+      "cancelled": false,
+      "progress": 1.0,
+      "cache_key_components": {
+        "dataset_sha256": "7fbc517bb41d7d595d91e1673af1a3c02971fea928bdd61a847aeb9a5c946a1c",
+        "sample_fingerprint": {
+          "y": {
+            "n": 24,
+            "sum": 17520000.0,
+            "mean": 730000.0,
+            "std": 138443.7310486346,
+            "head": 500000.0,
+            "tail": 960000.0
+          },
+          "X": {
+            "area": {
+              "n": 24,
+              "sum": 1752.0,
+              "std": 13.844373104863458
+            }
+          }
+        },
+        "row_ids": [
+          "R000000",
+          "R000001",
+          "R000002",
+          "R000003",
+          "R000004",
+          "R000005",
+          "R000006",
+          "R000007",
+          "R000008",
+          "R000009",
+          "R000010",
+          "R000011",
+          "R000012",
+          "R000013",
+          "R000014",
+          "R000015",
+          "R000016",
+          "R000017",
+          "R000018",
+          "R000019",
+          "R000020",
+          "R000021",
+          "R000022",
+          "R000023"
+        ],
+        "feature_schema": {
+          "version": "MP/1",
+          "column_order": [
+            "area"
+          ],
+          "columns": {
+            "area": {
+              "original_name": "area",
+              "role": "predictor",
+              "kind": "numeric",
+              "unit": "m2",
+              "group_id": null,
+              "categories": null,
+              "reference_category": null
+            }
+          },
+          "groups": {},
+          "target": {
+            "column": "preco",
+            "unit": "BRL"
+          },
+          "parameter_accounting": {
+            "n_quantitative": 1,
+            "n_categorical_groups": 0,
+            "n_indicator_columns": 0,
+            "n_free_slopes": 1,
+            "n_free_with_intercept": 2,
+            "groups": {},
+            "n_effective": 24,
+            "rank_slopes": 1,
+            "rank_with_intercept": 2,
+            "n_columns_in_X": 1
+          },
+          "base_variables": {
+            "area": {
+              "kind": "numeric",
+              "role": "predictor",
+              "unit": "m2",
+              "categories": null,
+              "reference_category": null,
+              "group_id": null,
+              "original_name": "area"
+            }
+          }
+        },
+        "missing_policy": {
+          "target": "never_impute",
+          "predictors": "complete_case"
+        },
+        "outlier_policy": {
+          "mode": "report_only",
+          "reviewed_exclusions": []
+        },
+        "search_policy": {
+          "mode": "exact",
+          "budget": 16,
+          "objective": "aic",
+          "seed": 17,
+          "target_degree": 1,
+          "y_transformations": [
+            "identity"
+          ]
+        },
+        "evaluation_policy": {
+          "method": "none",
+          "partitions": null,
+          "groups": null,
+          "seed": 17
+        },
+        "target_col": "preco",
+        "candidate_cols": [
+          "area"
+        ],
+        "roles": {
+          "preco": "target",
+          "area": "predictor",
+          "id": "identifier",
+          "bairro": "excluded"
+        },
+        "code_version": "C05/MP1",
+        "schema_version": "MP/1",
+        "y_transformations": [
+          "identity"
+        ],
+        "subject": {
+          "area": 73.5
+        }
+      },
+      "cache_hit": false,
+      "best_so_far_candidate_id": "area:linear|y:identity|int:1",
+      "max_vars": 1,
+      "n_units": 1,
+      "unit_ids": [
+        "area"
+      ],
+      "history": [
+        {
+          "candidate_id": "area:linear|y:identity|int:1",
+          "variables": [
+            "area"
+          ],
+          "r2_adj": null,
+          "original_rmse": 2.977517676621754e-10,
+          "grau_fundamentacao": null,
+          "valid": true,
+          "label": "admissible",
+          "discard_reason": null,
+          "status": "fitted"
+        },
+        {
+          "candidate_id": "area:ln|y:identity|int:1",
+          "variables": [
+            "ln(area)"
+          ],
+          "r2_adj": null,
+          "original_rmse": null,
+          "grau_fundamentacao": null,
+          "valid": false,
+          "label": "exploratory",
+          "discard_reason": "peer_fit_not_fitted",
+          "status": "rejected"
+        },
+        {
+          "candidate_id": "area:sqrt|y:identity|int:1",
+          "variables": [
+            "sqrt(area)"
+          ],
+          "r2_adj": null,
+          "original_rmse": null,
+          "grau_fundamentacao": null,
+          "valid": false,
+          "label": "exploratory",
+          "discard_reason": "peer_fit_not_fitted",
+          "status": "rejected"
+        },
+        {
+          "candidate_id": "area:inverse|y:identity|int:1",
+          "variables": [
+            "inverse(area)"
+          ],
+          "r2_adj": null,
+          "original_rmse": null,
+          "grau_fundamentacao": null,
+          "valid": false,
+          "label": "exploratory",
+          "discard_reason": "peer_fit_not_fitted",
+          "status": "rejected"
+        },
+        {
+          "candidate_id": "area:sqr|y:identity|int:1",
+          "variables": [
+            "sqr(area)"
+          ],
+          "r2_adj": null,
+          "original_rmse": null,
+          "grau_fundamentacao": null,
+          "valid": false,
+          "label": "exploratory",
+          "discard_reason": "peer_fit_not_fitted",
+          "status": "rejected"
+        },
+        {
+          "candidate_id": "area:inv_sqr|y:identity|int:1",
+          "variables": [
+            "inv_sqr(area)"
+          ],
+          "r2_adj": null,
+          "original_rmse": null,
+          "grau_fundamentacao": null,
+          "valid": false,
+          "label": "exploratory",
+          "discard_reason": "peer_fit_not_fitted",
+          "status": "rejected"
+        },
+        {
+          "candidate_id": "area:inv_sqrt|y:identity|int:1",
+          "variables": [
+            "inv_sqrt(area)"
+          ],
+          "r2_adj": null,
+          "original_rmse": null,
+          "grau_fundamentacao": null,
+          "valid": false,
+          "label": "exploratory",
+          "discard_reason": "peer_fit_not_fitted",
+          "status": "rejected"
+        }
+      ],
+      "history_complete": true,
+      "history_total": 7,
+      "seed": 17,
+      "code_version": "C05/MP1",
+      "hooks": "C04",
+      "profile": {
+        "elapsed_s": 0.040755877998890355,
+        "rss_bytes_before": 263180288,
+        "rss_bytes_after": 264437760,
+        "host": "this_process_only",
+        "disclaimer": "Measurements for this local run only; not a speed claim for other machines."
+      }
+    },
+    "winner_candidate_id": "area:linear|y:identity|int:1"
+  },
+  "alternatives": [
+    {
+      "candidate_id": "area:inv_sqrt|y:identity|int:1",
+      "candidate_spec": {
+        "candidate_id": "area:inv_sqrt|y:identity|int:1",
+        "features": [
+          "inv_sqrt(area)"
+        ],
+        "base_variables": [
+          "area"
+        ],
+        "feature_groups": {},
+        "x_transformations": {
+          "area": "inv_sqrt"
+        },
+        "y_transformation": {
+          "name": "identity"
+        },
+        "intercept": true
+      },
+      "status": "rejected",
+      "model_eligibility": {
+        "status": "unsupported",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "value": {
+        "point": null,
+        "mean_ci80": null,
+        "prediction_interval": null,
+        "arbitration_interval": null,
+        "admissible_interval": null
+      },
+      "admissibility": {
+        "numeric_technical": false,
+        "framing": false,
+        "label": "exploratory",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "ranking": {
+        "criteria_used": [],
+        "criteria_omitted": [],
+        "tie_break": "candidate_id_lexicographic_asc"
+      },
+      "metrics": {},
+      "used_row_ids": [
+        "R000000",
+        "R000001",
+        "R000002",
+        "R000003",
+        "R000004",
+        "R000005",
+        "R000006",
+        "R000007",
+        "R000008",
+        "R000009",
+        "R000010",
+        "R000011",
+        "R000012",
+        "R000013",
+        "R000014",
+        "R000015",
+        "R000016",
+        "R000017",
+        "R000018",
+        "R000019",
+        "R000020",
+        "R000021",
+        "R000022",
+        "R000023"
+      ],
+      "issues": [],
+      "discard_reason": "peer_fit_not_fitted",
+      "statistical": null,
+      "normative": null,
+      "coefficients": {},
+      "diagnostics": {}
+    },
+    {
+      "candidate_id": "area:inv_sqr|y:identity|int:1",
+      "candidate_spec": {
+        "candidate_id": "area:inv_sqr|y:identity|int:1",
+        "features": [
+          "inv_sqr(area)"
+        ],
+        "base_variables": [
+          "area"
+        ],
+        "feature_groups": {},
+        "x_transformations": {
+          "area": "inv_sqr"
+        },
+        "y_transformation": {
+          "name": "identity"
+        },
+        "intercept": true
+      },
+      "status": "rejected",
+      "model_eligibility": {
+        "status": "unsupported",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "value": {
+        "point": null,
+        "mean_ci80": null,
+        "prediction_interval": null,
+        "arbitration_interval": null,
+        "admissible_interval": null
+      },
+      "admissibility": {
+        "numeric_technical": false,
+        "framing": false,
+        "label": "exploratory",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "ranking": {
+        "criteria_used": [],
+        "criteria_omitted": [],
+        "tie_break": "candidate_id_lexicographic_asc"
+      },
+      "metrics": {},
+      "used_row_ids": [
+        "R000000",
+        "R000001",
+        "R000002",
+        "R000003",
+        "R000004",
+        "R000005",
+        "R000006",
+        "R000007",
+        "R000008",
+        "R000009",
+        "R000010",
+        "R000011",
+        "R000012",
+        "R000013",
+        "R000014",
+        "R000015",
+        "R000016",
+        "R000017",
+        "R000018",
+        "R000019",
+        "R000020",
+        "R000021",
+        "R000022",
+        "R000023"
+      ],
+      "issues": [],
+      "discard_reason": "peer_fit_not_fitted",
+      "statistical": null,
+      "normative": null,
+      "coefficients": {},
+      "diagnostics": {}
+    },
+    {
+      "candidate_id": "area:inverse|y:identity|int:1",
+      "candidate_spec": {
+        "candidate_id": "area:inverse|y:identity|int:1",
+        "features": [
+          "inverse(area)"
+        ],
+        "base_variables": [
+          "area"
+        ],
+        "feature_groups": {},
+        "x_transformations": {
+          "area": "inverse"
+        },
+        "y_transformation": {
+          "name": "identity"
+        },
+        "intercept": true
+      },
+      "status": "rejected",
+      "model_eligibility": {
+        "status": "unsupported",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "value": {
+        "point": null,
+        "mean_ci80": null,
+        "prediction_interval": null,
+        "arbitration_interval": null,
+        "admissible_interval": null
+      },
+      "admissibility": {
+        "numeric_technical": false,
+        "framing": false,
+        "label": "exploratory",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "ranking": {
+        "criteria_used": [],
+        "criteria_omitted": [],
+        "tie_break": "candidate_id_lexicographic_asc"
+      },
+      "metrics": {},
+      "used_row_ids": [
+        "R000000",
+        "R000001",
+        "R000002",
+        "R000003",
+        "R000004",
+        "R000005",
+        "R000006",
+        "R000007",
+        "R000008",
+        "R000009",
+        "R000010",
+        "R000011",
+        "R000012",
+        "R000013",
+        "R000014",
+        "R000015",
+        "R000016",
+        "R000017",
+        "R000018",
+        "R000019",
+        "R000020",
+        "R000021",
+        "R000022",
+        "R000023"
+      ],
+      "issues": [],
+      "discard_reason": "peer_fit_not_fitted",
+      "statistical": null,
+      "normative": null,
+      "coefficients": {},
+      "diagnostics": {}
+    },
+    {
+      "candidate_id": "area:ln|y:identity|int:1",
+      "candidate_spec": {
+        "candidate_id": "area:ln|y:identity|int:1",
+        "features": [
+          "ln(area)"
+        ],
+        "base_variables": [
+          "area"
+        ],
+        "feature_groups": {},
+        "x_transformations": {
+          "area": "ln"
+        },
+        "y_transformation": {
+          "name": "identity"
+        },
+        "intercept": true
+      },
+      "status": "rejected",
+      "model_eligibility": {
+        "status": "unsupported",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "value": {
+        "point": null,
+        "mean_ci80": null,
+        "prediction_interval": null,
+        "arbitration_interval": null,
+        "admissible_interval": null
+      },
+      "admissibility": {
+        "numeric_technical": false,
+        "framing": false,
+        "label": "exploratory",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "ranking": {
+        "criteria_used": [],
+        "criteria_omitted": [],
+        "tie_break": "candidate_id_lexicographic_asc"
+      },
+      "metrics": {},
+      "used_row_ids": [
+        "R000000",
+        "R000001",
+        "R000002",
+        "R000003",
+        "R000004",
+        "R000005",
+        "R000006",
+        "R000007",
+        "R000008",
+        "R000009",
+        "R000010",
+        "R000011",
+        "R000012",
+        "R000013",
+        "R000014",
+        "R000015",
+        "R000016",
+        "R000017",
+        "R000018",
+        "R000019",
+        "R000020",
+        "R000021",
+        "R000022",
+        "R000023"
+      ],
+      "issues": [],
+      "discard_reason": "peer_fit_not_fitted",
+      "statistical": null,
+      "normative": null,
+      "coefficients": {},
+      "diagnostics": {}
+    },
+    {
+      "candidate_id": "area:sqrt|y:identity|int:1",
+      "candidate_spec": {
+        "candidate_id": "area:sqrt|y:identity|int:1",
+        "features": [
+          "sqrt(area)"
+        ],
+        "base_variables": [
+          "area"
+        ],
+        "feature_groups": {},
+        "x_transformations": {
+          "area": "sqrt"
+        },
+        "y_transformation": {
+          "name": "identity"
+        },
+        "intercept": true
+      },
+      "status": "rejected",
+      "model_eligibility": {
+        "status": "unsupported",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "value": {
+        "point": null,
+        "mean_ci80": null,
+        "prediction_interval": null,
+        "arbitration_interval": null,
+        "admissible_interval": null
+      },
+      "admissibility": {
+        "numeric_technical": false,
+        "framing": false,
+        "label": "exploratory",
+        "reasons": [
+          "fit_not_successful"
+        ]
+      },
+      "ranking": {
+        "criteria_used": [],
+        "criteria_omitted": [],
+        "tie_break": "candidate_id_lexicographic_asc"
+      },
+      "metrics": {},
+      "used_row_ids": [
+        "R000000",
+        "R000001",
+        "R000002",
+        "R000003",
+        "R000004",
+        "R000005",
+        "R000006",
+        "R000007",
+        "R000008",
+        "R000009",
+        "R000010",
+        "R000011",
+        "R000012",
+        "R000013",
+        "R000014",
+        "R000015",
+        "R000016",
+        "R000017",
+        "R000018",
+        "R000019",
+        "R000020",
+        "R000021",
+        "R000022",
+        "R000023"
+      ],
+      "issues": [],
+      "discard_reason": "peer_fit_not_fitted",
+      "statistical": null,
+      "normative": null,
+      "coefficients": {},
+      "diagnostics": {}
+    }
+  ],
+  "next_actions": [
+    {
+      "code": "provide_subject_characteristic",
+      "priority": 30,
+      "reason": "Falta característica do sujeito (imóvel avaliando) exigida pelo esquema.",
+      "next_step": "Fornecer a característica do sujeito na mesma base e unidade das variáveis do modelo.",
+      "evidence_refs": [
+        {
+          "kind": "item",
+          "id": "tabela1.item1",
+          "item": 1,
+          "path": "[omitido]",
+          "evidence_status": "pending",
+          "source": {
+            "edition": "ABNT NBR 14653-2:2011",
+            "item": 1,
+            "clause": "Tabela 1 item 1",
+            "status": "verified"
+          }
+        }
+      ],
+      "limitations": [
+        "Sem a característica, extrapolação e previsão do avaliando permanecem pendentes.",
+        "Sem dados suficientes para estimar o ganho desta ação."
+      ]
+    },
+    {
+      "code": "incompatible_alternative_comparison",
+      "priority": 80,
+      "reason": "Há alternativas com unidade, data-base ou estimand distintos ou ausentes; a comparação numérica entre elas não é válida nessas condições.",
+      "next_step": "Revisar unidade, data-base e estimand até que as alternativas sejam comparáveis. Não tratar a diferença entre especificações como medida de precisão.",
+      "evidence_refs": [
+        {
+          "kind": "alternative",
+          "candidate_id": "area:inv_sqrt|y:identity|int:1",
+          "unit": null,
+          "reference_date": null,
+          "estimand": null
+        },
+        {
+          "kind": "alternative",
+          "candidate_id": "area:inv_sqr|y:identity|int:1",
+          "unit": null,
+          "reference_date": null,
+          "estimand": null
+        },
+        {
+          "kind": "alternative",
+          "candidate_id": "area:inverse|y:identity|int:1",
+          "unit": null,
+          "reference_date": null,
+          "estimand": null
+        },
+        {
+          "kind": "alternative",
+          "candidate_id": "area:ln|y:identity|int:1",
+          "unit": null,
+          "reference_date": null,
+          "estimand": null
+        },
+        {
+          "kind": "alternative",
+          "candidate_id": "area:sqrt|y:identity|int:1",
+          "unit": null,
+          "reference_date": null,
+          "estimand": null
+        }
+      ],
+      "limitations": [
+        "Comparações só usam valores na mesma unidade, data-base e estimand.",
+        "Ausência de unidade ou data não é preenchida por BRL, BRL/m2 ou data atual."
+      ]
+    }
+  ],
+  "provenance": {
+    "filename": "mercado.csv",
+    "composed_by": "c10.worker",
+    "peers": {
+      "ingest_market": {
+        "kind": "real",
+        "ref": "modules.data_loader.ingest_market"
+      },
+      "fit_dataset": {
+        "kind": "real",
+        "ref": "modules.preprocessing.fit_dataset"
+      },
+      "transform_subject": {
+        "kind": "real",
+        "ref": "modules.preprocessing.transform_subject"
+      },
+      "search_models": {
+        "kind": "real",
+        "ref": "modules.optimal_combination.search_models"
+      },
+      "fit_candidate": {
+        "kind": "real",
+        "ref": "modules.model_builder.fit_candidate"
+      },
+      "evaluate_fitted": {
+        "kind": "real",
+        "ref": "modules.model_builder.evaluate_fitted"
+      },
+      "assess_normative": {
+        "kind": "real",
+        "ref": "modules.nbr14653_validation.assess_normative"
+      },
+      "evaluate_procedure": {
+        "kind": "real",
+        "ref": "modules.model_evaluation.evaluate_procedure"
+      },
+      "render_report": {
+        "kind": "real",
+        "ref": "modules.results_generator.render_report"
+      },
+      "build_evidence_bundle": {
+        "kind": "real",
+        "ref": "modules.evidence_bundle.build_evidence_bundle"
+      },
+      "recommend_next_actions": {
+        "kind": "real",
+        "ref": "modules.decision_support.recommend_next_actions"
+      },
+      "evaluate_batch": {
+        "kind": "real",
+        "ref": "modules.valuation_batch.evaluate_batch"
+      },
+      "fit_target_transform": {
+        "kind": "real",
+        "ref": "modules.target_transform.fit_target_transform"
+      },
+      "transform_target": {
+        "kind": "real",
+        "ref": "modules.target_transform.transform_target"
+      },
+      "inverse_target_prediction": {
+        "kind": "real",
+        "ref": "modules.target_transform.inverse_target_prediction"
+      }
+    },
+    "sample_ledger_present": true,
+    "subject_categorical_survived": true
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "producer": "C12",
+  "consumer": "C10",
+  "exported_interface": "modules.evidence_bundle.build_evidence_bundle",
+  "required_callsite": "backend/worker.py after modules.result_contract.freeze_result_snapshot; write the returned manifest into the C11 job artifact registry (external to the frozen snapshot). Do not hash the manifest back into the snapshot.",
+  "contract_version": "MP/1",
+  "dependency_pr": null,
+  "head_sha": "62be2624ef018bc1a9318e855e5f4e16a58b8d1e",
+  "acceptance_case": "tests/c12_evidence/test_a01_complete_package.py plus scripts/c12_reproduce/reproduce.py --bundle <dir> exit 0 on a complete synthetic package",
+  "additional_consumers": [
+    {
+      "consumer": "C11",
+      "exported_interface": "manifest['files'] + modules.evidence_bundle.verify_bundle",
+      "required_callsite": "JobStore artifact registry / GET /jobs/{id} artifact_states; ProjectStore revision artifact_refs must point at versioned local paths inside the package, never at in-memory model_object or pickle."
+    },
+    {
+      "consumer": "C09",
+      "exported_interface": "manifest mapping (files, completeness_summary, reproduction.promised, share_selection)",
+      "required_callsite": "GUI artifact/dossier panel should render completeness statuses presente|declarado|verificado|faltante and must not treat reproduction.promised as issuance approval."
+    }
+  ],
+  "additional_exports": {
+    "verify_bundle": "modules.evidence_bundle.verify_bundle",
+    "reproduce_from_bundle": "modules.evidence_bundle.reproduce_from_bundle",
+    "export_share_copy": "modules.evidence_bundle.export_share_copy",
+    "cli": "scripts/c12_reproduce/reproduce.py"
+  },
+  "consumes": [
+    "C10 ResultSnapshot (frozen JSON mapping, schema_version MP/1)",
+    "C01 InputBundle (raw_frame, parsed_frame, row_ledger, input_sha256)",
+    "C02 PreparedDataset (base_frame, feature_schema, encoder_state, sample_ledger, row_ids)",
+    "C08 report bytes as artifacts.report_pdf (optional; never a substitute for full tables)",
+    "C11 storage for the package directory and artifact_refs"
+  ],
+  "notes": [
+    "Tests use labeled synthetic MP/1 mappings (SYNTHETIC_FIXTURE_C12_NOT_PRODUCTION), not live C01–C11 objects.",
+    "C12 does not edit backend/worker.py, modules/results.py, or modules/result_contract.py.",
+    "Share selection copies named functions and never deletes the original local package."
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "campaign_id": "C11",
+  "head_sha": "16778f2382a2fc5b1e2cecbd6f15ade9ebf5f5b3",
+  "pr": "https://github.com/tjsasakifln/modelapro/pull/12",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "READY_COMPONENT",
+  "criteria": [
+    {
+      "id": "C11-A01",
+      "status": "PASS",
+      "evidence": "tests/c11_persistence/test_a01_queryable_without_ws.py drives JobStore.create/save_snapshot/get/get_snapshot with no WebSocket; reopen still returns the same snapshot point 1234.5"
+    },
+    {
+      "id": "C11-A02",
+      "status": "PASS",
+      "evidence": "tests/c11_persistence/test_a02_restart_and_abandoned.py: revisions reload; abandoned running -> interrupted never succeeded; complete idempotency reuses; no resume_search. tests/c11_persistence/test_a02_a04_live_ws_does_not_interrupt.py: JobStore() without configure_default then JobStore.default() and /ws leave a live running job running"
+    },
+    {
+      "id": "C11-A03",
+      "status": "PASS",
+      "evidence": "tests/c11_persistence/test_a03_cancel_and_transitions.py: CAS, queued cancel never starts, running cancel_requested observed, concurrent cancel/complete one terminal state, artifact_states distinct, shutdown"
+    },
+    {
+      "id": "C11-A04",
+      "status": "PASS",
+      "evidence": "tests/c11_persistence/test_a04_ws_isolation.py: FakeWebSocket + real /ws TestClient; two job tokens isolated; dead socket pruned; unscoped send_notification does not broadcast. test_a02_a04_live_ws_does_not_interrupt.py drives /ws against JobStore() without configure_default"
+    },
+    {
+      "id": "C11-A05",
+      "status": "PASS",
+      "evidence": "tests/c11_persistence/test_a05_durability_security.py: temp root only; truncated sidecar; schema 99 refused; traversal; pickle file -> get_snapshot None; model_object rejected"
+    }
+  ],
+  "commands": [
+    {
+      "command": "python3 -m pytest tests/c11_persistence/ -q",
+      "exit_code": 0,
+      "note": "run 1, 39 passed"
+    },
+    {
+      "command": "python3 -m pytest tests/c11_persistence/ -q",
+      "exit_code": 0,
+      "note": "run 2, 39 passed"
+    },
+    {
+      "command": "python3 fresh-process JobStore/ProjectStore/LocalTaskRunner roundtrip",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m pytest tests/c11_persistence/test_a04_ws_isolation.py -q",
+      "exit_code": 0,
+      "note": "6 passed"
+    },
+    {
+      "command": "python3 -m pytest tests/test_audit_fixes.py tests/test_api.py -q",
+      "exit_code": 1,
+      "note": "C16 test_send_notification_delivers_realistic_completed_payload fails: global broadcast removed on purpose. _json_safe test and remaining 7 tests passed."
+    }
+  ],
+  "unmet_dependencies": [
+    "C10 POST /jobs 202 does not yet return access_token/ws_url (C11 create provides access_token on the job record)",
+    "C09 frontend still connects to unscoped /ws",
+    "C16 notifier delivery assertion still expects active_connections broadcast"
+  ],
+  "deferred_items": [
+    "Mid-search resume is not implemented (no checkpoint)",
+    "HTTP routes remain C10-owned; this PR does not edit backend/api.py or backend/worker.py",
+    "Public bind/exposure is C15"
+  ],
+  "review_findings": [
+    {
+      "source": "author",
+      "severity": "info",
+      "finding": "send_notification without job_id is a no-op after _json_safe serialization. C16's completed-payload delivery test fails until that campaign retargets."
+    },
+    {
+      "source": "author",
+      "severity": "info",
+      "finding": "Additive same-state update_transition is a patch so C10 can set stage while running. queued->failed is legal so a job that never starts is not left queued forever."
+    },
+    {
+      "source": "author",
+      "severity": "info",
+      "finding": "Workspace contained concurrent campaign files; only C11 write-list paths are committed on this branch."
+    },
+    {
+      "source": "author",
+      "severity": "info",
+      "finding": "Fixed: JobStore() now becomes JobStore.default(); recover_on_open is once per process/root so /ws cannot interrupt a live running job. Explicit recover_abandoned still runs on simulated process reopen."
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "id": "MP-PRO-20260911/P02",
+  "lote": "MP-PRO-20260911",
+  "campaign": "P02",
+  "title": "Rotina do avaliador na interface, com menos preenchimento e retrabalho",
+  "BASE_SHA": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "branch": "mp-pro-20260911/p02-rotina-interface",
+  "head_sha_note": "HEAD final no comentário da PR após o commit, para evitar ciclo do hash no próprio commit.",
+  "pr17": {
+    "url": "https://github.com/tjsasakifln/modelapro/pull/17",
+    "state": "open_draft",
+    "head": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+    "base_for_this_pr": "mp-20260911/integracao-final"
+  },
+  "local_class": "IMPLEMENTED_PARTIAL",
+  "features_implemented": [
+    "Percurso em quatro etapas: preparação da amostra, imóvel avaliando, resultado e revisão, projeto salvo.",
+    "Mapeamento de colunas, alvo e características editáveis, vinculado a token de arquivo+esquema.",
+    "Amostra interpretada da prévia, colunas não utilizadas com razão visível.",
+    "Localidade, unidade e data-base explícitas; vazio permanece pendente.",
+    "Pedido emite só search_policy.minimum_fundamentacao_grade (null|1..3); método de avaliação escolhido entre os suportados pela API.",
+    "Políticas enviadas visíveis e recuperáveis; holdout visível e só no POST de cálculo.",
+    "Invalidação de dependentes ao trocar arquivo/sujeito/política/unidade/data; erro de prévia descarta interpretação antiga.",
+    "Bloqueio de POST equivalente em rerun/duplo clique via fingerprint + job ativo.",
+    "Primeiro contato: valor, unidade, data-base, IC da média vs intervalo de predição, grau solicitado vs atingido, limitações, contagens, next_actions.",
+    "Faixa arbitrada rotulada como arbitragem, nunca como confiança.",
+    "Segundo nível: modelo/equação, gráficos, alternativas com guarda de compatibilidade; comparação é leitura.",
+    "workflow_context ausente não gera alerta falso de imóvel ausente; presente e confirmado tampouco.",
+    "Job succeeded não é rotulado como trabalho concluído; PDF falho mantém cálculo e oferece download do cálculo.",
+    "Lista de projetos GET /projects, abertura GET /projects/{id}, nova revisão POST /projects/{id}/revisions, lote POST /projects/{id}/batch.",
+    "Consulta de estado por GET; WebSocket opcional e não fonte da verdade."
+  ],
+  "files_changed": [
+    "frontend/app.py",
+    "frontend/assets/styles.css",
+    "frontend/components/forms.py",
+    "frontend/components/layout.py",
+    "frontend/components/workflow.py",
+    "tests/test_forms_heuristics.py",
+    "tests/c09_frontend/test_app_launch.py",
+    "tests/c09_frontend/test_layout_states.py",
+    "tests/c09_frontend/test_request_spec.py",
+    "tests/pro_workflow/p02/__init__.py",
+    "tests/pro_workflow/p02/test_a01_playwright.py",
+    "tests/pro_workflow/p02/test_invalidation_and_binding.py",
+    "tests/pro_workflow/p02/test_launch.py",
+    "tests/pro_workflow/p02/test_presenter_and_delivery.py",
+    "tests/pro_workflow/p02/test_projects_client.py",
+    "tests/pro_workflow/p02/test_request_grade_method.py",
+    "docs/campaigns/MP-PRO-20260911/P02/delivery.json",
+    "docs/campaigns/MP-PRO-20260911/P02/evidence.md"
+  ],
+  "contracts_consumed": {
+    "http": [
+      "POST /preview",
+      "POST /jobs",
+      "GET /jobs/{id}",
+      "GET /jobs/{id}/result",
+      "GET /jobs/{id}/artifacts/{name}",
+      "POST /jobs/{id}/cancel",
+      "GET /projects",
+      "GET /projects/{id}",
+      "POST /projects/{id}/revisions",
+      "POST /projects/{id}/batch"
+    ],
+    "mp1": [
+      "RequestSpec.search_policy.minimum_fundamentacao_grade",
+      "RequestSpec.evaluation_policy.method",
+      "ResultSnapshot.value.point/mean_ci80/prediction_interval/arbitration_interval/admissible_interval",
+      "validation.fundamentacao",
+      "validation.precisao",
+      "sample",
+      "issues",
+      "model",
+      "search",
+      "alternatives",
+      "next_actions"
+    ],
+    "optional_mp_pro_1": [
+      "provenance.workflow_context"
+    ]
+  },
+  "tests": {
+    "commands": [
+      "PYTHONPATH=. python3 -m pytest tests/c09_frontend tests/pro_workflow/p02 tests/test_forms_heuristics.py -q --tb=short"
+    ],
+    "runs": [
+      {"file": "p02-unit.txt", "exit_code": 0, "passed": 75},
+      {"file": "p02-unit-2.txt", "exit_code": 0, "passed": 75}
+    ],
+    "launch": {"file": "p02-launch.log", "exit_code": 0},
+    "a04": {"file": "p02-a04.log", "note": "stub HTTP das rotas C11, não mock do cliente"}
+  },
+  "acceptances": {
+    "P02-A01": {
+      "status": "BLOCKED",
+      "reason": "playwright import failed: No module named 'playwright'",
+      "evidence": "p02-playwright-unavailable.log",
+      "note": "Sem traces fabricados. AppTest + unitários cobrem o percurso de apresentação e o cliente HTTP real contra stub de rede."
+    },
+    "P02-A02": {
+      "status": "IMPLEMENTED_VERIFIED",
+      "tests": [
+        "tests/pro_workflow/p02/test_request_grade_method.py",
+        "tests/pro_workflow/p02/test_projects_client.py::test_posted_job_body_contains_canonical_grade_and_chosen_method"
+      ]
+    },
+    "P02-A03": {
+      "status": "IMPLEMENTED_VERIFIED",
+      "tests": ["tests/pro_workflow/p02/test_invalidation_and_binding.py"]
+    },
+    "P02-A04": {
+      "status": "IMPLEMENTED_PARTIAL",
+      "verified": "save/select/reload/recover/PDF fail/batch item states contra stub HTTP das rotas reais; GET /revisions 405 tratado como rota ausente; Reabrir esta revisão recupera GET /jobs/{id}/result",
+      "integration_pending": "GET /projects/{id}/revisions (lista completa) — BASE_SHA registra só POST; GET devolve 405 Method Not Allowed"
+    },
+    "P02-A05": {
+      "status": "IMPLEMENTED_PARTIAL",
+      "verified": "presenter 1366 e 360; workflow_context ausente e presente (fixture rotulada)",
+      "integration_pending": "confirmação live de workflow_context contra produtor P01"
+    },
+    "P02-A06": {
+      "status": "IMPLEMENTED_VERIFIED",
+      "note": "Tabela antes/depois em evidence.md. Ganhos de produtividade são hipótese até piloto real. Tempo de robô não é tempo humano."
+    }
+  },
+  "handoffs": [
+    {
+      "producer": "P01",
+      "consumer": "P02",
+      "change": "Expor GET /projects/{project_id}/revisions com a lista imutável de revisões. Na BASE_SHA o path só aceita POST e GET devolve 405.",
+      "method": "GET",
+      "path": "/projects/{project_id}/revisions",
+      "base_sha_status": 405,
+      "example_request": null,
+      "example_response": {
+        "schema_version": "MP/1",
+        "project_id": "proj-1",
+        "revisions": [
+          {"revision_id": "rev-1", "created_at": "2024-01-15T12:00:00Z", "job_id": "job-1"}
+        ]
+      },
+      "acceptance": "A UI lista revisões sem reconstruir estado da tela. Enquanto ausente, P02 usa GET /projects/{id} (revisão atual) e marca INTEGRATION_PENDING."
+    },
+    {
+      "producer": "P01",
+      "consumer": "P02",
+      "change": "Opcional provenance.workflow_context no ResultSnapshot (contrato MP-PRO/1 já descrito no lote).",
+      "path": "ResultSnapshot.provenance.workflow_context",
+      "example_response": {
+        "schema_version": "MP-PRO/1",
+        "subject_raw": {"area": "73,5"},
+        "requested_minimum_grade": 2,
+        "grade_requirement_status": "pending",
+        "selection_scope": "unknown",
+        "selection_conditioned_on_subject": null,
+        "limitation_codes": []
+      },
+      "acceptance": "Consumidor já trata ausente vs presente. Fixture rotulada não conta como integração live."
+    },
+    {
+      "producer": "P03",
+      "consumer": "P02",
+      "change": "report_context.fitted_values/residuals/observed_values/series_row_ids com series_scale/series_unit para gráficos de segundo nível.",
+      "path": "ResultSnapshot.report_context",
+      "acceptance": "Sem esses arrays o gráfico de resíduos fica indisponível, não inventado."
+    }
+  ],
+  "limitations": [
+    "Playwright/Chromium não estão no ambiente deste agente; A01 local BLOCKED com log.",
+    "GET /projects/{id}/revisions não existe na BASE_SHA.",
+    "provenance.workflow_context não é produzido na BASE_SHA; consumidor degradado de forma explícita.",
+    "Custo só é mostrado se a API devolver estimated_cost/cost; a BASE_SHA de /preview não devolve.",
+    "Não há POST /projects; o projeto nasce ao gravar a primeira revisão.",
+    "Adoção de modelo continua leitura no frontend; não há rota de adoção na BASE_SHA."
+  ]
+}

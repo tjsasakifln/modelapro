@@ -1,249 +1,865 @@
+"""C05: transparent model search, ranking, and measurable efficiency.
+
+``search_models`` is the MP/1 entry point. ``OptimalCombinationFinder.find_best_model``
+is a compatibility adapter over the same search — it does not run a second algorithm.
+"""
+from __future__ import annotations
+
+import dataclasses
+import hashlib
+import json
+import os
+import time
+from collections import OrderedDict
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+
+import numpy as np
 import pandas as pd
-import itertools
-from typing import List, Dict, Optional, Tuple
-from .results import OptimalCombinationResult, ModelResult
-from .model_builder import ModelBuilder
-from .transformations import Transformer
-from .logging_manager import logger
+import statsmodels.api as sm
+
 from .config_manager import config
+from .logging_manager import logger
+from .model_builder import ModelBuilder
+from .results import ModelResult, OptimalCombinationResult
+from .search_space import (
+    GROUP_OPTION,
+    LINEAR_OPTION,
+    SCHEMA_VERSION,
+    Y_IDENTITY,
+    SearchUnit,
+    canonical_transform_name,
+    count_exhaustive_candidates,
+    derived_max_vars,
+    domain_valid_include_options,
+    feature_column_name,
+    iter_search_candidates,
+    parse_feature_name,
+    possible_count_for_units,
+    resolve_authorized_base_variables,
+    search_units_from_prepared,
+    y_transformations_from_policy,
+)
+from .transformations import Transformer
+
+
+ProgressCallback = Callable[[Mapping[str, Any]], None]
+CancelRequested = Callable[[], bool]
+
+MAX_EXHAUSTIVE_CANDIDATES = 200_000
+DEFAULT_EVALUATION_BUDGET = 512
+HISTORY_SAMPLE_LIMIT = 5000
+DEFAULT_ALTERNATIVES = 5
+CODE_VERSION = "C05/MP1"
+
+_SEARCH_CACHE: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+_SEARCH_CACHE_LIMIT = 32
+
+
+def clear_search_cache() -> None:
+    """Drop the in-process search cache (tests and C14 reuse isolation)."""
+    _SEARCH_CACHE.clear()
+
+
+def evaluate_search_candidate(
+    prepared_dataset: Mapping[str, Any],
+    candidate_spec: Mapping[str, Any],
+    request_spec: Mapping[str, Any],
+    subject_design: Optional[Mapping[str, Any]] = None,
+    column_store: Optional["_ColumnStore"] = None,
+    hooks: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Fit and score one CandidateSpec with the same path ``search_models`` uses."""
+    evaluation_policy = dict(request_spec.get("evaluation_policy") or {})
+    hooks = dict(hooks or _resolve_hooks(request_spec))
+    if column_store is None:
+        column_store = _ColumnStore(_frame_for_columns(prepared_dataset))
+    record = _fit_and_score(
+        prepared_dataset,
+        candidate_spec,
+        request_spec,
+        subject_design,
+        column_store,
+        hooks,
+        evaluation_policy,
+        retain_legacy=bool((request_spec.get("search_policy") or {}).get("retain_legacy_model")),
+    )
+    record["_rank_tuple"] = ranking_tuple(
+        record, _objective_descriptor(request_spec.get("search_policy") or {}, evaluation_policy)
+    )
+    return record
+
+
+def _as_mapping(obj: Any) -> Mapping[str, Any]:
+    """Accept MP/1 mappings or the C02 dataclass objects without losing frames."""
+    if obj is None:
+        return {}
+    if isinstance(obj, Mapping):
+        return obj
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
+    if hasattr(obj, "__dict__"):
+        return {key: value for key, value in vars(obj).items() if not key.startswith("_")}
+    return {}
+
+
+def search_models(
+    prepared_dataset: Mapping[str, Any],
+    subject_design: Optional[Mapping[str, Any]],
+    request_spec: Mapping[str, Any],
+    progress_callback: Optional[ProgressCallback] = None,
+    cancel_requested: Optional[CancelRequested] = None,
+) -> Dict[str, Any]:
+    """Search candidate models and return ``{winner, alternatives, search_audit, issues}``.
+
+    Callbacks are synchronous and light. ``cancel_requested()`` returns bool.
+    C07 ``evaluate_procedure`` is never invoked here (no validation recursion).
+    """
+    prepared_dataset = _as_mapping(prepared_dataset)
+    if subject_design is not None:
+        subject_design = _as_mapping(subject_design)
+    request_spec = _as_mapping(request_spec)
+    _configure_local_threads((request_spec.get("search_policy") or {}).get("n_jobs", 1))
+    t0 = time.perf_counter()
+    rss0 = _rss_bytes()
+    issues: List[Dict[str, Any]] = []
+    search_policy = dict(request_spec.get("search_policy") or {})
+    evaluation_policy = dict(request_spec.get("evaluation_policy") or {})
+
+    cache_digest, cache_components = build_search_cache_key(
+        prepared_dataset, subject_design, request_spec
+    )
+    use_cache = bool(search_policy.get("use_cache", True))
+    if use_cache and cache_digest in _SEARCH_CACHE:
+        cached = _SEARCH_CACHE[cache_digest]
+        _SEARCH_CACHE.move_to_end(cache_digest)
+        hit = _deepcopy_search_result(cached)
+        hit["search_audit"] = dict(hit.get("search_audit") or {})
+        hit["search_audit"]["cache_hit"] = True
+        _emit_progress(
+            progress_callback,
+            {"progress": 1.0, "evaluated": hit["search_audit"].get("evaluated"), "cache_hit": True},
+        )
+        return hit
+
+    authorized, auth_issues = resolve_authorized_base_variables(
+        request_spec,
+        _available_predictor_names(prepared_dataset, request_spec),
+        target_col=request_spec.get("target_col"),
+    )
+    issues.extend(auth_issues)
+    if any(i.get("code") == "no_authorized_variables" and i.get("severity") == "error" for i in auth_issues):
+        audit = _empty_audit(
+            objective=_objective_descriptor(search_policy, evaluation_policy),
+            cache_components=cache_components,
+            cancelled=False,
+        )
+        audit["coverage"]["exact_optimum_guaranteed"] = False
+        audit["selection_scope"] = (
+            (request_spec.get("search_policy") or {}).get("model_scope")
+            or request_spec.get("model_scope")
+            or "population_model"
+        )
+        audit["selection_conditioned_on_subject"] = audit["selection_scope"] == "subject_specific"
+        return _search_result(None, [], audit, issues, t0, rss0)
+
+    subject_raw = None
+    if subject_design:
+        subject_raw = subject_design.get("raw_values") or subject_design.get("subject_raw")
+
+    declared_scope = search_policy.get("model_scope") or request_spec.get("model_scope")
+    if declared_scope not in {"population_model", "subject_specific"}:
+        declared_scope = "population_model"
+    selection_conditioned = declared_scope == "subject_specific"
+    subject_for_units = subject_raw if selection_conditioned else None
+
+    units, unit_issues = search_units_from_prepared(
+        prepared_dataset, authorized, subject_raw=subject_for_units
+    )
+    issues.extend(unit_issues)
+
+    dropped_transforms_due_to_subject: Dict[str, Any] = {}
+    for issue in unit_issues:
+        if issue.get("code") == "domain_exclusion":
+            dropped_transforms_due_to_subject = dict(
+                (issue.get("evidence") or {}).get("dropped_transforms") or {}
+            )
+
+    if selection_conditioned and subject_raw is not None:
+        missing_bases = [
+            u.base_variable
+            for u in units
+            if u.base_variable not in subject_raw
+        ]
+        if missing_bases:
+            issues.append(
+                _issue(
+                    "subject_missing_base",
+                    "warning",
+                    "Base variables without a subject value were excluded so ranking "
+                    "criteria that depend on the subject stay symmetric.",
+                    affected_ids=missing_bases,
+                )
+            )
+            units = [u for u in units if u.base_variable in subject_raw]
+
+    if not units:
+        issues.append(
+            _issue(
+                "empty_search_space",
+                "error",
+                "No search units remain after authorization, grouping, and domain filters.",
+            )
+        )
+        audit = _empty_audit(
+            objective=_objective_descriptor(search_policy, evaluation_policy),
+            cache_components=cache_components,
+            cancelled=False,
+        )
+        audit["selection_scope"] = declared_scope
+        audit["selection_conditioned_on_subject"] = bool(selection_conditioned)
+        audit["dropped_transforms_due_to_subject"] = dropped_transforms_due_to_subject
+        return _search_result(None, [], audit, issues, t0, rss0)
+
+    n_rows = _n_rows(prepared_dataset)
+    max_vars = derived_max_vars(n_rows, len(units), search_policy, evaluation_policy)
+    possible = possible_count_for_units(units, max_vars)
+    y_list = y_transformations_from_policy(search_policy)
+    if len(y_list) > 1:
+        possible *= len(y_list)
+
+    budget = search_policy.get("budget", DEFAULT_EVALUATION_BUDGET)
+    try:
+        budget = int(budget)
+    except (TypeError, ValueError):
+        budget = DEFAULT_EVALUATION_BUDGET
+    budget = max(0, budget)
+    threshold = search_policy.get("exact_count_threshold", MAX_EXHAUSTIVE_CANDIDATES)
+    try:
+        threshold = int(threshold)
+    except (TypeError, ValueError):
+        threshold = MAX_EXHAUSTIVE_CANDIDATES
+
+    requested_mode = (search_policy.get("mode") or "auto").lower()
+    mode, mode_issue = _resolve_mode(requested_mode, possible, budget, threshold)
+    if mode_issue:
+        issues.append(mode_issue)
+
+    seed = int(search_policy.get("seed") or 0)
+    intercept = bool(search_policy.get("intercept", True))
+    enumerator_budget = budget if mode == "approximate" else possible
+    candidate_iter = iter_search_candidates(
+        units,
+        max_vars=max_vars,
+        mode=mode,
+        budget=max(enumerator_budget, 1),
+        seed=seed,
+        y_transformations=y_list,
+        intercept=intercept,
+    )
+
+    hooks = _resolve_hooks(request_spec)
+    column_store = _ColumnStore(_frame_for_columns(prepared_dataset))
+    objective = _objective_descriptor(search_policy, evaluation_policy)
+    extra_objective = evaluation_policy.get("extra_objective")
+    shortlist_size = evaluation_policy.get("shortlist_size")
+    try:
+        shortlist_size = int(shortlist_size) if shortlist_size is not None else None
+    except (TypeError, ValueError):
+        shortlist_size = None
+    using_shortlist = bool(shortlist_size and callable(extra_objective))
+
+    n_alternatives = int(search_policy.get("max_alternatives") or DEFAULT_ALTERNATIVES)
+    retain_limit = max(n_alternatives + 1, 8)
+    retain_legacy = bool(search_policy.get("retain_legacy_model"))
+
+    generated = 0
+    evaluated = 0
+    rejected = 0
+    rejection_reasons: Dict[str, int] = {}
+    cancelled = False
+    compact_history: List[Dict[str, Any]] = []
+    scored: List[Dict[str, Any]] = []
+    last_progress = 0.0
+    denom = float(budget) if mode == "approximate" or budget < possible else float(max(possible, 1))
+    best_so_far_id = None
+    best_so_far_key = None
+
+    def consider_progress():
+        nonlocal last_progress
+        raw = evaluated / denom if denom else None
+        if raw is None:
+            payload_progress = None
+        else:
+            payload_progress = min(1.0, max(last_progress, max(0.0, raw)))
+            last_progress = payload_progress
+        _emit_progress(
+            progress_callback,
+            {
+                "progress": payload_progress,
+                "generated": generated,
+                "evaluated": evaluated,
+                "rejected": rejected,
+                "cancelled": cancelled,
+                "best_candidate_id": best_so_far_id,
+            },
+        )
+
+    consider_progress()
+
+    for spec in candidate_iter:
+        if _cancelled(cancel_requested):
+            cancelled = True
+            break
+        if budget and evaluated >= budget:
+            break
+        generated += 1
+        record = _fit_and_score(
+            prepared_dataset,
+            spec,
+            request_spec,
+            subject_design,
+            column_store,
+            hooks,
+            evaluation_policy,
+            retain_legacy=retain_legacy,
+        )
+        evaluated += 1
+        if not record["admissibility"]["numeric_technical"]:
+            rejected += 1
+            reason = record.get("discard_reason") or "not_admissible"
+            rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+        record["_rank_tuple"] = ranking_tuple(record, objective)
+        scored.append(record)
+        compact_history.append(_compact_history_entry(record))
+        if best_so_far_key is None or _is_better(record["_rank_tuple"], best_so_far_key):
+            best_so_far_key = record["_rank_tuple"]
+            best_so_far_id = record["candidate_id"]
+        _trim_retained_models(scored, retain_limit)
+        if evaluated % 5 == 0 or evaluated == 1:
+            consider_progress()
+        if budget and evaluated >= budget:
+            break
+
+    if _cancelled(cancel_requested):
+        cancelled = True
+
+    full_objective_on = "all_evaluated"
+    if using_shortlist and scored:
+        cheap_sorted = _sorted_records(scored, objective)
+        shortlist = cheap_sorted[: max(1, shortlist_size)]
+        shortlist_ids = {r["candidate_id"] for r in shortlist}
+        for rec in scored:
+            if rec["candidate_id"] not in shortlist_ids:
+                rec["metrics"]["full_objective"] = False
+                rec["criteria_omitted"] = list(
+                    dict.fromkeys(list(rec.get("criteria_omitted") or []) + ["extra_objective"])
+                )
+                continue
+            try:
+                extra = extra_objective(rec) or {}
+            except Exception as exc:
+                rec["issues"].append(
+                    _issue("extra_objective_failed", "warning", str(exc), affected_ids=[rec["candidate_id"]])
+                )
+                extra = {}
+            rec["metrics"].update({k: v for k, v in extra.items() if v is not None})
+            rec["metrics"]["full_objective"] = True
+            rec["_rank_tuple"] = ranking_tuple(rec, objective)
+        full_objective_on = "shortlist"
+        issues.append(
+            _issue(
+                "full_objective_shortlist_only",
+                "info",
+                "The complete ranking objective was evaluated only on the shortlist; "
+                "other generated candidates were scored with the cheap objective only.",
+                evidence={"shortlist_size": shortlist_size, "shortlist_ids": sorted(shortlist_ids)},
+            )
+        )
+
+    enumeration_exhaustive = (
+        mode == "exact"
+        and not cancelled
+        and generated == possible
+        and (budget <= 0 or evaluated <= budget)
+        and evaluated == possible
+    )
+    ranking_full = full_objective_on == "all_evaluated" and not cancelled and enumeration_exhaustive
+    exact_optimum = bool(enumeration_exhaustive and ranking_full and mode == "exact")
+
+    if cancelled:
+        ranking_objective = "partial"
+        issues.append(
+            _issue(
+                "search_cancelled",
+                "warning",
+                "Search stopped because cancel_requested() returned true before global completion.",
+                evidence={"generated": generated, "evaluated": evaluated, "possible": possible},
+            )
+        )
+    elif full_objective_on == "shortlist":
+        ranking_objective = "shortlist_only"
+    elif mode == "approximate" or generated < possible or evaluated < possible:
+        ranking_objective = "partial"
+    else:
+        ranking_objective = "full"
+
+    ordered = _sorted_records(scored, objective)
+    winner_rec = None
+    alternatives: List[Dict[str, Any]] = []
+    for rec in ordered:
+        numeric = bool((rec.get("admissibility") or {}).get("numeric_technical"))
+        if winner_rec is None and numeric:
+            # Grade/framing is not a numeric winner gate. A fitted model with
+            # unmet fundamentação remains an analysis, not NO_WINNER.
+            winner_rec = rec
+            continue
+        if winner_rec is None and not numeric:
+            if len(alternatives) < n_alternatives:
+                rec = dict(rec)
+                rec["discard_reason"] = rec.get("discard_reason") or "exploratory_not_admissible"
+                alternatives.append(rec)
+            continue
+        if len(alternatives) < n_alternatives:
+            rec = dict(rec)
+            if not numeric:
+                rec["discard_reason"] = rec.get("discard_reason") or "exploratory_not_admissible"
+            else:
+                rec["discard_reason"] = rec.get("discard_reason") or "dominated_by_winner"
+            alternatives.append(rec)
+
+    if winner_rec is None and ordered:
+        issues.append(
+            _issue(
+                "no_admissible_winner",
+                "warning",
+                "No candidate met numeric/technical admissibility. "
+                "Exploratory models may be listed in alternatives; none is implicitly admissible.",
+            )
+        )
+    elif winner_rec is not None:
+        adm = winner_rec.get("admissibility") or {}
+        if adm.get("numeric_technical") and not adm.get("framing"):
+            issues.append(
+                _issue(
+                    "grade_or_framing_not_met_analysis",
+                    "warning",
+                    "A numerically fitted model is returned as analysis; requested framing/grade "
+                    "was not met and this is not a qualified emission.",
+                    evidence={"reasons": list(adm.get("reasons") or []), "label": adm.get("label")},
+                )
+            )
+
+    if len(compact_history) > HISTORY_SAMPLE_LIMIT:
+        step = len(compact_history) / HISTORY_SAMPLE_LIMIT
+        sampled = [compact_history[int(i * step)] for i in range(HISTORY_SAMPLE_LIMIT)]
+        omitted = len(compact_history) - len(sampled)
+        issues.append(
+            _issue(
+                "history_sampled",
+                "info",
+                "History is sampled to bound result size; counters still reflect every candidate.",
+                evidence={"kept": len(sampled), "total": len(compact_history), "omitted": omitted},
+            )
+        )
+        history_out = sampled
+    else:
+        history_out = compact_history
+
+    last_progress = 1.0 if not cancelled else last_progress
+    consider_progress()
+    if not cancelled:
+        _emit_progress(
+            progress_callback,
+            {
+                "progress": 1.0,
+                "generated": generated,
+                "evaluated": evaluated,
+                "rejected": rejected,
+                "cancelled": False,
+                "best_candidate_id": winner_rec["candidate_id"] if winner_rec else best_so_far_id,
+            },
+        )
+
+    audit = {
+        "possible": possible,
+        "generated": generated,
+        "evaluated": evaluated,
+        "rejected": rejected,
+        "rejection_reasons": rejection_reasons,
+        "coverage": {
+            "enumeration": "exhaustive" if enumeration_exhaustive else "partial",
+            "ranking_objective": ranking_objective,
+            "exact_optimum_guaranteed": exact_optimum,
+            "pruning_proof": None,
+        },
+        "budget": {"max_evaluations": budget, "used": evaluated},
+        "objective": {
+            **objective,
+            "full_objective_evaluated_on": full_objective_on if not cancelled else "partial",
+        },
+        "mode": mode,
+        "requested_mode": requested_mode,
+        "cancelled": cancelled,
+        "progress": None if cancelled and last_progress == 0 else (1.0 if not cancelled else last_progress),
+        "cache_key_components": cache_components,
+        "cache_hit": False,
+        "best_so_far_candidate_id": winner_rec["candidate_id"] if winner_rec else best_so_far_id,
+        "max_vars": max_vars,
+        "n_units": len(units),
+        "unit_ids": [u.unit_id for u in units],
+        "history": history_out,
+        "history_complete": len(compact_history) <= HISTORY_SAMPLE_LIMIT,
+        "history_total": len(compact_history),
+        "seed": seed,
+        "code_version": CODE_VERSION,
+        "hooks": hooks.get("labeled"),
+        "selection_scope": declared_scope,
+        "selection_conditioned_on_subject": bool(selection_conditioned),
+        "dropped_transforms_due_to_subject": dropped_transforms_due_to_subject,
+    }
+    if not exact_optimum:
+        audit["coverage"]["optimum_disclaimer"] = (
+            "Partial coverage or an unproven prune is not a global optimum. "
+            "exact_optimum_guaranteed is true only for exact enumeration of the "
+            "space with the full ranking objective on every candidate."
+        )
+
+    include_legacy = retain_legacy
+    winner_out = _public_record(winner_rec, include_legacy) if winner_rec else None
+    alt_out = [_public_record(a, include_legacy) for a in alternatives]
+    result = _search_result(winner_out, alt_out, audit, issues, t0, rss0)
+    if use_cache and not cancelled:
+        _cache_put(cache_digest, result)
+    return result
+
+
+def ranking_tuple(
+    record: Mapping[str, Any],
+    objective: Optional[Mapping[str, Any]] = None,
+) -> Tuple:
+    """Documented ranking key. Higher is better.
+
+    Order:
+    1. numeric/technical admissibility
+    2. required framing
+    3. original-scale error (missing is worst when the objective requires it;
+       never compare R² across transformed vs original target scales)
+    4. optional precision amplitude, if required by policy and present
+    5. optional stability, if required and present
+    6. lower complexity (feature count)
+    Tie-break is applied separately: ``candidate_id`` lexicographic ascending.
+    Automatic sample-row removal is not a ranking criterion.
+    Grau de fundamentação is framing, not preference.
+    """
+    objective = objective or _objective_descriptor({}, {})
+    adm = record.get("admissibility") or {}
+    metrics = record.get("metrics") or {}
+    numeric = 1 if adm.get("numeric_technical") else 0
+    framing = 1 if adm.get("framing") else 0
+    required = list(objective.get("required_criteria") or ["original_rmse"])
+    metric = objective.get("metric") or "original_rmse"
+    if metric == "original_rmse":
+        rmse = metrics.get("original_rmse")
+        if "original_rmse" in required:
+            rmse_key = -float(rmse) if _finite_number(rmse) else float("-inf")
+        else:
+            rmse_key = -float(rmse) if _finite_number(rmse) else 0.0
+    else:
+        from modules.valuation_policy.selection import ranking_primary_score
+
+        rmse_key = ranking_primary_score(metrics, metric)
+        if metric in required and not _finite_number(metrics.get(metric)):
+            rmse_key = float("-inf")
+    amp_key = 0.0
+    if "precision_amplitude_pct" in required:
+        amp = metrics.get("precision_amplitude_pct")
+        amp_key = -float(amp) if _finite_number(amp) else float("-inf")
+    elif _finite_number(metrics.get("precision_amplitude_pct")):
+        amp_key = -float(metrics["precision_amplitude_pct"])
+    stab_key = 0.0
+    if "stability" in required:
+        stab = metrics.get("stability")
+        stab_key = float(stab) if _finite_number(stab) else float("-inf")
+    elif _finite_number(metrics.get("stability")):
+        stab_key = float(metrics["stability"])
+    complexity = metrics.get("complexity")
+    if complexity is None:
+        spec = record.get("candidate_spec") or {}
+        complexity = len(spec.get("features") or [])
+    complexity_key = -int(complexity)
+    extra_key = 0.0
+    if _finite_number(metrics.get("extra_objective_score")):
+        extra_key = float(metrics["extra_objective_score"])
+    return (
+        numeric,
+        framing,
+        rmse_key,
+        extra_key,
+        amp_key,
+        stab_key,
+        complexity_key,
+    )
+
+
+def classify_admissibility(
+    record: Mapping[str, Any],
+    evaluation_policy: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Separate numeric/technical admissibility, required framing, and label.
+
+    A higher fundamentação grade does not waive required diagnostics/precision.
+    Missing metrics are omitted, never fabricated. Insufficient models are
+    exploratory, never implicitly admissible.
+    """
+    reasons: List[str] = []
+    status_fit = record.get("status")
+    metrics = record.get("metrics") or {}
+    numeric = status_fit == "fitted" and _finite_number(metrics.get("original_rmse"))
+    if status_fit != "fitted":
+        reasons.append("fit_not_successful")
+        numeric = False
+    coeffs = record.get("coefficients") or {}
+    if coeffs and not all(_finite_number(v) for v in coeffs.values() if v is not None):
+        numeric = False
+        reasons.append("non_finite_coefficients")
+    if metrics.get("original_rmse") is None and status_fit == "fitted":
+        # Fitted but original-scale error could not be computed (e.g. missing inverse).
+        numeric = False
+        reasons.append("original_scale_error_unavailable")
+
+    framing_ok = numeric
+    min_grade = evaluation_policy.get("minimum_fundamentacao_grade")
+    if min_grade is None:
+        min_grade = evaluation_policy.get("min_fundamentacao_grade")
+    if min_grade is None:
+        min_grade = evaluation_policy.get("target_degree")
+    grau = metrics.get("grau_fundamentacao")
+    if min_grade is not None:
+        try:
+            if grau is None or int(grau) < int(min_grade):
+                framing_ok = False
+                reasons.append("min_fundamentacao_grade_not_met")
+        except (TypeError, ValueError):
+            framing_ok = False
+            reasons.append("min_fundamentacao_grade_not_met")
+    required_diagnostics = evaluation_policy.get("required_diagnostics") or []
+    diagnostics = record.get("diagnostics") or {}
+    for name in required_diagnostics:
+        if diagnostics.get(name) is None and metrics.get(name) is None:
+            framing_ok = False
+            reasons.append(f"missing_required_diagnostic:{name}")
+    if evaluation_policy.get("require_precision") and metrics.get("precision_amplitude_pct") is None:
+        framing_ok = False
+        reasons.append("missing_required_precision")
+    # Higher grade must not skip the checks above; they already ran.
+
+    label = "admissible" if numeric and framing_ok else "exploratory"
+    eligibility_status = "eligible" if label == "admissible" else "exploratory"
+    if status_fit == "error":
+        eligibility_status = "error"
+    elif status_fit == "rejected":
+        eligibility_status = "unsupported"
+    return {
+        "numeric_technical": bool(numeric),
+        "framing": bool(framing_ok),
+        "label": label,
+        "reasons": reasons,
+        "eligibility_status": eligibility_status,
+    }
+
+
+def _documentary_inputs(evaluation_policy: Mapping[str, Any]) -> Dict[str, Any]:
+    """Read documentary grades and provenance without truthy defaults.
+
+    ``0``, ``None`` and an invalid value have different meanings in the C05
+    classifier, so this adapter must preserve the value exactly.  Both the
+    legacy flat keys and C02's nested ``documentary.itemN`` shape are accepted.
+    """
+    policy = dict(evaluation_policy or {})
+    documentary = policy.get("documentary")
+    documentary = dict(documentary) if isinstance(documentary, Mapping) else {}
+
+    def value(item: int, kind: str) -> Any:
+        nested = documentary.get(f"item{item}")
+        nested = dict(nested) if isinstance(nested, Mapping) else {}
+        if kind == "grade":
+            for candidate in (
+                nested.get("grade"),
+                documentary.get(f"item{item}_grade"),
+                policy.get(f"grau_item{item}"),
+            ):
+                if candidate is not None:
+                    return candidate
+            return None
+        for candidate in (
+            nested.get("provenance"),
+            documentary.get(f"item{item}_provenance"),
+            policy.get(f"item{item}_provenance"),
+        ):
+            if candidate is not None:
+                return candidate
+        return None
+
+    return {
+        "grau_item1": value(1, "grade"),
+        "grau_item3": value(3, "grade"),
+        "item1_provenance": value(1, "provenance"),
+        "item3_provenance": value(3, "provenance"),
+    }
+
+
+def build_search_cache_key(
+    prepared_dataset: Mapping[str, Any],
+    subject_design: Optional[Mapping[str, Any]],
+    request_spec: Mapping[str, Any],
+) -> Tuple[str, Dict[str, Any]]:
+    """Cache identity: base, sample/policies, schema, transforms, objective, versions, subject."""
+    search_policy = dict(request_spec.get("search_policy") or {})
+    evaluation_policy = dict(request_spec.get("evaluation_policy") or {})
+    search_policy.pop("peer_hooks", None)
+    evaluation_policy.pop("extra_objective", None)
+    search_policy.pop("progress_callback", None)
+    scope = search_policy.get("model_scope") or request_spec.get("model_scope") or "population_model"
+    profile = request_spec.get("qualification_profile") or {}
+    components = {
+        "dataset_sha256": prepared_dataset.get("dataset_sha256"),
+        "sample_fingerprint": _sample_fingerprint(prepared_dataset),
+        "row_ids": list(prepared_dataset.get("row_ids") or []),
+        "feature_schema": prepared_dataset.get("feature_schema"),
+        "missing_policy": request_spec.get("missing_policy"),
+        "outlier_policy": request_spec.get("outlier_policy"),
+        "search_policy": search_policy,
+        "evaluation_policy": evaluation_policy,
+        "target_col": request_spec.get("target_col"),
+        "candidate_cols": request_spec.get("candidate_cols") if "candidate_cols" in request_spec else None,
+        "roles": request_spec.get("roles"),
+        "code_version": CODE_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "y_transformations": y_transformations_from_policy(search_policy),
+        "subject": None,
+        "model_scope": scope,
+        "qualification_profile": {
+            "id": profile.get("id") if isinstance(profile, Mapping) else None,
+            "version": profile.get("version") if isinstance(profile, Mapping) else None,
+            "value_basis": profile.get("value_basis") if isinstance(profile, Mapping) else None,
+        },
+    }
+    if scope == "subject_specific" and subject_design is not None:
+        components["subject"] = subject_design.get("raw_values") or subject_design.get("subject_raw")
+    blob = json.dumps(components, sort_keys=True, default=str)
+    digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    return digest, components
 
 
 class OptimalCombinationFinder:
-    """
-    Finds the NBR 14653-2 optimal (variable set x transformation) combination
-    for a regression model.
+    """Legacy finder. ``find_best_model`` adapts DataFrame calls onto ``search_models``."""
 
-    Search space
-    ------------
-    For each ORIGINAL independent variable ("variável-base") there is a set
-    of mutually exclusive options: {não incluir, linear, ln, sqrt, inverse,
-    sqr, inv_sqr, inv_sqrt}, restricted to the transformations that are
-    mathematically valid for that variable's domain (ln/sqrt/inv_sqrt need
-    strictly positive values; inverse/inv_sqr need non-zero values — same
-    domain checks as modules.transformations.Transformer). A candidate model
-    is one choice of exactly one option per base variable (the "não incluir"
-    option simply leaves that variable out). Because at most one option per
-    base variable can ever be chosen, two transformations of the SAME base
-    variable can never appear together — no post-hoc conflict filter needed.
-
-    This is a genuine exhaustive search over the transformation x inclusion
-    space (Cartesian product), not a correlation-based sample, for the
-    common case (see MAX_EXHAUSTIVE_CANDIDATES below).
-
-    Model-size ceiling
-    -------------------
-    Instead of an arbitrary fixed cap, the max number of variables per
-    candidate model is derived from the normative minimum-sample rule
-    (Tabela 1, item 2: n >= 3(k+1), the loosest requirement, valid even for
-    Grau I): max_vars = max(1, floor(n/3) - 1), n = rows in the ORIGINAL df.
-    This guarantees every tested candidate at least has a theoretical chance
-    at Grau I on item 2, without wasting time on models that are obviously
-    too large for the sample.
-
-    Combinatorial safety valve
-    ---------------------------
-    The exact number of exhaustive candidates (restricted to max_vars) is
-    computed with a cheap 0/1-knapsack-style DP BEFORE any model is fit
-    (see _count_exhaustive_candidates). Whether this stays small enough to
-    run fully exhaustive depends less on the raw number of candidate base
-    variables than on how many domain-valid transformation OPTIONS each one
-    contributes: a strictly-positive continuous variable can offer up to 7
-    mutually exclusive options (linear + all 6 entries of
-    NON_LINEAR_TRANSFORMATIONS), so as few as ~10 such variables can already
-    approach or exceed MAX_EXHAUSTIVE_CANDIDATES on their own (7**10 is
-    already in the tens of millions) - it is NOT generally true that
-    "typical" real-estate datasets always stay 100% exhaustive; that
-    depends on this per-variable option count, not merely on how many
-    columns are present. Only when the exact
-    count exceeds MAX_EXHAUSTIVE_CANDIDATES (200_000) does the search fall
-    back — documented, never silent — to the old top-N-by-correlation
-    heuristic (kept as _iter_candidates_fallback, not deleted), and
-    OptimalCombinationResult.exhaustive is set to False so callers can tell
-    the "guarantee of optimum" does NOT hold for that particular run.
-
-    IMPORTANT: the valve bounds the candidate COUNT, not wall-clock time.
-    When avaliando_raw is supplied (see below), every candidate requires a
-    full OLS fit plus a get_prediction() call; tens of thousands of
-    candidates can still take a long time by design — the user has
-    explicitly prioritized correctness over search cost.
-
-    Grau-aware ranking during the search
-    --------------------------------------
-    If avaliando_raw is a non-empty dict, item 4 (extrapolação) and grau de
-    precisão are computed for EVERY candidate (via
-    ModelBuilder.add_precision_and_extrapolation), not only for the final
-    winner, so grau_fundamentacao reflects items 1-6 in full during the
-    entire comparison — this is what actually guarantees the returned model
-    is optimal with respect to the real NBR 14653-2 grau, not merely to
-    r2_adjusted. Base variables that have no value in avaliando_raw are
-    excluded from the search entirely in that case (see find_best_model):
-    letting add_precision_and_extrapolation silently fail per-candidate for
-    only some candidates would make item 4 asymmetric across the ranking
-    (some candidates fairly scored, others stuck at the 0/provisional
-    default) — quietly corrupting the very ranking this rewrite exists to
-    fix. If avaliando_raw is not provided, item 4 stays 0/provisional
-    throughout the search (documented, known limitation — there is no way
-    to evaluate extrapolação per variable without avaliando data).
-    """
-
-    # Valve threshold: exact candidate count above which the search falls
-    # back to the heuristic top-N-by-correlation pruning below.
-    MAX_EXHAUSTIVE_CANDIDATES = 200_000
-
-    # Old heuristic, preserved as a named, documented fallback (NOT deleted)
-    # for the extreme case where the exhaustive space is too large.
+    MAX_EXHAUSTIVE_CANDIDATES = MAX_EXHAUSTIVE_CANDIDATES
     FALLBACK_TOP_N = 15
     FALLBACK_MAX_VARS = 5
-
-    # If more candidates than this are evaluated, history is sampled evenly
-    # rather than returning every single entry, to keep the result size
-    # manageable. The omission count is always reported (never hidden).
-    HISTORY_SAMPLE_LIMIT = 5000
-
-    NON_LINEAR_TRANSFORMATIONS = ['ln', 'sqrt', 'inverse', 'sqr', 'inv_sqr', 'inv_sqrt']
+    HISTORY_SAMPLE_LIMIT = HISTORY_SAMPLE_LIMIT
+    NON_LINEAR_TRANSFORMATIONS = [
+        "ln",
+        "sqrt",
+        "inverse",
+        "sqr",
+        "inv_sqr",
+        "inv_sqrt",
+    ]
 
     def __init__(self):
         self.model_builder = ModelBuilder()
         self.transformer = Transformer()
 
     @staticmethod
-    def _score_key(result: ModelResult) -> Tuple[int, float]:
-        """
-        Ordering key for candidate models: prefer higher grau_fundamentacao
-        (None treated as -1 for comparison purposes), with r2_adjusted as a
-        tie-breaker within the same grau.
-        """
+    def _score_key(result: ModelResult) -> Tuple:
+        """Deprecated adapter helper. Ranking is ``ranking_tuple`` in search_models."""
         grau = None
         if result.validation_result is not None:
             grau = result.validation_result.grau_fundamentacao
         grau_key = grau if grau is not None else -1
-        r2_adj = result.model_metrics.r2_adjusted if result.model_metrics else -float('inf')
+        r2_adj = result.model_metrics.r2_adjusted if result.model_metrics else -float("inf")
         return (grau_key, r2_adj)
 
     @staticmethod
     def _base_name(col: str) -> str:
-        """Extracts 'area' from 'ln(area)', or returns col unchanged if it's already a base name."""
-        if "(" in col and col.endswith(")"):
-            return col[col.index("(") + 1: -1]
-        return col
+        _, base = parse_feature_name(col)
+        return base
 
     def _build_variable_options(
-        self, df: pd.DataFrame, X_cols: List[str],
+        self,
+        df: pd.DataFrame,
+        X_cols: List[str],
         avaliando_raw: Optional[Dict[str, float]] = None,
     ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
-        """
-        For each base variable, builds the column(s) for every domain-valid
-        option: the base variable itself (linear/no transformation) plus
-        every transformation whose domain constraints are satisfied (same
-        validity checks as Transformer.apply_transformation) for the
-        TRAINING column.
-
-        When avaliando_raw is provided, a transformation is additionally
-        required to be domain-valid for that specific base variable's
-        avaliando value (e.g. ln/sqrt/inv_sqrt need a strictly positive
-        value, inverse/inv_sqr a non-zero value) before it is offered as an
-        option. A transformation can be perfectly valid across the whole
-        training column yet undefined for one specific avaliando value
-        (idade=0, distância=0, ...); without this check that candidate
-        would only fail later, inside add_precision_and_extrapolation, on a
-        per-candidate basis - making item 4 (extrapolação) asymmetric
-        across candidates and corrupting the grau-aware ranking, exactly
-        the failure mode this class exists to prevent (see class
-        docstring), just triggered by a different root cause than the
-        "missing base variable" case already filtered by the caller.
-
-        Returns the augmented DataFrame (all valid transformed columns
-        added) and a dict base_var -> [column names], one entry per valid
-        option including the base column name itself (never includes a
-        "não incluir" placeholder — that option is implicit: a base
-        variable simply isn't picked into a given candidate's subset).
-        """
         transformed_df = df.copy()
         vars_options: Dict[str, List[str]] = {}
-
         for col in X_cols:
-            options = [col]  # linear / no transformation, always domain-valid
-            dropped_for_avaliando = []
-            for trans_name in self.NON_LINEAR_TRANSFORMATIONS:
-                transformed, ok = Transformer.apply_transformation(df[col], trans_name)
-                if not ok:
-                    continue
-
-                if avaliando_raw is not None and col in avaliando_raw:
-                    _, avaliando_ok = Transformer.apply_transformation(
-                        pd.Series([avaliando_raw[col]]), trans_name
-                    )
-                    if not avaliando_ok:
-                        dropped_for_avaliando.append(trans_name)
+            subject_value = None
+            if avaliando_raw is not None and col in avaliando_raw:
+                subject_value = avaliando_raw[col]
+            options, dropped = domain_valid_include_options(
+                df[col], subject_value=subject_value
+            )
+            col_names: List[str] = []
+            for opt in options:
+                if opt == LINEAR_OPTION:
+                    col_names.append(col)
+                else:
+                    name = feature_column_name(col, opt)
+                    series, ok = Transformer.apply_transformation(df[col], opt)
+                    if not ok:
                         continue
-
-                new_col_name = f"{trans_name}({col})"
-                transformed_df[new_col_name] = transformed
-                options.append(new_col_name)
-
-            if dropped_for_avaliando:
+                    transformed_df[name] = series
+                    col_names.append(name)
+            if dropped:
                 logger.warning(
-                    f"Variável '{col}': transformação(ões) {dropped_for_avaliando} válida(s) "
+                    f"Variável '{col}': transformação(ões) {list(dropped)} válida(s) "
                     f"para a coluna de treino mas indefinida(s) para o valor do avaliando "
                     f"({avaliando_raw.get(col)!r}); excluída(s) do espaço de busca para manter "
                     f"o item 4 (extrapolação) simétrico entre candidatos."
                 )
-
-            vars_options[col] = options
-
+            vars_options[col] = col_names
         return transformed_df, vars_options
 
     @staticmethod
     def _count_exhaustive_candidates(option_counts: List[int], max_vars: int) -> int:
-        """
-        Counts EXACTLY how many candidates _iter_candidates_exhaustive will
-        yield, without generating them: for each base variable i, choosing
-        to include it multiplies the branch count by option_counts[i]
-        (its number of domain-valid options); choosing to exclude it
-        contributes a factor of 1. This is a standard 0/1-knapsack DP where
-        "weight" = 1 included variable and "value multiplicity" = option
-        count; dp[j] after processing all variables = number of ways to end
-        up with exactly j included variables.
-
-        Total = sum_{j=1}^{max_vars} dp[j]  (excludes j=0, the "no variable
-        included at all" case, which is not a valid model).
-        """
-        dp = [1] + [0] * max_vars
-        for c in option_counts:
-            # Iterate j from high to low so each variable is only ever
-            # "included" at most once per candidate (classic 0/1 knapsack
-            # in-place update).
-            for j in range(max_vars, 0, -1):
-                dp[j] += dp[j - 1] * c
-        return sum(dp[1:max_vars + 1])
+        return count_exhaustive_candidates(option_counts, max_vars)
 
     def _iter_candidates_exhaustive(self, vars_options: Dict[str, List[str]], max_vars: int):
-        """
-        True exhaustive enumeration: every subset of base variables of size
-        1..max_vars, combined with every choice of one domain-valid option
-        per variable in that subset. Yields lists of column names.
-        """
-        base_vars = list(vars_options.keys())
-        for k in range(1, max_vars + 1):
-            for subset in itertools.combinations(base_vars, k):
-                option_lists = [vars_options[v] for v in subset]
-                for choice in itertools.product(*option_lists):
-                    yield list(choice)
+        units = []
+        option_map = {}
+        for base, cols in vars_options.items():
+            transforms = []
+            for col in cols:
+                trans, _ = parse_feature_name(col)
+                transforms.append(trans)
+            unit = SearchUnit(
+                unit_id=base,
+                kind="quantitative",
+                base_variable=base,
+                columns=(base,),
+                options=tuple(transforms),
+            )
+            units.append(unit)
+            option_map[base] = {parse_feature_name(c)[0]: c for c in cols}
+        for spec in iter_search_candidates(units, max_vars, "exact", budget=10**18, seed=0):
+            names = []
+            for base, trans in spec["x_transformations"].items():
+                names.append(option_map[base].get(trans, feature_column_name(base, trans)))
+            yield names
 
     def _iter_candidates_fallback(
-        self, transformed_df: pd.DataFrame, y: pd.Series,
-        vars_options: Dict[str, List[str]], max_vars: int,
+        self,
+        transformed_df: pd.DataFrame,
+        y: pd.Series,
+        vars_options: Dict[str, List[str]],
+        max_vars: int,
     ):
-        """
-        OLD heuristic (kept intentionally, not deleted): documented fallback
-        used ONLY when the exhaustive space exceeds MAX_EXHAUSTIVE_CANDIDATES.
-        Ranks all candidate columns by |correlation| with the target, keeps
-        the top FALLBACK_TOP_N, and tests combinations up to
-        FALLBACK_MAX_VARS variables, skipping any combo that would mix two
-        transformations of the same base variable.
-        """
-        flat_cols = [c for opts in vars_options.values() for c in opts]
+        """Legacy correlation prune. Not used by search_models (replaced by diverse approximate)."""
+        import itertools as _it
 
+        flat_cols = [c for opts in vars_options.values() for c in opts]
         correlations = []
         for col in flat_cols:
             try:
@@ -253,12 +869,10 @@ class OptimalCombinationFinder:
             except Exception:
                 pass
         correlations.sort(key=lambda x: x[1], reverse=True)
-        top_vars = [x[0] for x in correlations[:self.FALLBACK_TOP_N]]
-
+        top_vars = [x[0] for x in correlations[: self.FALLBACK_TOP_N]]
         max_vars_in_model = min(len(top_vars), self.FALLBACK_MAX_VARS, max_vars)
-
         for k in range(1, max_vars_in_model + 1):
-            for combo in itertools.combinations(top_vars, k):
+            for combo in _it.combinations(top_vars, k):
                 base_names = set()
                 conflict = False
                 for var in combo:
@@ -277,269 +891,1078 @@ class OptimalCombinationFinder:
         target_col: str,
         degree: int = 1,
         avaliando_raw: Optional[Dict[str, float]] = None,
-        grau_item1: int = 1,
-        grau_item3: int = 1,
+        grau_item1: Optional[int] = None,
+        grau_item3: Optional[int] = None,
+        item1_provenance: Any = None,
+        item3_provenance: Any = None,
         candidate_cols: Optional[List[str]] = None,
     ) -> OptimalCombinationResult:
-        """
-        Finds the best model by exhaustively testing combinations of
-        variables and transformations (see class docstring for the full
-        algorithm and the combinatorial safety valve).
-
-        Candidates are scored primarily by the official NBR 14653-2 grau de
-        fundamentação achieved (None counts as the worst possible grau), with
-        r2_adjusted as a tie-breaker within the same grau. The search
-        prefers a combination that reaches at least `degree`; if none does,
-        the best combination found overall is returned with
-        target_achieved=False.
-
-        If avaliando_raw is provided (non-empty dict), grau de precisão and
-        item 4 (extrapolação) are computed for EVERY candidate during the
-        search itself, so the ranking is grau-aware throughout — not just
-        at the end. Base variables absent from avaliando_raw are excluded
-        from the search in that case (see class docstring). If avaliando_raw
-        is not provided, item 4 stays 0/provisional for every candidate
-        (documented known limitation).
-
-        candidate_cols: optional explicit list of base variable column
-        names (already cleaned via clean_column_name, matching df.columns)
-        to restrict the search to. This is how the user's free choice of
-        which market variables to bring in is honored - the search never
-        pre-fixes candidates itself. Names not present in df (or equal to
-        target_col) are ignored with a logged warning, never an error. None
-        or an empty list keeps the previous behavior: every column except
-        target_col is a candidate.
-        """
+        """Adapter: map the legacy DataFrame call onto ``search_models`` and back."""
         try:
-            X_cols_all = [c for c in df.columns if c != target_col]
-            y = df[target_col]
-            n = len(df)
-
-            if candidate_cols:
-                requested = set(candidate_cols)
-                missing_requested = [c for c in candidate_cols if c not in X_cols_all]
-                if missing_requested:
-                    logger.warning(
-                        f"candidate_cols solicita coluna(s) inexistente(s) no DataFrame (ou "
-                        f"igual ao alvo): {missing_requested}; serão ignoradas."
-                    )
-                X_cols_all = [c for c in X_cols_all if c in requested]
-
-            if not X_cols_all:
-                return OptimalCombinationResult(
-                    success=False,
-                    message="Nenhuma variável independente disponível no DataFrame.",
-                    error="no_independent_variables",
-                )
-
-            effective_avaliando: Optional[Dict[str, float]] = None
-            X_cols = X_cols_all
-            avaliando_exclusion_disclosure = ""
-            if avaliando_raw:
-                missing_bases = [c for c in X_cols_all if c not in avaliando_raw]
-                if missing_bases:
-                    logger.warning(
-                        f"avaliando_raw não contém valor para a(s) variável(is) base "
-                        f"{missing_bases}; elas serão excluídas da busca. Deixá-las entrar "
-                        f"faria add_precision_and_extrapolation falhar (silenciosamente, por "
-                        f"candidato) só para modelos que as usassem, tornando o item 4 "
-                        f"assimétrico entre candidatos e corrompendo o ranking por grau de "
-                        f"fundamentação."
-                    )
-                    # User-facing version of the log line above: surfaced
-                    # through OptimalCombinationResult.message so it reaches
-                    # search_message in the worker response and the PDF
-                    # report (see worker.py / results_generator.py), instead
-                    # of being visible only in server logs. This is the
-                    # ONLY signal the user gets that a candidate variable
-                    # they selected (e.g. a categorical like "bairro",
-                    # expanded here into "bairro_Centro", "bairro_Sul", ...)
-                    # was silently dropped from the search because no
-                    # avaliando value exists for it.
-                    avaliando_exclusion_disclosure = (
-                        f"Variável(is) candidata(s) excluída(s) da busca por falta de valor "
-                        f"do imóvel avaliando: {missing_bases}. Nenhum valor foi informado "
-                        f"para essa(s) coluna(s) no imóvel avaliando, portanto nenhum modelo "
-                        f"testado durante a busca as utiliza (necessário para manter o item 4 "
-                        f"- extrapolação - e o grau de precisão simétricos entre todos os "
-                        f"candidatos comparados)."
-                    )
-                X_cols = [c for c in X_cols_all if c not in missing_bases]
-                effective_avaliando = avaliando_raw
-
-            if not X_cols:
-                return OptimalCombinationResult(
-                    success=False,
-                    message=(
-                        "Nenhuma variável base possui valor de avaliando informado em "
-                        "avaliando_raw; busca impossível nessas condições."
-                    ),
-                    error="no_usable_variables",
-                )
-
-            transformed_df, vars_options = self._build_variable_options(
-                df, X_cols, avaliando_raw=effective_avaliando
+            prepared, request_spec, subject = self._legacy_to_mp1(
+                df,
+                target_col,
+                degree=degree,
+                avaliando_raw=avaliando_raw,
+                grau_item1=grau_item1,
+                grau_item3=grau_item3,
+                item1_provenance=item1_provenance,
+                item3_provenance=item3_provenance,
+                candidate_cols=candidate_cols,
             )
-
-            # Tabela 1, item 2 (n >= 3(k+1), o piso normativo mais permissivo,
-            # válido até para Grau I): teto de variáveis por modelo derivado
-            # do próprio critério normativo, não mais um número arbitrário.
-            max_vars = max(1, n // 3 - 1)
-            max_vars = min(max_vars, len(vars_options))
-
-            option_counts = [len(opts) for opts in vars_options.values()]
-            exhaustive_total = self._count_exhaustive_candidates(option_counts, max_vars)
-
-            exhaustive = True
-            fallback_disclosure = ""
-            if exhaustive_total > self.MAX_EXHAUSTIVE_CANDIDATES:
-                exhaustive = False
-                fallback_max_vars = min(self.FALLBACK_MAX_VARS, max_vars)
-                fallback_disclosure = (
-                    f"Busca exaustiva exigiria {exhaustive_total} combinações "
-                    f"(variável-base x transformação, até {max_vars} variáveis por modelo), "
-                    f"acima do limite de segurança combinatória de "
-                    f"{self.MAX_EXHAUSTIVE_CANDIDATES}. Aplicando fallback documentado de poda "
-                    f"por correlação: top-{self.FALLBACK_TOP_N} colunas por |correlação| com o "
-                    f"target, até {fallback_max_vars} variáveis por modelo. A garantia de ótimo "
-                    f"global sobre TODO o espaço de busca NÃO se aplica a este resultado "
-                    f"(OptimalCombinationResult.exhaustive=False)."
-                )
-                logger.warning(fallback_disclosure)
-                candidate_iter = self._iter_candidates_fallback(transformed_df, y, vars_options, max_vars)
-            else:
-                candidate_iter = self._iter_candidates_exhaustive(vars_options, max_vars)
-
-            best_global_result: Optional[ModelResult] = None
-            best_global_key = (-2, -float('inf'))
-
-            best_target_result: Optional[ModelResult] = None
-            best_target_key = (-2, -float('inf'))
-
-            combinations_tested = 0
-            full_history: List[Dict] = []
-
-            for cols in candidate_iter:
-                combinations_tested += 1
-
-                X_subset = transformed_df[cols]
-
-                result = self.model_builder.build_model(
-                    X_subset, y, degree, remove_outliers=True,
-                    grau_item1=grau_item1, grau_item3=grau_item3
-                )
-
-                # Grau-aware ranking: compute item 4 / grau de precisão for
-                # THIS candidate now, before it's compared to any other, so
-                # grau_fundamentacao used in _score_key reflects items 1-6
-                # in full — not a placeholder — for every candidate alike.
-                if result.success and result.model_metrics and effective_avaliando:
-                    result = self.model_builder.add_precision_and_extrapolation(
-                        result, effective_avaliando, df, degree=degree
-                    )
-
-                if result.success and result.model_metrics:
-                    key = self._score_key(result)
-                    grau_fundamentacao = (
-                        result.validation_result.grau_fundamentacao
-                        if result.validation_result else None
-                    )
-
-                    if key > best_global_key:
-                        best_global_key = key
-                        best_global_result = result
-
-                    if grau_fundamentacao is not None and grau_fundamentacao >= degree:
-                        if key > best_target_key:
-                            best_target_key = key
-                            best_target_result = result
-
-                    full_history.append({
-                        "variables": cols,
-                        "r2_adj": result.model_metrics.r2_adjusted,
-                        "grau_fundamentacao": grau_fundamentacao,
-                        "valid": result.validation_result.is_valid if result.validation_result else False,
-                    })
-
-            if exhaustive and combinations_tested != exhaustive_total:
-                # Should never happen; if it does, the DP count and the
-                # generator have drifted out of sync and need reconciling.
-                logger.warning(
-                    f"Divergência entre a contagem prevista de candidatos exaustivos "
-                    f"({exhaustive_total}) e o número efetivamente gerado "
-                    f"({combinations_tested}). Verifique _count_exhaustive_candidates vs. "
-                    f"_iter_candidates_exhaustive."
-                )
-
-            if best_target_result is not None:
-                best_model = best_target_result
-                target_achieved = True
-                best_grau_reached = best_model.validation_result.grau_fundamentacao
-            elif best_global_result is not None:
-                best_model = best_global_result
-                target_achieved = False
-                best_grau_reached = (
-                    best_global_result.validation_result.grau_fundamentacao
-                    if best_global_result.validation_result else None
-                )
-            else:
-                best_model = None
-                target_achieved = False
-                best_grau_reached = None
-
-            # Final safety-net recompute from the winner's actual
-            # grau_fundamentacao. When effective_avaliando was set, this is a
-            # no-op (already finalized per-candidate above). When
-            # avaliando_raw was not provided at all, item 4 stayed
-            # 0/provisional for every candidate — documented known
-            # limitation — and this simply reflects that provisional state,
-            # matching prior behavior.
-            if best_model is not None and best_model.validation_result is not None:
-                best_grau_reached = best_model.validation_result.grau_fundamentacao
-                target_achieved = (
-                    best_grau_reached is not None and best_grau_reached >= degree
-                )
-
-            message_parts = []
-            if avaliando_exclusion_disclosure:
-                message_parts.append(avaliando_exclusion_disclosure)
-            if fallback_disclosure:
-                # Surface the exhaustive->fallback disclosure through the
-                # result's `message` field too, not just the log, so it
-                # actually reaches the end user via the websocket payload
-                # and the PDF report (see worker.py / results_generator.py)
-                # instead of being visible only in server logs.
-                message_parts.append(fallback_disclosure)
-
-            if len(full_history) > self.HISTORY_SAMPLE_LIMIT:
-                step = len(full_history) / self.HISTORY_SAMPLE_LIMIT
-                sampled_indices = [int(i * step) for i in range(self.HISTORY_SAMPLE_LIMIT)]
-                history = [full_history[i] for i in sampled_indices]
-                omitted = len(full_history) - len(history)
-                sample_note = (
-                    f"Histórico amostrado: mantidas {len(history)} de {len(full_history)} "
-                    f"combinações testadas ({omitted} omitidas) para limitar o tamanho do "
-                    f"resultado. combinations_tested reflete o total real, não apenas o "
-                    f"histórico amostrado."
-                )
-                logger.info(sample_note)
-                message_parts.append(sample_note)
-            else:
-                history = full_history
-
-            message = " ".join(message_parts)
-
-            return OptimalCombinationResult(
-                success=True,
-                message=message,
-                best_model=best_model,
-                combinations_tested=combinations_tested,
-                history=history,
-                target_achieved=target_achieved,
-                best_grau_reached=best_grau_reached,
-                exhaustive=exhaustive,
+            result = search_models(prepared, subject, request_spec)
+            legacy = self._to_legacy_result(
+                result, degree=degree, evaluation_policy=request_spec["evaluation_policy"]
             )
-
+            if avaliando_raw and legacy.best_model is not None:
+                builder = ModelBuilder()
+                original_df = prepared.get("base_frame")
+                if original_df is None:
+                    original_df = df.drop(columns=[target_col])
+                legacy.best_model = builder.add_precision_and_extrapolation(
+                    legacy.best_model, dict(avaliando_raw), original_df, degree=degree
+                )
+                vr = legacy.best_model.validation_result
+                if vr is not None:
+                    legacy.best_grau_reached = vr.grau_fundamentacao
+                    legacy.target_achieved = (
+                        vr.grau_fundamentacao is not None
+                        and vr.grau_fundamentacao >= degree
+                    )
+            return legacy
         except Exception as e:
             logger.error(f"Error finding optimal combination: {str(e)}")
-            return OptimalCombinationResult(success=False, message=f"Error: {str(e)}", error=str(e))
+            return OptimalCombinationResult(
+                success=False, message=f"Error: {str(e)}", error=str(e)
+            )
+
+    def _legacy_to_mp1(
+        self,
+        df: pd.DataFrame,
+        target_col: str,
+        degree: int,
+        avaliando_raw: Optional[Dict[str, float]],
+        grau_item1: Optional[int],
+        grau_item3: Optional[int],
+        item1_provenance: Any,
+        item3_provenance: Any,
+        candidate_cols: Optional[List[str]],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]:
+        if target_col not in df.columns:
+            raise ValueError(f"target_col {target_col!r} not in DataFrame")
+        X = df.drop(columns=[target_col])
+        y = df[target_col]
+        columns = {}
+        for c in X.columns:
+            columns[c] = {
+                "original_name": c,
+                "role": "predictor",
+                "kind": "quantitative",
+                "unit": None,
+                "group_id": None,
+                "categories": None,
+                "reference_category": None,
+            }
+        prepared = {
+            "schema_version": SCHEMA_VERSION,
+            "X": X,
+            "y": y,
+            "row_ids": [str(i) for i in df.index],
+            "feature_schema": {
+                "version": 1,
+                "columns": columns,
+                "groups": {},
+                "target": {"column": target_col, "unit": None},
+            },
+            "encoder_state": {},
+            "sample_ledger": {},
+            "issues": [],
+            "dataset_sha256": None,
+            "base_frame": X.copy(),
+            "_legacy_df": df,
+        }
+        request_spec: Dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
+            "target_col": target_col,
+            "roles": {c: "predictor" for c in X.columns},
+            "units": {},
+            "search_policy": {
+                "mode": "auto",
+                "budget": DEFAULT_EVALUATION_BUDGET,
+                "exact_count_threshold": self.MAX_EXHAUSTIVE_CANDIDATES,
+                "objective": "original_scale_error",
+                "seed": 0,
+                "retain_legacy_model": True,
+                "max_alternatives": DEFAULT_ALTERNATIVES,
+                "n_jobs": 1,
+            },
+            "evaluation_policy": {
+                "sample_size_rule": None,
+                "min_fundamentacao_grade": None,
+                "remove_outliers": False,
+                "outlier_action": "report_only",
+                "grau_item1": grau_item1,
+                "grau_item3": grau_item3,
+                "item1_provenance": item1_provenance,
+                "item3_provenance": item3_provenance,
+                "seed": 0,
+            },
+            "missing_policy": {"target": "never_impute", "predictors": "complete_case"},
+            "outlier_policy": {"action": "report_only"},
+        }
+        if candidate_cols is None:
+            request_spec["candidate_cols"] = None
+        else:
+            request_spec["candidate_cols"] = list(candidate_cols)
+        subject = None
+        if avaliando_raw:
+            subject = {
+                "X": None,
+                "raw_values": dict(avaliando_raw),
+                "issues": [],
+                "supported": True,
+            }
+        return prepared, request_spec, subject
+
+    def _to_legacy_result(
+        self,
+        search: Mapping[str, Any],
+        degree: int = 1,
+        evaluation_policy: Optional[Mapping[str, Any]] = None,
+    ) -> OptimalCombinationResult:
+        issues = list(search.get("issues") or [])
+        error_issues = [i for i in issues if i.get("severity") == "error"]
+        audit = search.get("search_audit") or {}
+        winner = search.get("winner")
+        if error_issues and winner is None:
+            code = error_issues[0].get("code") or "search_error"
+            return OptimalCombinationResult(
+                success=False,
+                message=error_issues[0].get("message") or "",
+                error=code,
+                combinations_tested=int(audit.get("evaluated") or 0),
+                exhaustive=False,
+            )
+        best_model = None
+        if winner is not None:
+            best_model = winner.get("_legacy_model_result")
+        if best_model is None:
+            for alt in search.get("alternatives") or []:
+                if alt.get("_legacy_model_result") is not None:
+                    best_model = alt["_legacy_model_result"]
+                    break
+        if best_model is None and winner is not None:
+            coeffs = winner.get("coefficients") or {}
+            if coeffs:
+                best_model = ModelResult(
+                    success=True,
+                    message="adapted from MP/1 CandidateFit",
+                    coefficients={
+                        str(key): float(value)
+                        for key, value in coeffs.items()
+                        if value is not None and _finite_number(value)
+                    },
+                    model_object=winner.get("model_object"),
+                    pvalues={},
+                )
+                fit_obj = winner.get("candidate_fit") or winner
+                records = winner.get("coefficient_records")
+                if not records and fit_obj is not None:
+                    records = getattr(fit_obj, "coefficient_records", None)
+                    if records is None and isinstance(fit_obj, Mapping):
+                        records = fit_obj.get("coefficient_records")
+                if records:
+                    best_model.pvalues = {
+                        str(rec.get("name")): rec.get("pvalue")
+                        for rec in records
+                        if isinstance(rec, Mapping) and rec.get("name") is not None
+                    }
+                setattr(best_model, "_c04_candidate_fit", fit_obj)
+                setattr(best_model, "_c04_used_row_ids", list(winner.get("used_row_ids") or []))
+                X_design = winner.get("X_design")
+                y_design = winner.get("y_design")
+                if X_design is None and fit_obj is not None:
+                    X_design = getattr(fit_obj, "X_design", None)
+                    if X_design is None and isinstance(fit_obj, Mapping):
+                        X_design = fit_obj.get("X_design")
+                if y_design is None and fit_obj is not None:
+                    y_design = getattr(fit_obj, "y_design", None)
+                    if y_design is None and isinstance(fit_obj, Mapping):
+                        y_design = fit_obj.get("y_design")
+                if best_model.model_metrics is None and best_model.model_object is not None and X_design is not None:
+                    try:
+                        best_model.model_metrics = ModelBuilder()._calculate_metrics(
+                            best_model.model_object, X_design, y_design
+                        )
+                    except Exception:
+                        pass
+                if X_design is not None and y_design is not None and best_model.model_object is not None:
+                    from modules.nbr14653_validation import NBRValidator
+
+                    doc = _documentary_inputs(evaluation_policy or {})
+                    best_model.validation_result = NBRValidator.validate_model(
+                        best_model,
+                        X_design,
+                        y_design,
+                        degree,
+                        grau_item1=doc["grau_item1"],
+                        grau_item3=doc["grau_item3"],
+                        item1_provenance=doc["item1_provenance"],
+                        item3_provenance=doc["item3_provenance"],
+                    )
+        # Item 4/precision for the legacy DataFrame API is completed in
+        # find_best_model via add_precision_and_extrapolation when avaliando exists.
+        grau = None
+        if best_model is not None and best_model.validation_result is not None:
+            grau = best_model.validation_result.grau_fundamentacao
+        target_achieved = grau is not None and grau >= degree
+        message_parts = [i.get("message") for i in issues if i.get("message")]
+        if audit.get("coverage", {}).get("enumeration") != "exhaustive":
+            possible = audit.get("possible")
+            budget = (audit.get("budget") or {}).get("max_evaluations")
+            message_parts.append(
+                f"Busca exaustiva exigiria {possible} combinações, acima do "
+                f"limite de segurança combinatória / orçamento de {budget}. "
+                f"Aplicando busca aproximada (diversidade de variáveis-base/grupos) "
+                f"como fallback documentado. A garantia de ótimo global sobre TODO "
+                f"o espaço de busca NÃO se aplica a este resultado "
+                f"(OptimalCombinationResult.exhaustive=False)."
+            )
+        history = []
+        for entry in audit.get("history") or []:
+            history.append(
+                {
+                    "variables": list(entry.get("variables") or []),
+                    "r2_adj": entry.get("r2_adj"),
+                    "grau_fundamentacao": entry.get("grau_fundamentacao"),
+                    "valid": entry.get("valid", False),
+                }
+            )
+        profile = (search.get("search_audit") or {}).get("profile") or {}
+        result = OptimalCombinationResult(
+            success=best_model is not None,
+            message=" ".join(p for p in message_parts if p)
+            or (
+                "No admissible candidate produced a fitted model."
+                if best_model is None
+                else ""
+            ),
+            best_model=best_model,
+            combinations_tested=int(audit.get("evaluated") or 0),
+            time_elapsed=float(profile.get("elapsed_s") or 0.0),
+            history=history,
+            target_achieved=target_achieved,
+            best_grau_reached=grau,
+            exhaustive=bool(audit.get("coverage", {}).get("exact_optimum_guaranteed")),
+        )
+        result.search_audit = dict(audit)
+        return result
+
+
+def _configure_local_threads(n_jobs: Any) -> int:
+    try:
+        n = max(1, int(n_jobs or 1))
+    except (TypeError, ValueError):
+        n = 1
+    n = min(n, 1)  # local single-user default: never oversubscribe BLAS + workers
+    for var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+    ):
+        os.environ.setdefault(var, str(n))
+    return n
+
+
+def _rss_bytes() -> Optional[int]:
+    try:
+        with open("/proc/self/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except Exception:
+        pass
+    try:
+        import resource
+
+        rss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        return rss * 1024
+    except Exception:
+        return None
+
+
+def _emit_progress(cb: Optional[ProgressCallback], payload: Mapping[str, Any]) -> None:
+    if cb is None:
+        return
+    try:
+        cb(payload)
+    except Exception:
+        logger.warning("progress_callback raised; search continues", exc_info=True)
+
+
+def _cancelled(fn: Optional[CancelRequested]) -> bool:
+    if fn is None:
+        return False
+    try:
+        return bool(fn())
+    except Exception:
+        logger.warning("cancel_requested raised; treating as not cancelled", exc_info=True)
+        return False
+
+
+def _issue(
+    code: str,
+    severity: str,
+    message: str,
+    affected_ids: Optional[List[str]] = None,
+    evidence: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return {
+        "code": code,
+        "severity": severity,
+        "origin": "C05",
+        "message": message,
+        "affected_ids": list(affected_ids or []),
+        "evidence": dict(evidence or {}),
+    }
+
+
+def _empty_audit(objective: Mapping[str, Any], cache_components: Mapping[str, Any], cancelled: bool) -> Dict[str, Any]:
+    return {
+        "possible": 0,
+        "generated": 0,
+        "evaluated": 0,
+        "rejected": 0,
+        "rejection_reasons": {},
+        "coverage": {
+            "enumeration": "partial",
+            "ranking_objective": "partial",
+            "exact_optimum_guaranteed": False,
+            "pruning_proof": None,
+        },
+        "budget": {"max_evaluations": 0, "used": 0},
+        "objective": dict(objective),
+        "mode": "exact",
+        "cancelled": cancelled,
+        "progress": None,
+        "cache_key_components": dict(cache_components),
+        "cache_hit": False,
+        "history": [],
+        "history_complete": True,
+        "history_total": 0,
+        "code_version": CODE_VERSION,
+    }
+
+
+def _search_result(
+    winner,
+    alternatives,
+    audit: Dict[str, Any],
+    issues: List[Dict[str, Any]],
+    t0: float,
+    rss0: Optional[int],
+) -> Dict[str, Any]:
+    rss1 = _rss_bytes()
+    audit = dict(audit)
+    audit["profile"] = {
+        "elapsed_s": time.perf_counter() - t0,
+        "rss_bytes_before": rss0,
+        "rss_bytes_after": rss1,
+        "host": "this_process_only",
+        "disclaimer": "Measurements for this local run only; not a speed claim for other machines.",
+    }
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "winner": winner,
+        "alternatives": list(alternatives or []),
+        "search_audit": audit,
+        "issues": list(issues or []),
+    }
+
+
+def _deepcopy_search_result(result: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "schema_version": result.get("schema_version"),
+        "winner": dict(result["winner"]) if result.get("winner") else None,
+        "alternatives": [dict(a) for a in result.get("alternatives") or []],
+        "search_audit": dict(result.get("search_audit") or {}),
+        "issues": list(result.get("issues") or []),
+    }
+
+
+def _cache_put(digest: str, result: Dict[str, Any]) -> None:
+    _SEARCH_CACHE[digest] = _deepcopy_search_result(result)
+    _SEARCH_CACHE.move_to_end(digest)
+    while len(_SEARCH_CACHE) > _SEARCH_CACHE_LIMIT:
+        _SEARCH_CACHE.popitem(last=False)
+
+
+def _sample_fingerprint(prepared_dataset: Mapping[str, Any]) -> Dict[str, Any]:
+    """Cheap identity of the numeric sample so cache hits cannot mix different y/X."""
+    y = prepared_dataset.get("y")
+    X = prepared_dataset.get("X")
+    if X is None:
+        X = prepared_dataset.get("base_frame")
+    parts: Dict[str, Any] = {}
+    try:
+        if y is not None:
+            arr = np.asarray(y, dtype=float).reshape(-1)
+            parts["y"] = {
+                "n": int(arr.size),
+                "sum": float(np.nansum(arr)) if arr.size else 0.0,
+                "mean": float(np.nanmean(arr)) if arr.size else 0.0,
+                "std": float(np.nanstd(arr)) if arr.size else 0.0,
+                "head": float(arr[0]) if arr.size else None,
+                "tail": float(arr[-1]) if arr.size else None,
+            }
+        if X is not None and hasattr(X, "columns"):
+            col_fp = {}
+            for c in list(X.columns)[:32]:
+                arr = np.asarray(X[c], dtype=float).reshape(-1)
+                col_fp[str(c)] = {
+                    "n": int(arr.size),
+                    "sum": float(np.nansum(arr)) if arr.size else 0.0,
+                    "std": float(np.nanstd(arr)) if arr.size else 0.0,
+                }
+            parts["X"] = col_fp
+    except Exception:
+        parts["fallback"] = str(type(y)) + str(type(X))
+    return parts
+
+
+def _available_predictor_names(
+    prepared_dataset: Mapping[str, Any], request_spec: Mapping[str, Any]
+) -> List[str]:
+    schema = prepared_dataset.get("feature_schema") or {}
+    columns = schema.get("columns") or {}
+    if columns:
+        names = list(columns.keys())
+        groups = schema.get("groups") or {}
+        for g in groups.values():
+            base = g.get("base_variable")
+            if base and base not in names:
+                names.append(base)
+        return names
+    frame = prepared_dataset.get("base_frame")
+    if frame is None:
+        frame = prepared_dataset.get("X")
+    if frame is not None:
+        target = request_spec.get("target_col")
+        return [c for c in list(frame.columns) if c != target]
+    return []
+
+
+def _n_rows(prepared_dataset: Mapping[str, Any]) -> int:
+    y = prepared_dataset.get("y")
+    if y is not None:
+        try:
+            return int(len(y))
+        except TypeError:
+            pass
+    row_ids = prepared_dataset.get("row_ids")
+    if row_ids is not None:
+        return int(len(row_ids))
+    X = prepared_dataset.get("X")
+    if X is not None:
+        return int(len(X))
+    return 0
+
+
+def _frame_for_columns(prepared_dataset: Mapping[str, Any]):
+    base = prepared_dataset.get("base_frame")
+    X = prepared_dataset.get("X")
+    if base is not None and X is not None:
+        # Prefer base variables; overlay numeric X columns (dummies).
+        frame = base.copy()
+        for c in X.columns:
+            if c not in frame.columns:
+                frame[c] = X[c]
+        return frame
+    if base is not None:
+        return base
+    return X
+
+
+def _resolve_mode(
+    requested_mode: str, possible: int, budget: int, threshold: int
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    if requested_mode == "exact":
+        if possible <= budget:
+            return "exact", None
+        return (
+            "approximate",
+            _issue(
+                "exact_budget_insufficient",
+                "warning",
+                "mode=exact was requested but the possible candidate count exceeds the "
+                "evaluation budget. Running approximate search; this is not a proven optimum.",
+                evidence={"possible": possible, "budget": budget},
+            ),
+        )
+    if requested_mode == "approximate":
+        return "approximate", None
+    if possible <= min(budget, threshold):
+        return "exact", None
+    return (
+        "approximate",
+        _issue(
+            "approximate_due_to_budget",
+            "warning",
+            "Possible candidate count exceeds the exact-mode budget/threshold. "
+            "Approximate diverse search is used; exact_optimum_guaranteed remains false.",
+            evidence={"possible": possible, "budget": budget, "threshold": threshold},
+        ),
+    )
+
+
+def _objective_descriptor(
+    search_policy: Mapping[str, Any], evaluation_policy: Mapping[str, Any]
+) -> Dict[str, Any]:
+    from modules.valuation_policy.selection import objective_descriptor
+
+    return objective_descriptor(search_policy, evaluation_policy)
+
+
+def _resolve_hooks(request_spec: Mapping[str, Any]) -> Dict[str, Any]:
+    policy = request_spec.get("search_policy") or {}
+    hooks = policy.get("peer_hooks")
+    if isinstance(hooks, dict) and hooks.get("labeled") == "CONTRACT_FIXTURE":
+        return hooks
+    fit = None
+    evaluate = None
+    inverse = None
+    try:
+        from . import model_builder as mb
+
+        fit = getattr(mb, "fit_candidate", None)
+        evaluate = getattr(mb, "evaluate_fitted", None)
+    except Exception:
+        fit = None
+        evaluate = None
+    try:
+        from . import target_transform as tt
+
+        inverse = getattr(tt, "inverse_target_prediction", None)
+    except Exception:
+        inverse = None
+    if callable(fit) and callable(evaluate):
+        return {
+            "fit_candidate": fit,
+            "evaluate_fitted": evaluate,
+            "inverse_target": inverse,
+            "labeled": "C04",
+        }
+    return {
+        "fit_candidate": None,
+        "evaluate_fitted": None,
+        "inverse_target": inverse,
+        "labeled": "legacy_model_builder",
+    }
+
+
+def _finite_number(value: Any) -> bool:
+    try:
+        return value is not None and bool(np.isfinite(float(value)))
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_better(key_a: Tuple, key_b: Tuple) -> bool:
+    return key_a > key_b
+
+
+def _sorted_records(records: Sequence[Mapping[str, Any]], objective: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    recs = [dict(r) for r in records]
+    recs.sort(key=lambda r: str(r.get("candidate_id") or ""))
+    recs.sort(key=lambda r: r.get("_rank_tuple") or ranking_tuple(r, objective), reverse=True)
+    return recs
+
+
+def _trim_retained_models(scored: List[Dict[str, Any]], retain_limit: int) -> None:
+    if len(scored) <= retain_limit:
+        return
+    ranked = _sorted_records(scored, _objective_descriptor({}, {}))
+    keep_ids = {r["candidate_id"] for r in ranked[:retain_limit]}
+    for rec in scored:
+        if rec["candidate_id"] in keep_ids:
+            continue
+        rec["_legacy_model_result"] = None
+        rec["model_object"] = None
+
+
+def _compact_history_entry(record: Mapping[str, Any]) -> Dict[str, Any]:
+    spec = record.get("candidate_spec") or {}
+    metrics = record.get("metrics") or {}
+    return {
+        "candidate_id": record.get("candidate_id"),
+        "variables": list(spec.get("features") or []),
+        "r2_adj": metrics.get("r2_adjusted"),
+        "original_rmse": metrics.get("original_rmse"),
+        "grau_fundamentacao": metrics.get("grau_fundamentacao"),
+        "valid": bool((record.get("admissibility") or {}).get("label") == "admissible"),
+        "label": (record.get("admissibility") or {}).get("label"),
+        "discard_reason": record.get("discard_reason"),
+        "status": record.get("status"),
+    }
+
+
+def _public_record(record: Optional[Mapping[str, Any]], include_legacy: bool) -> Optional[Dict[str, Any]]:
+    if record is None:
+        return None
+    adm = record.get("admissibility") or {}
+    out = {
+        "candidate_id": record.get("candidate_id"),
+        "candidate_spec": record.get("candidate_spec"),
+        "status": record.get("status"),
+        "model_eligibility": {
+            "status": adm.get("eligibility_status") or "exploratory",
+            "reasons": list(adm.get("reasons") or []),
+        },
+        "value": record.get("value"),
+        "admissibility": {
+            "numeric_technical": bool(adm.get("numeric_technical")),
+            "framing": bool(adm.get("framing")),
+            "label": adm.get("label"),
+            "reasons": list(adm.get("reasons") or []),
+        },
+        "ranking": {
+            "criteria_used": list(record.get("criteria_used") or []),
+            "criteria_omitted": list(record.get("criteria_omitted") or []),
+            "tie_break": "candidate_id_lexicographic_asc",
+        },
+        "metrics": dict(record.get("metrics") or {}),
+        "used_row_ids": record.get("used_row_ids"),
+        "issues": list(record.get("issues") or []),
+        "discard_reason": record.get("discard_reason"),
+        "statistical": record.get("statistical"),
+        "normative": record.get("normative"),
+        "coefficients": record.get("coefficients"),
+        "diagnostics": record.get("diagnostics") or {},
+        # In-process only: C04.evaluate_fitted / C03 predict_original.
+        "candidate_fit": record.get("candidate_fit"),
+        "model_object": record.get("model_object"),
+    }
+    if include_legacy:
+        out["_legacy_model_result"] = record.get("_legacy_model_result")
+    return out
+
+
+class _ColumnStore:
+    def __init__(self, frame):
+        self.frame = frame
+        self._cache: Dict[Tuple[str, str], Any] = {}
+
+    def get(self, base: str, transform: str):
+        key = (base, canonical_transform_name(transform))
+        if key in self._cache:
+            return self._cache[key]
+        if self.frame is None or base not in getattr(self.frame, "columns", []):
+            self._cache[key] = None
+            return None
+        if key[1] in (LINEAR_OPTION, GROUP_OPTION):
+            self._cache[key] = self.frame[base]
+            return self._cache[key]
+        series, ok = Transformer.apply_transformation(self.frame[base], key[1])
+        self._cache[key] = series if ok else None
+        return self._cache[key]
+
+
+def _design_from_spec(store: _ColumnStore, spec: Mapping[str, Any], X_fallback) -> Optional[pd.DataFrame]:
+    data: Dict[str, Any] = {}
+    for cols in (spec.get("feature_groups") or {}).values():
+        for c in cols:
+            series = store.get(c, LINEAR_OPTION)
+            if series is None and X_fallback is not None and c in X_fallback.columns:
+                series = X_fallback[c]
+            if series is None:
+                return None
+            data[c] = series
+    for base, trans in (spec.get("x_transformations") or {}).items():
+        if trans == GROUP_OPTION:
+            continue
+        col_name = feature_column_name(base, trans)
+        series = store.get(base, trans)
+        if series is None:
+            return None
+        data[col_name] = series
+    if not data:
+        return None
+    frame = pd.DataFrame(data)
+    return frame
+
+
+def _y_and_state(
+    prepared_dataset: Mapping[str, Any],
+    spec: Mapping[str, Any],
+    hooks: Mapping[str, Any],
+):
+    y = prepared_dataset.get("y")
+    y_name = (spec.get("y_transformation") or {}).get("name") or Y_IDENTITY
+    y_name = canonical_transform_name(y_name)
+    if y_name in (LINEAR_OPTION, Y_IDENTITY):
+        return y, {"name": Y_IDENTITY}, np.asarray(y, dtype=float)
+    y_original = np.asarray(prepared_dataset.get("y_original", y), dtype=float)
+    apply_t = None
+    try:
+        from . import target_transform as tt
+
+        apply_t = getattr(tt, "transform_target", None)
+        fit_t = getattr(tt, "fit_target_transform", None)
+    except Exception:
+        apply_t = None
+        fit_t = None
+    if callable(fit_t) and callable(apply_t):
+        c06_name = "log" if y_name in {"ln", "log", "logarithm"} else (
+            "identity" if y_name in {LINEAR_OPTION, Y_IDENTITY, "none"} else y_name
+        )
+        if c06_name in {"identity", "log"}:
+            try:
+                state = fit_t(y, c06_name, None)
+                y_t = apply_t(y, state)
+                return y_t, state, y_original
+            except Exception:
+                pass
+    # Labeled fixture may supply inverse only; apply numpy transforms for tests.
+    if y_name == "ln":
+        arr = np.asarray(y, dtype=float)
+        if np.any(arr <= 0):
+            return None, {"name": y_name}, y_original
+        return np.log(arr), {"name": "ln"}, y_original
+    return None, {"name": y_name}, y_original
+
+
+def _inverse_prediction(pred, y_state, hooks):
+    name = (y_state or {}).get("name") or Y_IDENTITY
+    if name in (Y_IDENTITY, LINEAR_OPTION, None):
+        return np.asarray(pred, dtype=float)
+    inverse = hooks.get("inverse_target")
+    if callable(inverse):
+        out = inverse(pred, y_state)
+        if isinstance(out, tuple):
+            out = out[0]
+        if isinstance(out, dict):
+            out = out.get("values", out.get("prediction"))
+        return np.asarray(out, dtype=float)
+    if name == "ln":
+        return np.exp(np.asarray(pred, dtype=float))
+    return None
+
+
+def _original_rmse_from_model(
+    model,
+    X_design: pd.DataFrame,
+    y_original,
+    y_state,
+    hooks,
+    intercept: bool,
+) -> Optional[float]:
+    if model is None or X_design is None:
+        return None
+    Xc = sm.add_constant(X_design, has_constant="add") if intercept else X_design
+    try:
+        params_index = list(model.params.index)
+        for col in params_index:
+            if col not in Xc.columns:
+                return None
+        Xc = Xc[params_index]
+        pred = model.predict(Xc)
+    except Exception:
+        return None
+    pred_orig = _inverse_prediction(pred, y_state, hooks)
+    if pred_orig is None:
+        return None
+    yv = np.asarray(y_original, dtype=float).reshape(-1)
+    pv = np.asarray(pred_orig, dtype=float).reshape(-1)
+    if yv.shape != pv.shape:
+        return None
+    if not np.all(np.isfinite(yv)) or not np.all(np.isfinite(pv)):
+        return None
+    return float(np.sqrt(np.mean((yv - pv) ** 2)))
+
+
+def _value_from_prediction(model, X_row: pd.DataFrame, intercept: bool) -> Optional[Dict[str, Any]]:
+    if model is None or X_row is None or len(X_row) == 0:
+        return None
+    try:
+        Xc = sm.add_constant(X_row, has_constant="add") if intercept else X_row
+        params_index = list(model.params.index)
+        for col in params_index:
+            if col not in Xc.columns:
+                return None
+        Xc = Xc[params_index]
+        prediction = model.get_prediction(Xc)
+        summary = prediction.summary_frame(alpha=1 - config.CONFIDENCE_LEVEL_PRECISION)
+        point = float(summary["mean"].iloc[0])
+        lo = float(summary["mean_ci_lower"].iloc[0])
+        hi = float(summary["mean_ci_upper"].iloc[0])
+        if not all(_finite_number(v) for v in (point, lo, hi)):
+            return {
+                "point": point if _finite_number(point) else None,
+                "mean_ci80": None,
+                "prediction_interval": None,
+                "arbitration_interval": None,
+                "admissible_interval": None,
+            }
+        return {
+            "point": point,
+            "mean_ci80": {"lower": lo, "upper": hi},
+            "prediction_interval": None,
+            "arbitration_interval": None,
+            "admissible_interval": None,
+        }
+    except Exception:
+        return None
+
+
+def _empty_value() -> Dict[str, Any]:
+    return {
+        "point": None,
+        "mean_ci80": None,
+        "prediction_interval": None,
+        "arbitration_interval": None,
+        "admissible_interval": None,
+    }
+
+
+def _fit_and_score(
+    prepared_dataset: Mapping[str, Any],
+    spec: Mapping[str, Any],
+    request_spec: Mapping[str, Any],
+    subject_design: Optional[Mapping[str, Any]],
+    column_store: _ColumnStore,
+    hooks: Mapping[str, Any],
+    evaluation_policy: Mapping[str, Any],
+    retain_legacy: bool,
+) -> Dict[str, Any]:
+    issues: List[Dict[str, Any]] = []
+    criteria_used: List[str] = []
+    criteria_omitted: List[str] = []
+    X_fallback = prepared_dataset.get("X")
+    X_design = _design_from_spec(column_store, spec, X_fallback)
+    y_fit, y_state, y_original = _y_and_state(prepared_dataset, spec, hooks)
+    record: Dict[str, Any] = {
+        "candidate_id": spec["candidate_id"],
+        "candidate_spec": spec,
+        "status": "error",
+        "metrics": {},
+        "diagnostics": {},
+        "coefficients": {},
+        "issues": issues,
+        "criteria_used": criteria_used,
+        "criteria_omitted": criteria_omitted,
+        "used_row_ids": list(prepared_dataset.get("row_ids") or []),
+        "value": _empty_value(),
+        "discard_reason": None,
+        "_legacy_model_result": None,
+        "model_object": None,
+    }
+    if X_design is None or y_fit is None:
+        record["status"] = "rejected"
+        record["discard_reason"] = "design_or_target_unavailable"
+        record["admissibility"] = classify_admissibility(record, evaluation_policy)
+        record["model_eligibility"] = {
+            "status": record["admissibility"]["eligibility_status"],
+            "reasons": record["admissibility"]["reasons"],
+        }
+        return record
+
+    y_name = (y_state or {}).get("name") or Y_IDENTITY
+    if y_name not in (Y_IDENTITY, LINEAR_OPTION) and not callable(hooks.get("inverse_target")) and y_name != "ln":
+        # Cannot recover original-scale error; do not rank on transformed R².
+        record["status"] = "rejected"
+        record["discard_reason"] = "y_inverse_unavailable"
+        criteria_omitted.append("original_rmse")
+        record["admissibility"] = classify_admissibility(record, evaluation_policy)
+        return record
+
+    fit_candidate = hooks.get("fit_candidate")
+    evaluate_fitted = hooks.get("evaluate_fitted")
+    model_result = None
+    model_obj = None
+    coefficients = {}
+    r2_adj = None
+    grau = None
+    amplitude = None
+    used_row_ids = list(prepared_dataset.get("row_ids") or [])
+    outliers_removed: List[Any] = []
+
+    if callable(fit_candidate):
+        try:
+            candidate_fit = fit_candidate(prepared_dataset, spec, request_spec)
+        except Exception as exc:
+            record["status"] = "error"
+            record["discard_reason"] = "fit_candidate_error"
+            issues.append(_issue("fit_candidate_error", "error", str(exc), [spec["candidate_id"]]))
+            record["admissibility"] = classify_admissibility(record, evaluation_policy)
+            return record
+        status = (candidate_fit or {}).get("status") if isinstance(candidate_fit, dict) else getattr(candidate_fit, "status", None)
+        if status != "fitted":
+            record["status"] = status or "rejected"
+            record["discard_reason"] = "peer_fit_not_fitted"
+            record["admissibility"] = classify_admissibility(record, evaluation_policy)
+            return record
+        model_obj = candidate_fit.get("model_object") if isinstance(candidate_fit, dict) else getattr(candidate_fit, "model_object", None)
+        coefficients = candidate_fit.get("coefficients") if isinstance(candidate_fit, dict) else getattr(candidate_fit, "coefficients", {}) or {}
+        used_row_ids = list(
+            (candidate_fit.get("used_row_ids") if isinstance(candidate_fit, dict) else getattr(candidate_fit, "used_row_ids", None))
+            or used_row_ids
+        )
+        diagnostics = candidate_fit.get("diagnostics") if isinstance(candidate_fit, dict) else getattr(candidate_fit, "diagnostics", {}) or {}
+        record["diagnostics"] = diagnostics or {}
+        record["candidate_fit"] = candidate_fit
+        if _finite_number((diagnostics or {}).get("aic")):
+            record.setdefault("_fit_info", {})["aic"] = float(diagnostics["aic"])
+        if _finite_number((diagnostics or {}).get("bic")):
+            record.setdefault("_fit_info", {})["bic"] = float(diagnostics["bic"])
+        if callable(evaluate_fitted) and subject_design is not None:
+            try:
+                assessment = evaluate_fitted(candidate_fit, subject_design, request_spec)
+            except Exception as exc:
+                issues.append(_issue("evaluate_fitted_error", "warning", str(exc), [spec["candidate_id"]]))
+                assessment = None
+            assessment_map = _as_mapping(assessment) if assessment is not None else {}
+            if assessment_map:
+                record["value"] = assessment_map.get("value") or record["value"]
+                record["statistical"] = assessment_map.get("statistical")
+                record["normative"] = assessment_map.get("normative")
+                rec_metrics = assessment_map.get("statistical") or {}
+                amplitude = rec_metrics.get("precision_amplitude_pct") or rec_metrics.get("amplitude_pct")
+                record["candidate_fit"] = candidate_fit
+        rmse = _original_rmse_from_model(
+            model_obj, X_design, y_original, y_state, hooks, spec.get("intercept", True)
+        )
+    else:
+        builder = ModelBuilder()
+        documentary = _documentary_inputs(evaluation_policy)
+        raw_degree = (
+            evaluation_policy.get("minimum_fundamentacao_grade")
+            if evaluation_policy.get("minimum_fundamentacao_grade") is not None
+            else evaluation_policy.get("min_fundamentacao_grade")
+            if evaluation_policy.get("min_fundamentacao_grade") is not None
+            else evaluation_policy.get("target_degree")
+        )
+        degree = int(raw_degree) if raw_degree is not None else 1
+        remove_outliers = bool(evaluation_policy.get("remove_outliers", False))
+        y_series = y_fit if isinstance(y_fit, pd.Series) else pd.Series(np.asarray(y_fit), index=X_design.index)
+        if len(y_series) != len(X_design):
+            y_series = pd.Series(np.asarray(prepared_dataset.get("y")), index=X_design.index)
+        model_result = builder.build_model(
+            X_design,
+            y_series,
+            degree=degree,
+            remove_outliers=remove_outliers,
+            grau_item1=documentary["grau_item1"],
+            grau_item3=documentary["grau_item3"],
+            item1_provenance=documentary["item1_provenance"],
+            item3_provenance=documentary["item3_provenance"],
+        )
+        if not model_result.success or model_result.model_metrics is None:
+            record["status"] = "rejected"
+            record["discard_reason"] = "ols_fit_failed"
+            record["admissibility"] = classify_admissibility(record, evaluation_policy)
+            return record
+        model_obj = model_result.model_object
+        coefficients = dict(model_result.coefficients or {})
+        r2_adj = model_result.model_metrics.r2_adjusted
+        outliers_removed = list(model_result.outliers_removed or [])
+        if model_result.validation_result is not None:
+            grau = model_result.validation_result.grau_fundamentacao
+            amplitude = model_result.validation_result.precisao_amplitude_pct
+        subject_raw = None
+        if subject_design:
+            subject_raw = subject_design.get("raw_values") or subject_design.get("subject_raw")
+        if subject_raw and model_result.success:
+            original_df = prepared_dataset.get("_legacy_df")
+            if original_df is None:
+                base = prepared_dataset.get("base_frame")
+                y_col = request_spec.get("target_col") or "y"
+                if base is not None:
+                    original_df = base.copy()
+                    original_df[y_col] = prepared_dataset.get("y")
+            if original_df is not None:
+                model_result = builder.add_precision_and_extrapolation(
+                    model_result, dict(subject_raw), original_df, degree=degree
+                )
+                if model_result.validation_result is not None:
+                    grau = model_result.validation_result.grau_fundamentacao
+                    amplitude = model_result.validation_result.precisao_amplitude_pct
+        rmse = _original_rmse_from_model(
+            model_obj, X_design, y_original, y_state, hooks, spec.get("intercept", True)
+        )
+        record["_legacy_model_result"] = model_result if retain_legacy else None
+        if subject_design is not None:
+            raw = subject_design.get("raw_values") or {}
+            row = {}
+            for base, trans in spec.get("x_transformations", {}).items():
+                if trans == GROUP_OPTION:
+                    continue
+                if base not in raw:
+                    row = None
+                    break
+                series, ok = Transformer.apply_transformation(pd.Series([raw[base]]), trans)
+                if not ok:
+                    row = None
+                    break
+                row[feature_column_name(base, trans)] = series.iloc[0]
+            if row is not None:
+                X_row = pd.DataFrame([row])
+                for cols in (spec.get("feature_groups") or {}).values():
+                    for c in cols:
+                        if c in (subject_design.get("X").columns if subject_design.get("X") is not None else []):
+                            X_row[c] = subject_design["X"][c].iloc[0]
+                record["value"] = _value_from_prediction(model_obj, X_row, spec.get("intercept", True)) or _empty_value()
+                if y_name not in (Y_IDENTITY, LINEAR_OPTION) and record["value"].get("point") is not None:
+                    inv = _inverse_prediction([record["value"]["point"]], y_state, hooks)
+                    if inv is None:
+                        record["value"] = _empty_value()
+                        criteria_omitted.append("subject_value_original_scale")
+                    else:
+                        record["value"]["point"] = float(np.asarray(inv).reshape(-1)[0])
+                        record["value"]["mean_ci80"] = None
+
+    record["status"] = "fitted"
+    record["coefficients"] = coefficients
+    # Winner must remain evaluable by C04.evaluate_fitted; trim drops extras.
+    record["model_object"] = model_obj
+    record["used_row_ids"] = used_row_ids
+    metrics: Dict[str, Any] = {
+        "complexity": len(spec.get("features") or []),
+        "n_outliers_removed": len(outliers_removed),
+        "y_transformation": y_name,
+    }
+    fit_info = record.get("_fit_info") or {}
+    diagnostics = record.get("diagnostics") or {}
+    for key in ("aic", "bic"):
+        raw = fit_info.get(key)
+        if raw is None:
+            raw = diagnostics.get(key)
+        if _finite_number(raw):
+            metrics[key] = float(raw)
+            criteria_used.append(key)
+    if _finite_number(rmse):
+        metrics["original_rmse"] = float(rmse)
+        criteria_used.append("original_rmse")
+    else:
+        criteria_omitted.append("original_rmse")
+    if _finite_number(r2_adj):
+        metrics["r2_adjusted"] = float(r2_adj)
+        if y_name not in (Y_IDENTITY, LINEAR_OPTION):
+            metrics["r2_adjusted_scale"] = "transformed_target"
+            criteria_omitted.append("r2_adjusted_not_comparable_across_scales")
+        else:
+            metrics["r2_adjusted_scale"] = "original"
+    if grau is not None:
+        metrics["grau_fundamentacao"] = grau
+    if _finite_number(amplitude):
+        metrics["precision_amplitude_pct"] = float(amplitude)
+        criteria_used.append("precision_amplitude_pct")
+    criteria_used.append("complexity")
+    record["metrics"] = metrics
+    record["admissibility"] = classify_admissibility(record, evaluation_policy)
+    if record["admissibility"]["label"] != "admissible":
+        record["discard_reason"] = record["discard_reason"] or ",".join(
+            record["admissibility"]["reasons"] or ["exploratory"]
+        )
+    return record

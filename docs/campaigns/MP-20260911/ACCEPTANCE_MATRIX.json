@@ -1,0 +1,153 @@
+{
+  "lote": "MP-20260911",
+  "integrator": "C18-PR17-close",
+  "suite_run_sha": "e465a9392578b5ca2d6a842fc6f1415f41e610bb",
+  "suite_run_note": "Product SHA of PR #17. Parent 7db63cb is the C18 product commit; e465a93 only fixes the GHA wheel-eval CSV encode. Docs commits after this SHA record this hash and must not cycle it. A1 gate is GitHub Actions run 34630150786 (pull_request), aggregator success.",
+  "product_sha": "e465a9392578b5ca2d6a842fc6f1415f41e610bb",
+  "product_tree": "aee529c39ac5a10bbb91e549d7437612d69f830b",
+  "base_main": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "github_test_merge": "fe954172d6bfe0b643e466838115eff65db110e2",
+  "historical_github_test_merge_c17": "64f480e72e0297a04a7e583952c3289c9ea65cf5",
+  "gha_run_id": 34630150786,
+  "gha_run_url": "https://github.com/tjsasakifln/modelapro/actions/runs/34630150786",
+  "gha_conclusion": "success",
+  "review_answered": "https://github.com/tjsasakifln/modelapro/pull/17#pullrequestreview-5179350036",
+  "TECHNICAL_E2E": "PASS_LINUX",
+  "TECHNICAL_E2E_SCOPE": "A–J hardened + Playwright Streamlit loopback + wheel eval outside checkout + GHA wide suite + C16 harness. Not a Windows or full-NBR claim.",
+  "NORMATIVE_VERIFICATION": "PARTIAL",
+  "DELIVERY": "READY_FOR_MERGE_REVIEW",
+  "MAIN_MERGED": "NO",
+  "DEPLOYED": "NO",
+  "MERGE_AUTHORIZATION": "NOT_GRANTED",
+  "os_executed": ["linux"],
+  "os_not_run": ["windows"],
+  "branch_protection_main": "NOT_CONFIGURED",
+  "branch_protection_note": "GET /repos/tjsasakifln/modelapro/branches/main/protection → 404. Aggregator is a workflow job, not a required status check by protection. This campaign did not edit protections.",
+  "normative_sources": [
+    {
+      "id": "nbr14653-2-2011",
+      "edition": "ABNT NBR 14653-2:2011",
+      "status": "partial",
+      "note": "Item 4 (a)+(b) and table classifiers implemented as calculated/pending; unverified clauses listed in C03/unverified_rules.md"
+    },
+    {
+      "id": "nbr14653-1-2019",
+      "edition": "ABNT NBR 14653-1:2019",
+      "status": "pending",
+      "note": "Campo de arbítrio cited; not a certified full-norm claim"
+    }
+  ],
+  "unverified_rules": [
+    "9.2.1.1.extras",
+    "9.2.1.6.1.homogeneous",
+    "anexoA.2.micronumerosidade",
+    "tabelas3_4.fatores",
+    "metodos.custo_involutivo_evolutivo",
+    "anexoA.8.agrupamentos",
+    "anexoA.10.1.2.arbitrado",
+    "anexoA.2.1.outliers_justificativa",
+    "8.2.1.5.2.campo_insuficiente"
+  ],
+  "scenarios_A_J": {
+    "A": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestALocaleAndMissingTarget"},
+    "B": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestBInvalidInputs"},
+    "C": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestCNormativeExtrapolation", "note": "item4 not axes_missing; n==sample.used; far subject out_of_measure in original-unit axes"},
+    "D": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestDInfluence"},
+    "E": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestEIndependentValidation", "note": "POST evaluation_policy.method=holdout; procedure/partitions/reserved predictions required; method=none does not satisfy the scenario"},
+    "F": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestFArtifacts", "note": "analytic 10000×area point in downloaded PDF; annex IDs for n=210; separate PDF-failure test"},
+    "G": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestGRecovery"},
+    "H": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestHIsolationBatch", "note": "two finite points; unknown category point null; missing docs keep grade None; frozen population_model from compose"},
+    "I": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestISearchCoverage"},
+    "J": {"status": "PASS", "evidence": "tests/c17_integration/test_scenarios_a_j.py::TestJLocalInstall", "note": "Linux executed; Windows NOT_RUN"}
+  },
+  "F01_F16": [
+    {"id": "F01", "status": "CLOSED_VERIFIED", "reason": "ingest_market + POST /jobs: missing target not imputed; observed_target < received"},
+    {"id": "F02", "status": "CLOSED_VERIFIED", "reason": "pt-BR CSV/Excel and ambiguous_number issue without silent 1.234→1234 under locale auto"},
+    {"id": "F03", "status": "CLOSED_VERIFIED", "reason": "unknown bairro subject does not silently become reference; encoder categories are train-only"},
+    {"id": "F04", "status": "CLOSED_VERIFIED", "reason": "item4 calculated with axes from CandidateFit.base_frame; y_subject in original unit; n==sample.used; faixa ampliada is not efeito_monetario"},
+    {"id": "F05", "status": "CLOSED_VERIFIED", "reason": "outlier_policy report_only keeps n; default remove_outliers=False; no silent_exclusion issue"},
+    {"id": "F06", "status": "CLOSED_VERIFIED", "reason": "exact vs approximate search_audit; exact_optimum_guaranteed false in limited mode"},
+    {"id": "F07", "status": "CLOSED_VERIFIED", "reason": "invalid file / empty candidate_cols / non-finite subject are 4xx or failed with issues; cancel queryable"},
+    {"id": "F08", "status": "CLOSED_VERIFIED", "reason": "PDF %PDF generated; 210-row sample IDs in downloaded bytes; evidence output_dir under job store"},
+    {"id": "F09", "status": "CLOSED_VERIFIED", "reason": "target_unit empty stays empty; unit_pending issue; no BRL default"},
+    {"id": "F10", "status": "CLOSED_VERIFIED", "reason": "failed jobs return issues, not 200 empty JSON; point is finite or null"},
+    {"id": "F11", "status": "CLOSED_VERIFIED", "reason": "search_audit possible/generated/evaluated/coverage present on snapshot"},
+    {"id": "F12", "status": "CLOSED_VERIFIED", "reason": "identity/log and ln alias through search/POST; unknown Y is supported=false not identity"},
+    {"id": "F13", "status": "CLOSED_VERIFIED", "reason": "GET /jobs/{id}/result recovers snapshot without WebSocket"},
+    {"id": "F14", "status": "CLOSED_VERIFIED", "reason": "two jobs distinct job_id and input_sha256; batch items independent"},
+    {"id": "F15", "status": "CLOSED_VERIFIED", "reason": "wheel in venv outside checkout; GHA install-eval-linux; Redis extra; loopback host"},
+    {"id": "F16", "status": "CLOSED_VERIFIED", "reason": "candidate_cols=[] is HTTP 400 CANDIDATE_COLS_EMPTY, never all columns"}
+  ],
+  "I01_I11": {
+    "I01": "FIXED",
+    "I02": "FIXED",
+    "I03": "FIXED",
+    "I04": "FIXED_ITEM4_ORIGINAL_UNIT",
+    "I05": "FIXED",
+    "I06": "FIXED",
+    "I07": "FIXED",
+    "I08": "FIXED",
+    "I09": "PENDING_WINDOWS_PDF",
+    "I10": "PARTIAL_MAPPING_DOCUMENTED",
+    "I11": "DECLARED_TRAIN_RMSE_IS_NOT_GENERALIZATION"
+  },
+  "R17": {
+    "R17-01": {"status": "PASS", "note": "Wide suite blocking; aggregator if:always(); pypdf/Playwright in [dev]; GHA 34630150786 success. Remaining continue-on-error is only the Windows WeasyPrint native probe, not a required Linux job."},
+    "R17-02": {"status": "PASS", "note": "ln→log alias preserved from d755b0b; unknown Y/encoder error specifically; C06 invert only with complete identity/log state."},
+    "R17-03": {"status": "PASS", "note": "TestE POSTs evaluation_policy.method=holdout; method=none does not satisfy the scenario."},
+    "R17-04": {"status": "PASS", "note": "PDF/dossier content-checked against analytic point; annex IDs for n>200; separate PDF-failure; batch two finite points + unknown-category null."},
+    "R17-05": {"status": "PASS", "note": "Playwright loopback in GHA wide suite and local; wheel eval outside checkout twice locally and in GHA install-eval-linux."},
+    "R17-06": {"status": "PASS", "note": "_assess_subject_normative no longer swaps to builtin when C03 grade is None and sample_item_scores exist."}
+  },
+  "A1_A8": {
+    "A1": {"status": "PASS", "evidence": "https://github.com/tjsasakifln/modelapro/actions/runs/34630150786 job 103364984372 592 passed, 1 skipped; aggregator 103366696947 success"},
+    "A2": {"status": "PASS", "evidence": "tests/c17_integration/test_r17_hardening.py + POST identity/log paths"},
+    "A3": {"status": "PASS", "evidence": "test_r17_06_missing_subject_docs_stay_pending_despite_sample_scores; TestHIsolationBatch"},
+    "A4": {"status": "PASS", "evidence": "TestEIndependentValidation holdout POST"},
+    "A5": {"status": "PASS", "evidence": "TestFArtifacts downloaded PDF analytic point; annex n=210; PDF-failure separate"},
+    "A6": {"status": "PASS", "evidence": "TestGRecovery + TestHIsolationBatch save/reopen/batch"},
+    "A7": {"status": "PASS", "evidence": "tests/acceptance/test_e2e_ui.py in GHA wide suite; local Playwright 1 passed; wheel sha256 846401726ddf2e7481d2b58ab3048283d0a106a9b4e6991d737252151dedfd40 point ~900000"},
+    "A8": {"status": "PASS", "evidence": "GHA artifacts wide-suite-linux, c16-harness, dist, c15-linux-evidence; adversarial tests in test_r17_hardening.py"}
+  },
+  "suite_buckets": {
+    "sha": "e465a9392578b5ca2d6a842fc6f1415f41e610bb",
+    "pythonpath": "",
+    "os": "linux",
+    "python": "3.12",
+    "gha_wide_suite": {"aprovados": 592, "reprovados": 0, "skip": 1, "seconds": 259.61, "job": 103364984372, "note": "pytest tests; skip is C15_INSTALL_SMOKE (covered by install-eval-linux)"},
+    "gha_c16_harness": {"aprovados": 59, "reprovados": 0, "nao_executados": 0, "violacoes_a04": 0, "total": 59, "disjoint": true, "job": 103364984502, "checked_out_sha": "fe954172d6bfe0b643e466838115eff65db110e2", "note": "PR checkout is GitHub test-merge of e465a93 into c92949e4"},
+    "gha_c15_linux": {"job": 103364984456, "conclusion": "success"},
+    "gha_c15_windows": {"job": 103364984430, "conclusion": "success", "note": "packaging tests only; WeasyPrint native probe continue-on-error; Windows PDF NOT_RUN as product claim"},
+    "gha_install_eval": {"job": 103365055397, "conclusion": "success", "point": 899999.9999999998, "modules": "/home/runner/c15-smoke-venv/lib/python3.12/site-packages/modules/__init__.py"},
+    "gha_aggregator": {"job": 103366696947, "conclusion": "success"},
+    "local_wide_ignore_c15": {"aprovados": 550, "reprovados": 0, "runs": 2, "seconds": [249.25, 286.19], "note": "first run 549+1 UI fail (hidden file input); second 550 after state=attached. Command: pytest tests --ignore=tests/c15_packaging"},
+    "local_c15_packaging": {"aprovados": 42, "reprovados": 0, "skip": 1},
+    "local_playwright": {"aprovados": 1, "reprovados": 0, "nodeid": "tests/acceptance/test_e2e_ui.py::TestE2EUiStreamlit::test_upload_select_start_and_visible_result"},
+    "local_wheel": {"sha256": "846401726ddf2e7481d2b58ab3048283d0a106a9b4e6991d737252151dedfd40", "point": 900000.0, "runs": 2, "backend": "/home/tjsasakifln/venvs/modelapro-pr17-wheel/lib/python3.12/site-packages/backend/__init__.py"}
+  },
+  "historical_suite_buckets_c17": {
+    "sha": "1f43121fe25f11d7200655ffd75de3c99bff50be",
+    "note": "C17 close-out snapshot; superseded as A1 evidence by e465a93. Kept for reconciliation, not as current gate.",
+    "c17_integration": {"aprovados": 28, "reprovados": 0, "nao_executados": 0, "skip": 0, "runs": 2},
+    "c16_harness_d755b0b": {"aprovados": 47, "reprovados": 11, "nao_executados": 1}
+  },
+  "campaign_reprovados": [],
+  "c16_reprovados": [],
+  "c16_nao_executados": [],
+  "residual_limitations": [
+    "Windows PDF / WeasyPrint native: NOT_RUN as a product claim; C15 Windows packaging tests passed; native PDF probe is continue-on-error on that job only.",
+    "NBR clauses in unverified_rules.md remain unverified; NORMATIVE_VERIFICATION=PARTIAL.",
+    "JobStore logs 'could not persist succeeded state' on the compose-direct wheel smoke; snapshot and PDF are still produced; GET /result recovery is covered by TestG.",
+    "Playwright traces/HAR are not uploaded on success (pytest tmp screenshot is asserted in-test). GHA wide suite includes the UI nodeid as passed.",
+    "main branch protection is not configured; aggregator success is a workflow conclusion, not a required check by GitHub protection.",
+    "C15_INSTALL_SMOKE is skipped in the default wide suite; the dedicated install-eval-linux job is the wheel evaluation gate."
+  ],
+  "acceptance_command": "python scripts/c17_acceptance/run.py --output DIR",
+  "acceptance_quick_note": "--quick runs only tests/c17_integration twice and cannot release the PR.",
+  "notes": [
+    "issuance.status is never ready_for_professional_review solely from a table grade",
+    "C16 harness counts in suite_buckets are from gha_run_id on the GitHub test-merge tree",
+    "Streamlit E2E ran in GHA wide suite and locally with Playwright Chromium",
+    "This JSON records the already-tested product SHA e465a93; do not rewrite it to the SHA of a later docs-only commit"
+  ]
+}

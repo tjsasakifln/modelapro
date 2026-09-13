@@ -70,7 +70,15 @@ class TestLowR2DoesNotBlock:
         X = pd.DataFrame({'const': 1, 'x': range(20)})
         y = pd.Series(range(20))
 
-        res = NBRValidator.validate_model(model_result, X, y, degree=1)
+        # MP-COM/C05: documentary items must be DECLARED with provenance.
+        # Undeclared items are pending and score 0 - this test is about R2,
+        # so it declares them explicitly instead of relying on a silent default.
+        res = NBRValidator.validate_model(
+            model_result, X, y, degree=1,
+            grau_item1=2, grau_item3=2,
+            item1_provenance={"source": "laudo/vistoria", "ref": "fixture"},
+            item3_provenance={"source": "planilha de dados", "ref": "fixture"},
+        )
         # Finalize with an in-range avaliando so item 4 is fully scored.
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=25.0,
@@ -230,8 +238,9 @@ class TestFinalizePrecisionAndExtrapolation:
         assert item4.grau_achieved == 3
 
     def test_extrapolation_admitida_uma_variavel(self):
-        # value=25, sample [0,19] -> outside [min,max] but inside extended
-        # [0.5*min, 2*max] = [0, 38] -> Grau II (admitted for 1 variable).
+        # ABNT NBR 14653-2:2011 Tabela 1 item 4: faixa ampliada (a) is not
+        # sufficient. Without predict_original, (b) |Δvalue| vs frontier is
+        # missing → absence is not approval (legacy int score = 0).
         res = self._base_validation_result()
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=20.0,
@@ -241,12 +250,40 @@ class TestFinalizePrecisionAndExtrapolation:
             degree=1,
         )
         item4 = next(i for i in res.item_scores if i.item == 4)
+        assert item4.grau_achieved == 0
+        assert res.details.get("item4", {}).get("evidence_status") == "pending"
+
+    def test_extrapolation_admitida_uma_variavel_com_valor_na_fronteira(self):
+        # Same measure window as the former measure-only test, but (b) is
+        # evaluated in the original unit. y = 233.333... + x yields |Δ|=15%
+        # exactly at x=25 vs frontier 19 → Grau II.
+        # 50*|b| / |c+19b| = 0.15 with b=1 ⇒ c = 35/0.15.
+        c = 35.0 / 0.15
+
+        def predict_original(subject):
+            return c + float(subject["x"])
+
+        res = self._base_validation_result()
+        res = NBRValidator.finalize_precision_and_extrapolation(
+            res, amplitude_pct=20.0,
+            extrapolation_details=[
+                {"variable": "x", "avaliando_value": 25, "sample_min": 0, "sample_max": 19}
+            ],
+            degree=1,
+            predict_original=predict_original,
+            subject_raw={"x": 25},
+        )
+        item4 = next(i for i in res.item_scores if i.item == 4)
         assert item4.grau_achieved == 2
+        delta = res.details["item4"]["calculation"]["boundary_delta_pct"]
+        y_av = c + 25.0
+        y_fr = c + 19.0
+        assert delta == pytest.approx(abs(y_av - y_fr) / abs(y_fr) * 100.0)
 
     def test_extrapolation_admitida_duas_variaveis_grau_i(self):
-        # Two variables extrapolated (each within its own extended interval)
-        # -> Grau II's "no máximo 1 variável" rule is violated, so it drops
-        # to Grau I (still admitted, no upper limit on variable count there).
+        # Two extrapolated axes: Grau II is impossible. Grau I requires
+        # (a) plus |Δ|≤20% de per si AND simultaneously. Without
+        # predict_original this must not be approved from faixa alone.
         res = self._base_validation_result()
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=20.0,
@@ -257,7 +294,8 @@ class TestFinalizePrecisionAndExtrapolation:
             degree=1,
         )
         item4 = next(i for i in res.item_scores if i.item == 4)
-        assert item4.grau_achieved == 1
+        assert item4.grau_achieved == 0
+        assert res.details.get("item4", {}).get("evidence_status") == "pending"
 
     def test_extrapolation_out_of_extended_interval(self):
         # value=50 way beyond ext_max=38 -> Grau 0, even for Grau I.
@@ -343,11 +381,10 @@ class TestModelBuilderPrecisionAndExtrapolation:
         result = builder.build_model(X, y, degree=1)
         assert result.success is True
 
-        # Sanity check the fixture: the outlier must actually have been
-        # detected and excluded from the refit, and n (item 2) must reflect
-        # that post-removal sample.
-        assert result.outliers_removed, "fixture outlier was not detected; test is not exercising the fix"
-        assert len(result.residuals) == len(X) - len(result.outliers_removed)
+        # Report-only: influence is identified, rows stay in the principal sample.
+        warnings = " ".join(result.validation_result.warnings or [])
+        assert "influen" in warnings.lower() or result.outliers_removed == []
+        assert len(result.residuals) == len(X)
 
         avaliando_raw = {'area': 120.0, 'quartos': 3}
         result2 = builder.add_precision_and_extrapolation(
@@ -357,11 +394,9 @@ class TestModelBuilderPrecisionAndExtrapolation:
         details = result2.validation_result.details.get("extrapolation_details")
         area_detail = next(d for d in details if d["variable"] == "area")
 
-        # The raw original_df contains the planted outlier (area=900), but
-        # item 4's sample_max must come from the data effectively used by
-        # the fitted model (max area ~200), not the raw 900.
-        assert area_detail["sample_max"] < X['area'].max()
-        assert area_detail["sample_max"] == pytest.approx(200.0, abs=1.0)
+        # Report-only: the principal sample keeps the influential point.
+        # Silent drop would hide 900 from item 4's range.
+        assert area_detail["sample_max"] == pytest.approx(float(X["area"].max()), abs=1.0)
 
 
 class TestVIFDoesNotBlock:
@@ -393,7 +428,14 @@ class TestVIFDoesNotBlock:
         X = pd.DataFrame({'const': 1, 'x1': range(20), 'x2': range(20)})
         y = pd.Series(range(20))
 
-        res = NBRValidator.validate_model(model_result, X, y, degree=1)
+        # MP-COM/C05: items 1/3 declared with provenance; this test is about
+        # VIF, not about undeclared documentary items scoring points.
+        res = NBRValidator.validate_model(
+            model_result, X, y, degree=1,
+            grau_item1=2, grau_item3=2,
+            item1_provenance={"source": "laudo/vistoria", "ref": "fixture"},
+            item3_provenance={"source": "planilha de dados", "ref": "fixture"},
+        )
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=25.0,
             extrapolation_details=[
@@ -521,6 +563,31 @@ class TestOptimalCombinationTargetAchieved:
         df = pd.DataFrame({'area': area, 'preco': preco})
         return df
 
+    def test_declared_documentary_grades_survive_final_revalidation(self):
+        """The legacy adapter preserves the caller's documentary declarations."""
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        df = self._make_strong_dataset()
+        finder = OptimalCombinationFinder()
+        result = finder.find_best_model(
+            df, target_col='preco', degree=1,
+            avaliando_raw={'area': 120.0},
+            grau_item1=2, grau_item3=2,
+        )
+
+        assert result.success is True
+        assert result.best_model is not None
+        vr = result.best_model.validation_result
+        grades = {i.item: i.grau_achieved for i in vr.item_scores}
+
+        # The final validation is the same assessment made with the declarations;
+        # it must not overwrite them with absent/default values.
+        assert grades[2] == 3 and grades[4] == 3 and grades[5] == 3 and grades[6] == 3
+        assert grades[1] == 2
+        assert grades[3] == 2
+        assert vr.grau_fundamentacao is not None
+        assert result.best_grau_reached == vr.grau_fundamentacao
+
     def test_target_achieved_true_when_reachable(self):
         from modules.optimal_combination import OptimalCombinationFinder
 
@@ -529,6 +596,7 @@ class TestOptimalCombinationTargetAchieved:
         result = finder.find_best_model(
             df, target_col='preco', degree=1,
             avaliando_raw={'area': 120.0},
+            grau_item1=2, grau_item3=2,
         )
 
         assert result.success is True
@@ -544,9 +612,9 @@ class TestOptimalCombinationTargetAchieved:
 
         df = self._make_strong_dataset()
         finder = OptimalCombinationFinder()
-        # Grau III requires items 1 and 3 (externally informed) to be >= 2,
-        # but find_best_model defaults grau_item1=grau_item3=1, so Grau III
-        # is structurally unreachable regardless of data quality.
+        # Grau III requires items 1 and 3 (documentary) to be >= 2. No
+        # declaration is supplied, so it remains unreachable regardless of
+        # the calculated items.
         result = finder.find_best_model(
             df, target_col='preco', degree=3,
             avaliando_raw={'area': 120.0},
@@ -558,6 +626,48 @@ class TestOptimalCombinationTargetAchieved:
         assert result.best_grau_reached == final_grau
         assert final_grau is None or final_grau < 3
         assert result.target_achieved is False
+
+    def test_explicit_zero_documentary_grades_are_not_defaulted_to_one(self):
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        result = OptimalCombinationFinder().find_best_model(
+            self._make_strong_dataset(),
+            target_col="preco",
+            degree=1,
+            avaliando_raw={"area": 120.0},
+            grau_item1=0,
+            grau_item3=0,
+        )
+
+        assert result.success is True
+        scores = {
+            item.item: item.grau_achieved
+            for item in result.best_model.validation_result.item_scores
+        }
+        assert scores[1] == 0
+        assert scores[3] == 0
+        assert result.best_model.validation_result.grau_fundamentacao is None
+
+    def test_invalid_documentary_grade_remains_distinct_from_absence(self):
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        result = OptimalCombinationFinder().find_best_model(
+            self._make_strong_dataset(),
+            target_col="preco",
+            degree=1,
+            avaliando_raw={"area": 120.0},
+            grau_item1="invalid",
+            grau_item3=None,
+        )
+
+        assert result.success is True
+        details = {
+            item.item: item.detail
+            for item in result.best_model.validation_result.item_scores
+        }
+        assert "inválido" in details[1]
+        assert "não informado" in details[3]
+        assert result.best_model.validation_result.grau_fundamentacao is None
 
     def test_target_achieved_false_and_best_grau_none_without_avaliando(self):
         """Without avaliando_raw, item 4 stays provisionally 0 and no grau

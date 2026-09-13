@@ -1,0 +1,102 @@
+{
+  "producer": "C14",
+  "consumer": ["C10", "C11", "C09", "C12", "C17"],
+  "exported_interface": {
+    "module": "modules.valuation_batch",
+    "callable": "evaluate_batch",
+    "signature": "evaluate_batch(frozen_project, subjects, request_spec, progress_callback=None, cancel_requested=None, *, resume_from=None, reuse_ledger=None, max_workers=1, adapters=None, project_store=None) -> BatchResult",
+    "helpers": [
+      "compute_reuse_key(frozen_project, request_spec) -> str",
+      "validate_frozen_project(frozen_project) -> (mapping, issues)",
+      "export_batch_result(batch_result) -> mapping",
+      "ReuseLedger"
+    ],
+    "frozen_project_fields": [
+      "schema_version",
+      "project_id",
+      "revision_id",
+      "input_sha256",
+      "dataset_sha256",
+      "request_spec",
+      "feature_schema",
+      "encoder_state",
+      "model_spec",
+      "model_state",
+      "model_scope",
+      "subject_constraints",
+      "domain",
+      "sample_ledger",
+      "normative_version",
+      "artifact_refs",
+      "provenance"
+    ],
+    "model_scope": ["subject_specific", "population_model"],
+    "batch_item_status": ["succeeded", "failed", "pending", "cancelled", "unsupported"],
+    "notes": [
+      "candidate_fit may be attached in memory only after validated restore; C14 never unpickles user objects.",
+      "value matches ResultSnapshot.value. Failure is null + issue, never a substitute zero.",
+      "model_eligibility.status=eligible is not issuance authorization.",
+      "Structured export is BatchResult/export; C14 does not emit a consolidated PDF."
+    ]
+  },
+  "required_callsite": [
+    {
+      "consumer": "C10",
+      "file": "backend/api.py",
+      "required_callsite": "POST /projects/{id}/batch -> 202 {job_id, status_url}",
+      "how": "Worker/API should load FrozenProject via C11 ProjectStore.load_revision, call evaluate_batch, persist BatchResult items via JobStore.save_snapshot. C14 does not own this file."
+    },
+    {
+      "consumer": "C11",
+      "file": "modules/project_store.py",
+      "required_callsite": "ProjectStore.save_revision / load_revision; JobStore.save_snapshot / get_snapshot; LocalTaskRunner.submit/cancel",
+      "how": "Store JSON-safe FrozenProject metadata and artifact_refs. Do not pickle. C14 ReuseLedger can bind a ProjectStore but does not open a second database."
+    },
+    {
+      "consumer": "C09",
+      "file": "frontend/app.py",
+      "required_callsite": "present per-item status, value, issues, eligibility and ressalvas; never a single grade for the lote",
+      "how": "Read GET /jobs/{id} progress and GET /jobs/{id}/result item list. C14 does not own UI."
+    },
+    {
+      "consumer": "C12",
+      "file": "modules/evidence_bundle.py",
+      "required_callsite": "build_evidence_bundle over each item assessment / BatchResult.export",
+      "how": "Per-item hashes and ressalvas. Do not collapse into one PDF that erases individual caveats."
+    },
+    {
+      "consumer": "C04",
+      "file": "modules/model_builder.py",
+      "required_callsite": "evaluate_fitted(candidate_fit, subject_design, request_spec) and restore of CandidateFit.model_object from revision",
+      "how": "C14 already calls evaluate_fitted when a live CandidateFit with model_object is in memory. Specification-only FrozenProject uses frozen coefficients without a new fit. C14 does not own this file."
+    },
+    {
+      "consumer": "C02",
+      "file": "modules/preprocessing.py",
+      "required_callsite": "transform_subject(subject_raw, feature_schema, encoder_state)",
+      "how": "C14 calls this when importable; otherwise applies declarative encoder_state. Unknown category remains unsupported, never recoded as reference."
+    },
+    {
+      "consumer": "C03",
+      "file": "modules/nbr14653_validation.py",
+      "required_callsite": "assess_normative(context) with per-subject predict_original callback",
+      "how": "C14 calls assess_normative when published; otherwise uses NBRValidator item-4/precisão/fundamentação classifiers per subject. Documentary payload is the current subject only."
+    },
+    {
+      "consumer": "C06",
+      "file": "modules/target_transform.py",
+      "required_callsite": "inverse_target_prediction(prediction, state, residual_context=None)",
+      "how": "C14 calls this when published; Transformer.apply_transformation is used for X. No normative CI is claimed for a transformation without a validated method."
+    }
+  ],
+  "contract_version": "MP/1",
+  "dependency_pr": "https://github.com/tjsasakifln/modelapro/pull/9",
+  "head_sha": "1a9f80d6f69c4ea5fefad89c0523e9a3295049f3",
+  "acceptance_case": [
+    "C14-A01",
+    "C14-A02",
+    "C14-A03",
+    "C14-A04",
+    "C14-A05"
+  ]
+}

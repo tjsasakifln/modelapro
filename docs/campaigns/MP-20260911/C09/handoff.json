@@ -1,0 +1,68 @@
+{
+  "campaign_id": "C09",
+  "contract_version": "MP/1",
+  "producer": "C09",
+  "notes": "Interface Streamlit consome o contrato MP/1. Não duplica parsing/encoder. Não persiste projeto em loja paralela.",
+  "items": [
+    {
+      "producer": "C10",
+      "consumer": "C09",
+      "exported_interface": "POST /preview (multipart file + request_json + subject_json opcional) devolve column_map, issues e feature_schema C02, sem disparar busca",
+      "required_callsite": "frontend/components/forms.py:JobClient.preview e frontend/app.py:_preview_provider_for",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "Arquivo com bairro e número '1.234,56' produz prévia com coluna categórica bairro e sample_raw preservado; UI não relê o CSV."
+    },
+    {
+      "producer": "C10",
+      "consumer": "C09",
+      "exported_interface": "POST /jobs -> 202 {job_id,status_url}; GET /jobs/{id}; GET /jobs/{id}/result (ResultSnapshot); POST /jobs/{id}/cancel; GET /jobs/{id}/artifacts/{name}",
+      "required_callsite": "frontend/components/forms.py:JobClient.submit_job/get_status/get_result/cancel/get_artifact",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "Após 202, GET recupera snapshot mesmo sem WebSocket; job_id preservado se o GET falhar."
+    },
+    {
+      "producer": "C11",
+      "consumer": "C09",
+      "exported_interface": "GET /projects; GET /projects/{id}; POST /projects/{id}/revisions; estados queued|running|succeeded|failed|cancelled|interrupted; artifact_states pending|running|ready|failed",
+      "required_callsite": "frontend/components/forms.py:JobClient.list_projects/get_project/save_revision e frontend/components/layout.py:present_job_status/present_artifacts",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "Botões cancelar/salvar/baixar seguem o estado real; PDF failed ainda oferece download do cálculo."
+    },
+    {
+      "producer": "C10",
+      "consumer": "C09",
+      "exported_interface": "POST /projects/{id}/batch -> 202 (C14 via C10)",
+      "required_callsite": "frontend/components/forms.py:JobClient.submit_batch",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "Lote usa a mesma recuperação por job_id; C09 não cria workflow paralelo."
+    },
+    {
+      "producer": "C13",
+      "consumer": "C09",
+      "exported_interface": "ResultSnapshot.next_actions[] com code, priority, reason, next_step, evidence_refs, limitations",
+      "required_callsite": "frontend/components/layout.py:present_snapshot e render_snapshot_panel",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "Ações exibem evidência e limitações; não são tratadas como autorização de emissão."
+    },
+    {
+      "producer": "C15",
+      "consumer": "C09",
+      "exported_interface": "frontend/__init__.py, frontend/components/__init__.py e entrypoint modelapro=frontend.app:main",
+      "required_callsite": "frontend/app.py:_import_components (já há fallback components.* / frontend.components.*) e setup.py (C15)",
+      "contract_version": "MP/1",
+      "dependency_pr": null,
+      "head_sha": null,
+      "acceptance_case": "streamlit run frontend/app.py e import frontend.app:main resolvem os componentes sem editar arquivos da C15 nesta PR."
+    }
+  ]
+}

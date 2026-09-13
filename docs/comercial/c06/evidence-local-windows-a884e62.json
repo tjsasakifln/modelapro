@@ -1,0 +1,89 @@
+{
+  "data": {
+    "declared_count": 21,
+    "matches": 21,
+    "missing_or_mismatch": [],
+    "unexpected_first_party_bundle_files": []
+  },
+  "pathex": [
+    "C:\\Users\\tj_sa\\AppData\\Local\\Temp\\modelapro-c06-a3sourcebound.14EXoN\\source\\scripts",
+    "C:\\Users\\tj_sa\\AppData\\Local\\Temp\\modelapro-c06-a3sourcebound.14EXoN\\source"
+  ],
+  "python_modules": {
+    "expected_count": 102,
+    "matched_source_count": 102,
+    "missing_or_stale": [],
+    "unexpected_first_party_modules": []
+  },
+  "runtime_metadata": {
+    "matches_staged": true,
+    "only_metadata": false,
+    "path": "modelapro-0.1.0.dist-info/METADATA",
+    "sha256": "48ff020bef09548b27090b48214f9049b1bd0ab3387430beed7653d91ba1bab9"
+  },
+  "schema_version": "MP-COM-PYINSTALLER-SOURCE-ORIGIN/1",
+  "source_sha": "a884e62eb431adf47f670611a3063e6e59252bc2",
+  "status": "FAILED",
+  "tree_sha": "3a9bc7fd5f1c490e11399359eb0d98973be36131",
+  "scope": "LOCAL_FREEZE_SOURCE_ORIGIN_FAILURE_NOT_HOSTED_OR_LIFECYCLE",
+  "evidence_files": [
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/proof/source-origin-verification.json",
+      "sha256": "272bf350625cc4257a4894bd19f19549c8a518d4799ffe053fb73b9d0b2af742",
+      "size": 33451
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/proof/pyinstaller.log",
+      "sha256": "d3ca913d314d4a696b60d3ae784ab1a0fe7cc873a2380d238d160f4c4d1ae44c",
+      "size": 31425
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/work/modelapro/Analysis-00.toc",
+      "sha256": "559a6f77e756ce5790f30561c3e48b632479eb6d7f67d3582d9464fed7a077ae",
+      "size": 1777962
+    }
+  ],
+  "actual_runtime_metadata_files": [
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/dist/MODELA-PRO/modelapro-0.1.0.dist-info/INSTALLER",
+      "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508",
+      "size": 4
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/dist/MODELA-PRO/modelapro-0.1.0.dist-info/METADATA",
+      "sha256": "48ff020bef09548b27090b48214f9049b1bd0ab3387430beed7653d91ba1bab9",
+      "size": 53
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/dist/MODELA-PRO/modelapro-0.1.0.dist-info/RECORD",
+      "sha256": "6aa62dc12c28b590b52ed9a1c021b7668d8d398f538ae246f20ccc1f6d38f1f9",
+      "size": 16471
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/dist/MODELA-PRO/modelapro-0.1.0.dist-info/REQUESTED",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/dist/MODELA-PRO/modelapro-0.1.0.dist-info/WHEEL",
+      "sha256": "61532836a2b3111b7ec23519c09df7c41180c27165fb872a6d8913b566b88ad1",
+      "size": 91
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/dist/MODELA-PRO/modelapro-0.1.0.dist-info/direct_url.json",
+      "sha256": "83ad7c1108646621c658dc8f34475d3d2db7d91f95ad27d2761342518eb5a528",
+      "size": 105
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/dist/MODELA-PRO/modelapro-0.1.0.dist-info/entry_points.txt",
+      "sha256": "4171be320d064e1bd3cf731c3b0c61ca021313b47cdc6fc0bb8680320154a3a8",
+      "size": 152
+    },
+    {
+      "path": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN/dist/MODELA-PRO/modelapro-0.1.0.dist-info/top_level.txt",
+      "sha256": "7cea03a968c639c6b96c1ac7b6f66c77a7d2d0410c1fa7df728cfd0cf4208046",
+      "size": 44
+    }
+  ],
+  "diagnosis": "PyInstaller Analysis reintroduced seven installed dist-info files automatically; staged METADATA matches source. Correction not implemented at session stop."
+}

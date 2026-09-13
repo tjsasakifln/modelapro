@@ -1,0 +1,11 @@
+{
+  "schema": "MP-COM-TRUSTED-VENDOR/1",
+  "state": "UNCONFIGURED",
+  "environment": "production",
+  "algorithm": "Ed25519",
+  "purpose": "buyer_entitlement",
+  "key_id": null,
+  "public_key_base64url": null,
+  "display_label": "CHAVE DO TITULAR NÃO CONFIGURADA",
+  "note": "The legitimate rightsholder must pin a public key for a production artifact."
+}

@@ -1,0 +1,65 @@
+{
+  "campaign_id": "C15",
+  "head_sha": "9e864419591ab48de1fcb04975f35d51c3d145f4",
+  "base_sha": "c92949e4db8c559c6b02ef58b7df90d6cf01e7ed",
+  "contract_version": "MP/1",
+  "status": "READY_COMPONENT",
+  "pr": "https://github.com/tjsasakifln/modelapro/pull/13",
+  "ci_run": "https://github.com/tjsasakifln/modelapro/actions/runs/34599132777",
+  "criteria": [
+    {
+      "id": "C15-A01",
+      "status": "PASS",
+      "evidence": "Wheel/sdist contain backend, modules, frontend, templates, CSS, c15_local. Clean venv install x2 locally and CI job 'Clean venv install smoke (Linux)' success with PYTHONPATH unset. tests/c15_packaging/test_packaging_metadata.py and test_wheel_install_smoke.py."
+    },
+    {
+      "id": "C15-A02",
+      "status": "PASS",
+      "evidence": "Direct deps openpyxl/xlrd/weasyprint declared. CSV/xlsx round-trip; xls via xlrd fixture. Linux WeasyPrint probe rendered %PDF. Windows CI probe: OSError libgobject-2.0-0 + GTK hint; PDF not claimed on Windows."
+    },
+    {
+      "id": "C15-A03",
+      "status": "PASS",
+      "evidence": "Launcher uses streamlit CLI process and uvicorn --host 127.0.0.1. /health {status:healthy} twice locally and in Linux install-smoke job. Redis not required. C10/C11 keys validated. Copying .env.example (blank JOBS_DIR/PROJECTS_DIR) loads via dotenv without error. CORS * still hardcoded in backend/api.py (C10 handoff); bind host already uses config.API_HOST."
+    },
+    {
+      "id": "C15-A04",
+      "status": "PASS",
+      "evidence": "PR Actions run 34599132777 (fix SHA 9e86441) conclusion=success on ubuntu-latest and windows-latest. Prior run 34597990388 also success. Jobs: lint, C15 tests Linux, C15 tests Windows, build, install smoke, inherited baseline (not omitted). macOS untested. Python 3.11 declared not matrixed."
+    },
+    {
+      "id": "C15-A05",
+      "status": "PASS",
+      "evidence": "No .env secrets versioned. setup.py shim; requirements*.txt install the project with constraints/linux-py3.txt; test_dependency_sync enforces no diverging lists. psutil, requests, openpyxl, xlrd are direct runtime deps. Windows CI applied the same lock."
+    }
+  ],
+  "commands": [
+    {"command": "python -V", "exit_code": 0, "note": "Python 3.12.3 local; CI Python 3.12 Linux and Windows"},
+    {"command": "python -m flake8 --max-line-length=120 owned C15 paths", "exit_code": 0},
+    {"command": "pytest tests/c15_packaging -q (run 1)", "exit_code": 0},
+    {"command": "pytest tests/c15_packaging -q (run 2)", "exit_code": 0},
+    {"command": "C15_INSTALL_SMOKE=1 pytest tests/c15_packaging/test_wheel_install_smoke.py -q (run 1)", "exit_code": 0},
+    {"command": "C15_INSTALL_SMOKE=1 pytest tests/c15_packaging/test_wheel_install_smoke.py -q (run 2)", "exit_code": 0},
+    {"command": "python -m c15_local.launcher --check-pdf", "exit_code": 0, "note": "Linux native stack present"},
+    {"command": "backend+frontend start x2 GET /health", "exit_code": 0},
+    {"command": "pytest tests --ignore=tests/c15_packaging -q (inherited baseline)", "exit_code": 0},
+    {"command": "GitHub Actions run 34599132777 (pull_request, SHA 9e86441)", "exit_code": 0, "note": "conclusion=success after JOBS_DIR blank fix"}
+  ],
+  "unmet_dependencies": [
+    "C10 must consume config.CORS_ORIGINS in backend/api.py",
+    "C08 should call probe_weasyprint before PDF render",
+    "C17 owns global README/AGENTS/DoD copy"
+  ],
+  "deferred_items": [
+    "macOS: untested (no runner)",
+    "Python 3.11: declared requires-python, not CI-matrixed",
+    "Windows PDF native stack: diagnosed missing libgobject/GTK; not claimed",
+    "tests/test_nbr14653.py grep is C03-owned"
+  ],
+  "review_findings": [
+    "Author review: CORS * remains until C10; documented handoff, not silently patched.",
+    "Author review: frontend.app:main removed from console_scripts; Streamlit is a subprocess.",
+    "WeasyPrint on Linux emits HarfBuzz-Subset deprecation; PDF still generated.",
+    "CI observed: https://github.com/tjsasakifln/modelapro/actions/runs/34597990388"
+  ]
+}

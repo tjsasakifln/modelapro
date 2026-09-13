@@ -115,3 +115,249 @@ class OptimalCombinationResult(BaseResult):
     # poda por correlação (top-N) — ver OptimalCombinationFinder para o
     # limiar exato e a mensagem de aviso correspondente.
     exhaustive: bool = True
+
+
+# ---------------------------------------------------------------------------
+# MP/1 adapters (C10). Legacy dataclasses above stay the public surface for
+# existing callers. These helpers convert them into MP/1 mappings and
+# explicitly list capabilities they CANNOT represent. They never rebuild
+# value.point from the arbitration (campo de arbítrio) interval, never treat
+# is_valid as issuance approval, and never invent missing row ledgers.
+# ---------------------------------------------------------------------------
+
+LEGACY_CAPABILITY_GAPS = {
+    "DataLoadResult": (
+        "row_ledger with observed_target/disposition/missing_before/changes/reasons",
+        "input_sha256",
+        "raw_frame versus parsed_frame (only a processed dataframe is kept)",
+        "stable row_id that is guaranteed never to enter as a predictor",
+        "roles applied before cleaning",
+        "column_map of original → internal names as a first-class object",
+    ),
+    "ModelResult": (
+        "used_row_ids / excluded_row_ids distinct from outliers_removed",
+        "feature_schema groups and reference categories",
+        "declarative encoder_state",
+        "target_transform_state with estimand/limitations",
+        "model_sha256 of the fitted specification",
+        "coefficients at integral precision as a typed structure",
+        "CandidateFit.status (fitted|rejected|error)",
+    ),
+    "ValidationResult": (
+        "verification_status of listed rules (verified_rules_listed|partial|pending)",
+        "rule edition/source/status per item",
+        "separation of documentary declared points from verified evidence",
+        "issuance readiness distinct from grau_fundamentacao / is_valid",
+        "precisao.status in {not_computed, classified, unclassified, error}",
+        "predict_original callback identity with the same pipeline",
+    ),
+    "OptimalCombinationResult": (
+        "search_audit of possible/generated/evaluated/rejected candidates",
+        "coverage versus ranking-criterion completeness",
+        "budget and objective as declared search_policy fields",
+        "alternatives as CandidateAssessment list",
+        "cancel_requested cooperative stop",
+    ),
+}
+
+
+def _legacy_gap_issues(kind: str, origin: str = "results.legacy_adapter") -> List[Dict[str, Any]]:
+    from modules.result_contract import make_issue
+
+    gaps = LEGACY_CAPABILITY_GAPS.get(kind, ())
+    return [
+        make_issue(
+            "LEGACY_CAPABILITY_GAP",
+            f"{kind} cannot represent: {gap}",
+            severity="warning",
+            origin=origin,
+            evidence={"legacy_type": kind, "gap": gap},
+        )
+        for gap in gaps
+    ]
+
+
+def adapt_validation_result(vr: Optional["ValidationResult"]) -> Dict[str, Any]:
+    """Map ValidationResult into snapshot.validation without authorizing a laudo.
+
+    is_valid / grau_fundamentacao never become issuance.status =
+    ready_for_professional_review. Declared documentary scores stay
+    declared, not verified. Missing precision stays not_computed, not 0.
+    """
+    issues = _legacy_gap_issues("ValidationResult")
+    if vr is None:
+        return {
+            "fundamentacao": {"grade": None, "points": None, "items": []},
+            "precisao": {
+                "status": "not_computed",
+                "grade": None,
+                "amplitude_pct": None,
+            },
+            "statistical": {},
+            "documentary": {"status": "declared", "verified": False},
+            "issuance": {
+                "status": "draft",
+                "reasons": [
+                    "legacy_validation_absent",
+                    "no_automatic_report_approval",
+                ],
+            },
+            "legacy_capability_gaps": issues,
+        }
+
+    precisao_status = "not_computed" if vr.grau_precisao is None else "classified"
+    items = []
+    for score in vr.item_scores or []:
+        items.append(
+            {
+                "item": score.item,
+                "description": score.description,
+                "grade": score.grau_achieved,
+                "detail": score.detail,
+                "evidence_status": "declared",
+            }
+        )
+    # Never promote is_valid to an approved report. At most, a valid
+    # fundamentação grade is a draft that still requires professional review.
+    issuance_status = "draft"
+    reasons = [
+        "legacy_validation_does_not_authorize_issuance",
+        "no_automatic_report_approval",
+        "documentary_declared_is_not_verified_proof",
+    ]
+    if vr.is_valid:
+        reasons.append("legacy_is_valid_true_is_not_issuance_readiness")
+        issuance_status = "review_required"
+
+    admissible = None
+    if (
+        vr.valores_admissiveis_inferior is not None
+        and vr.valores_admissiveis_superior is not None
+    ):
+        admissible = {
+            "lower": vr.valores_admissiveis_inferior,
+            "upper": vr.valores_admissiveis_superior,
+        }
+
+    return {
+        "fundamentacao": {
+            "grade": vr.grau_fundamentacao,
+            "points": vr.grau_fundamentacao_pontos,
+            "items": items,
+        },
+        "precisao": {
+            "status": precisao_status,
+            "grade": vr.grau_precisao,
+            "amplitude_pct": vr.precisao_amplitude_pct,
+        },
+        "statistical": dict(vr.details or {}),
+        "documentary": {
+            "status": "declared",
+            "verified": False,
+            "messages": list(vr.messages or []),
+            "warnings": list(vr.warnings or []),
+        },
+        "issuance": {"status": issuance_status, "reasons": reasons},
+        "admissible_interval": admissible,
+        "legacy_is_valid": vr.is_valid,
+        "legacy_capability_gaps": issues,
+    }
+
+
+def adapt_model_result(mr: Optional["ModelResult"]) -> Dict[str, Any]:
+    """JSON-safe model summary. model_object is never included."""
+    issues = _legacy_gap_issues("ModelResult")
+    if mr is None:
+        return {"status": "absent", "legacy_capability_gaps": issues}
+    metrics = None
+    if mr.model_metrics is not None:
+        metrics = {
+            "r2": mr.model_metrics.r2,
+            "r2_adjusted": mr.model_metrics.r2_adjusted,
+            "f_statistic": mr.model_metrics.f_statistic,
+            "f_pvalue": mr.model_metrics.f_pvalue,
+            "std_error": mr.model_metrics.std_error,
+            "aic": mr.model_metrics.aic,
+            "bic": mr.model_metrics.bic,
+            "condition_number": mr.model_metrics.condition_number,
+            "normality_pvalue": mr.model_metrics.normality_pvalue,
+            "homoscedasticity_pvalue": mr.model_metrics.homoscedasticity_pvalue,
+            "autocorrelation_durbin_watson": mr.model_metrics.autocorrelation_durbin_watson,
+        }
+    return {
+        "status": "fitted" if mr.success else "error",
+        "formula": mr.formula,
+        "coefficients": dict(mr.coefficients or {}),
+        "pvalues": dict(mr.pvalues or {}),
+        "vif": dict(mr.vif or {}),
+        "transformations": dict(mr.transformations or {}),
+        "outliers_removed": list(mr.outliers_removed or []),
+        "metrics": metrics,
+        "message": mr.message,
+        "legacy_capability_gaps": issues,
+        # model_object intentionally omitted — never JSON / pickle restore.
+    }
+
+
+def adapt_data_load_result(dlr: Optional["DataLoadResult"]) -> Dict[str, Any]:
+    """Surface what DataLoadResult can say and mark what it cannot."""
+    issues = _legacy_gap_issues("DataLoadResult")
+    if dlr is None:
+        return {"success": False, "legacy_capability_gaps": issues}
+    return {
+        "success": dlr.success,
+        "message": dlr.message,
+        "variables": list(dlr.variables or []),
+        "sample_size": dlr.sample_size,
+        "missing_values": dict(dlr.missing_values or {}),
+        "excluded_columns": dict(dlr.excluded_columns or {}),
+        "has_dataframe": dlr.dataframe is not None,
+        "has_identification_df": dlr.identification_df is not None,
+        "legacy_capability_gaps": issues,
+    }
+
+
+def adapt_optimal_combination_result(
+    ocr: Optional["OptimalCombinationResult"],
+) -> Dict[str, Any]:
+    issues = _legacy_gap_issues("OptimalCombinationResult")
+    if ocr is None:
+        return {"success": False, "legacy_capability_gaps": issues}
+    return {
+        "success": ocr.success,
+        "combinations_tested": ocr.combinations_tested,
+        "exhaustive": ocr.exhaustive,
+        "target_achieved": ocr.target_achieved,
+        "best_grau_reached": ocr.best_grau_reached,
+        "time_elapsed": ocr.time_elapsed,
+        "legacy_capability_gaps": issues,
+        "winner": adapt_model_result(ocr.best_model),
+    }
+
+
+def value_block_from_legacy_validation(
+    vr: Optional["ValidationResult"],
+    *,
+    point: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Build the snapshot value object.
+
+    `point` must be the model's direct estimate. This function does not
+    derive it from valores_admissiveis_* or from a ±15% arbitration band.
+    """
+    from modules.result_contract import empty_value_block
+
+    block = empty_value_block()
+    block["point"] = point
+    if vr is None:
+        return block
+    if (
+        vr.valores_admissiveis_inferior is not None
+        and vr.valores_admissiveis_superior is not None
+    ):
+        block["admissible_interval"] = {
+            "lower": vr.valores_admissiveis_inferior,
+            "upper": vr.valores_admissiveis_superior,
+        }
+    return block
+

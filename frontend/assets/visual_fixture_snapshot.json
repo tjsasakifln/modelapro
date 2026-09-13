@@ -1,0 +1,64 @@
+{
+  "schema_version": "MP/1",
+  "job_id": "fixture-visual-local",
+  "project_id": null,
+  "input_sha256": "visual-fixture-not-a-real-case",
+  "code_sha": "local",
+  "reference_date": "2024-03-01",
+  "generated_at": "2024-03-02T12:00:00Z",
+  "target": {
+    "column": "preco",
+    "unit": "BRL",
+    "estimand": "valor de mercado do imóvel avaliando"
+  },
+  "value": {
+    "point": 512340.0,
+    "mean_ci80": {"lower": 490000.0, "upper": 534000.0},
+    "prediction_interval": {"lower": 430000.0, "upper": 600000.0},
+    "arbitration_interval": null,
+    "admissible_interval": {"lower": 450000.0, "upper": 580000.0}
+  },
+  "sample": {
+    "received": 40,
+    "observed_target": 38,
+    "prepared": 36,
+    "used": 34,
+    "excluded": 6,
+    "used_row_ids": ["r1", "r2", "r3"],
+    "excluded_row_ids": ["r40"]
+  },
+  "validation": {
+    "fundamentacao": {"grade": 2, "points": 11, "items": []},
+    "precisao": {"status": "classified", "grade": 2, "amplitude_pct": 18.5},
+    "statistical": {},
+    "documentary": {"provenance": "declared_by_user"},
+    "issuance": {
+      "status": "review_required",
+      "reasons": ["Tela de verificação visual local — não é conclusão real do caso."]
+    }
+  },
+  "issues": [
+    {
+      "code": "fixture_notice",
+      "severity": "warning",
+      "origin": "c09.fixture",
+      "message": "Verificação visual local com dados de exemplo — não é conclusão real do caso.",
+      "affected_ids": [],
+      "evidence": {}
+    }
+  ],
+  "model": {"formula": "exemplo local", "coefficients": {}, "diagnostics": {}},
+  "search": {},
+  "alternatives": [],
+  "next_actions": [
+    {
+      "code": "review_sample",
+      "priority": "high",
+      "reason": "Fixture de interface.",
+      "next_step": "Não emitir laudo a partir desta tela.",
+      "evidence_refs": ["visual_fixture_snapshot.json"],
+      "limitations": "Dados sintéticos rotulados; não representam um caso real."
+    }
+  ],
+  "provenance": {"kind": "visual_fixture"}
+}

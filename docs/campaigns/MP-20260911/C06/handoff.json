@@ -1,0 +1,103 @@
+{
+  "producer": "C06",
+  "contract_version": "MP/1",
+  "dependency_pr": "https://github.com/tjsasakifln/modelapro/pull/1",
+  "head_sha": "a416db2ea85c245018dd270171153800e6d494f1",
+  "exported_interface": {
+    "apply_transformation": {
+      "path": "modules.transformations.Transformer.apply_transformation",
+      "signature": "(series: pandas.Series, trans_type: str) -> (series, bool)",
+      "notes": "Return unpacks as two values for C04/C05. On failure the result also has failure_code in {unknown_name, domain_zero, domain_negative, nonfinite_input, nonfinite_output, overflow}. sqrt accepts 0; ln and inv_sqrt require >0; inverse and inv_sqr require !=0."
+    },
+    "domain_for": {
+      "path": "modules.transformations.Transformer.domain_for",
+      "signature": "(trans_type: str) -> dict|None"
+    },
+    "fit_target_transform": {
+      "path": "modules.target_transform.fit_target_transform",
+      "signature": "(y_train, name, options=None) -> state mapping"
+    },
+    "transform_target": {
+      "path": "modules.target_transform.transform_target",
+      "signature": "(y, state) -> array|series|float"
+    },
+    "inverse_target_prediction": {
+      "path": "modules.target_transform.inverse_target_prediction",
+      "signature": "(prediction, state, residual_context=None) -> mapping"
+    }
+  },
+  "state_fields": {
+    "schema_version": "MP/1",
+    "name": "identity|log",
+    "n_train": "int, training size only",
+    "domain": {
+      "requires_finite": "bool",
+      "requires_positive": "bool",
+      "includes_zero": "bool",
+      "includes_negative": "bool",
+      "description": "str"
+    },
+    "inverse": {
+      "invocation": "modules.target_transform.inverse_target_prediction",
+      "default_method": "identity|exponential",
+      "default_estimand": "E[Y|X]|exp(E[log Y|X])|median(Y|X)"
+    },
+    "parameters": "JSON-friendly scalars learned from y_train only (y_min, y_max; log also stores marginal log moments, explicitly not residual variance)",
+    "comparison_scale": "original",
+    "normative_interval_validated": "true only for identity"
+  },
+  "inverse_result_fields": {
+    "point": "original-unit scalar or list",
+    "estimand": "E[Y|X] or exp(E[log Y|X]) or median(Y|X)",
+    "method": "identity|exponential|lognormal_mean|smearing",
+    "assumptions": "list[str]",
+    "limitations": "list[str]",
+    "unit": "original",
+    "comparison_scale": "original",
+    "value": {
+      "point": "number|null",
+      "mean_ci80": "null unless identity and a finite original-scale mean interval was supplied",
+      "prediction_interval": null,
+      "arbitration_interval": null,
+      "admissible_interval": null
+    },
+    "retransformed_interval": "optional; interprets exp(E[log Y|X]); explicitly not mean_ci80",
+    "precisao": {"status": "not_computed", "grade": null, "amplitude_pct": null},
+    "normative_classification": {
+      "identity": {"status": "not_provided_by_c06"},
+      "log": {"status": "unavailable"}
+    }
+  },
+  "consumers": [
+    {
+      "consumer": "C16",
+      "required_callsite": "tests/test_audit_fixes.py::TestAvaliandoDomainPreFilter::test_transformation_invalid_for_avaliando_value_is_excluded_from_search",
+      "acceptance_case": "C06-A01 sqrt([0,1,4]) succeeds; avaliando idade=0 must no longer force exclusion of sqrt(idade). ln(0), inv_sqrt(0) and inverse(0) remain invalid.",
+      "change_requested": "Stop asserting that Transformer rejects sqrt at value <= 0. Keep asserting that ln, inv_sqrt, inverse and inv_sqr are excluded when avaliando idade is 0. Do not require rejection of sqrt(0)."
+    },
+    {
+      "consumer": "C04",
+      "required_callsite": "modules.model_builder: apply_transformation unpack; CandidateFit.target_transform_state; evaluate_fitted must inverse to original unit",
+      "acceptance_case": "C06-A05 original-unit inverse; identity numerically equivalent to untransformed Y; sqrt-on-X works even when log-Y intervals are experimental.",
+      "change_requested": "Continue unpacking apply_transformation as (series, bool). Persist target_transform_state from fit_target_transform (train only). Call inverse_target_prediction for subject point/interval. Do not put exponentiated log intervals into value.mean_ci80. Comments that lump sqrt with ln/inv_sqrt as strictly-positive are stale."
+    },
+    {
+      "consumer": "C05",
+      "required_callsite": "modules.optimal_combination._build_variable_options already calls apply_transformation",
+      "acceptance_case": "sqrt(0) is domain-valid for X; ranking must use original-unit metrics from inverse_target_prediction, not Shapiro of marginal X.",
+      "change_requested": "No C06 edit of this file. After C06, sqrt(avaliando=0) is offered. Compare candidates on original Y unit. Do not rank by Transformer.test_transformations normality scores. Comments that require strictly positive values for sqrt are stale."
+    },
+    {
+      "consumer": "C03",
+      "required_callsite": "assess_normative predict_original callback and precision interval",
+      "acceptance_case": "C06-A05: boundaries on original scale via inverse.invocation; log-Y has normative_classification.status=unavailable and precisao.status=not_computed.",
+      "change_requested": "Call modules.target_transform.inverse_target_prediction (state.inverse.invocation) so subject/frontiers are in the original unit. Do not assign a precision grade from an unvalidated log retransformation. Identity remains the legacy-correct path."
+    },
+    {
+      "consumer": "C07",
+      "required_callsite": "evaluate_procedure / out-of-sample predictor",
+      "acceptance_case": "C06-A04 train-only state; holdout residuals must not estimate smearing or lognormal sigma2.",
+      "change_requested": "Fit target transform on the training partition only. When calling inverse_target_prediction, residual_context.origin must be 'train' if a mean correction is requested. Never estimate the correction from the reserved set."
+    }
+  ]
+}

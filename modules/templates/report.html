@@ -2,91 +2,187 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Laudo de Avaliação — {{ app_name }}</title>
+<title>{{ document_kind }} — {{ app_name }}</title>
 <style>
   @page {
     size: A4;
-    margin: 2cm 1.8cm;
+    margin: 1.5cm 1.4cm 1.8cm 1.4cm;
     @bottom-center {
-      content: "Página " counter(page) " de " counter(pages);
+      content: "{{ document_kind }} — página " counter(page) " de " counter(pages);
       font-size: 8pt;
-      color: #666;
+      color: #555;
     }
   }
-  body {
-    font-family: "Helvetica", "Arial", sans-serif;
-    font-size: 10.5pt;
+  @page annex {
+    size: A4;
+    margin: 1.3cm 1.2cm 1.7cm 1.2cm;
+    @bottom-center {
+      content: "Anexo integral — página " counter(page) " de " counter(pages);
+      font-size: 8pt;
+      color: #555;
+    }
+  }
+  @page ledger {
+    size: A4 landscape;
+    margin: 1.2cm 1.1cm 1.6cm 1.1cm;
+    @bottom-center {
+      content: "Planilha integral — página " counter(page) " de " counter(pages);
+      font-size: 8pt;
+      color: #555;
+    }
+  }
+  html, body {
+    font-family: "DejaVu Sans", "Liberation Sans", "Helvetica", "Arial", sans-serif;
+    font-size: 10pt;
     color: #1a1a1a;
-    line-height: 1.4;
+    line-height: 1.35;
   }
   h1 {
-    font-size: 15pt;
+    font-size: 14pt;
     color: #0b3d5c;
-    margin-bottom: 0.2em;
+    margin: 0 0 0.15em 0;
   }
   h2 {
-    font-size: 12.5pt;
+    font-size: 11.5pt;
     color: #0b3d5c;
-    border-bottom: 1.5pt solid #0b3d5c;
-    padding-bottom: 3px;
-    margin-top: 1.4em;
-    margin-bottom: 0.6em;
+    border-bottom: 1.2pt solid #0b3d5c;
+    padding-bottom: 2px;
+    margin-top: 1.15em;
+    margin-bottom: 0.45em;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 10.5pt;
+    color: #0b3d5c;
+    margin: 0.8em 0 0.3em 0;
+    page-break-after: avoid;
   }
   .subtitle {
-    font-size: 10pt;
+    font-size: 9.5pt;
     color: #444;
-    margin-bottom: 1em;
+    margin-bottom: 0.7em;
   }
-  .meta-block p {
-    margin: 2px 0;
+  .minuta-banner {
+    background-color: #fff4d6;
+    border: 1.5pt solid #c48a00;
+    color: #4a3200;
+    padding: 8px 10px;
+    margin: 0.4em 0 0.8em 0;
+    border-radius: 3px;
   }
+  .minuta-banner strong { display: block; margin-bottom: 2px; }
+  .final-banner {
+    background-color: #e8f5ed;
+    border: 1.5pt solid #237a45;
+    color: #123d24;
+    padding: 8px 10px;
+    margin: 0.4em 0 0.8em 0;
+    border-radius: 3px;
+  }
+  .meta-block p { margin: 2px 0; }
   .meta-block b {
     display: inline-block;
-    min-width: 120px;
+    min-width: 148px;
   }
+  .pending { color: #8a1c1c; font-weight: bold; }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin: 0.6em 0 1em 0;
-    font-size: 9.5pt;
+    margin: 0.45em 0 0.8em 0;
+    font-size: 8.5pt;
+    page-break-inside: auto;
   }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
   th, td {
     border: 1px solid #ccc;
-    padding: 4px 6px;
+    padding: 3px 5px;
     text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+    hyphens: none;
   }
   th {
     background-color: #0b3d5c;
     color: #fff;
     font-weight: bold;
   }
-  tr:nth-child(even) td {
+  tr:nth-child(even) td { background-color: #f4f7f9; }
+  .metrics-grid td.label {
     background-color: #f4f7f9;
+    font-weight: bold;
+    width: 48%;
   }
   .formula-box {
     background-color: #f4f7f9;
     border: 1px solid #ccc;
     border-radius: 3px;
     padding: 8px 10px;
-    font-family: "Courier New", monospace;
-    font-size: 10pt;
-    margin: 0.6em 0;
+    font-family: "Courier New", "DejaVu Sans Mono", monospace;
+    font-size: 9pt;
+    margin: 0.5em 0;
+    overflow-wrap: anywhere;
+  }
+  .frozen-box {
+    background-color: #f7f7f7;
+    border: 1px solid #bbb;
+    font-family: "Courier New", "DejaVu Sans Mono", monospace;
+    font-size: 8pt;
+    padding: 8px 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .id-ledger {
+    font-family: "Courier New", "DejaVu Sans Mono", monospace;
+    font-size: 8pt;
+    overflow-wrap: anywhere;
+    line-height: 1.45;
   }
   .chart-img {
     width: 100%;
-    max-width: 480px;
+    max-width: 165mm;
+    max-height: 95mm;
     display: block;
-    margin: 0.6em auto;
+    margin: 0.4em auto;
+    page-break-inside: avoid;
   }
+  .chart-block { page-break-inside: avoid; margin-bottom: 0.8em; }
   .disclaimer {
     font-size: 9pt;
     color: #333;
     background-color: #fff8e1;
     border: 1px solid #e0c060;
     border-radius: 3px;
-    padding: 8px 10px;
-    margin: 0.6em 0;
+    padding: 7px 9px;
+    margin: 0.45em 0;
   }
+  .issue {
+    border-radius: 3px;
+    padding: 6px 8px;
+    margin: 0.3em 0;
+    font-size: 9pt;
+    page-break-inside: avoid;
+  }
+  .issue-normative { background: #fdecea; border: 1px solid #c0392b; }
+  .issue-statistical { background: #eaf2fb; border: 1px solid #1f4e79; }
+  .issue-documentary { background: #f4ecf7; border: 1px solid #6c3483; }
+  .issue-search { background: #fef5e7; border: 1px solid #b9770e; }
+  .issue-inference { background: #e8f6f3; border: 1px solid #117a65; }
+  .issue-other { background: #f4f4f4; border: 1px solid #666; }
+  .origin-badge, .severity-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 8pt;
+    font-weight: bold;
+    margin-right: 4px;
+    background: #0b3d5c;
+    color: #fff;
+  }
+  .severity-error { background: #922b21; }
+  .severity-warning { background: #b9770e; }
+  .severity-info { background: #1f4e79; }
   .badge {
     display: inline-block;
     padding: 2px 8px;
@@ -95,141 +191,497 @@
     color: #fff;
     font-weight: bold;
   }
-  .metrics-grid {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 0.6em 0;
+  .status-declared { background: #fef9e7; }
+  .status-present { background: #eaf2f8; }
+  .status-verified { background: #e8f8f5; }
+  .status-pending { background: #fdecea; }
+  .no-data { color: #666; font-style: italic; }
+  .annex { page: annex; page-break-before: always; }
+  .ledger { page: ledger; page-break-before: always; }
+  .long-wrap { overflow-wrap: anywhere; hyphens: none; }
+  .col-id, .col-num {
+    white-space: nowrap;
+    font-family: "DejaVu Sans Mono", "Courier New", monospace;
+    font-size: 7.5pt;
   }
-  .metrics-grid td {
-    border: 1px solid #ccc;
+  table.ledger-table { font-size: 7.5pt; }
+  table.correlation-panel { font-size: 7.8pt; table-layout: fixed; }
+  table.correlation-panel th, table.correlation-panel td {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+    padding: 2px 3px;
+  }
+  table.correlation-panel th:first-child { width: 24%; }
+  .rule-card {
+    border: 1px solid #aebbc4;
+    border-left: 4px solid #0b3d5c;
     padding: 6px 8px;
+    margin: 0.45em 0;
+    page-break-inside: avoid;
   }
-  .metrics-grid td.label {
-    background-color: #f4f7f9;
-    font-weight: bold;
-    width: 55%;
+  .rule-card p { margin: 2px 0; }
+  table.ledger-core { table-layout: fixed; font-size: 7.8pt; }
+  table.ledger-core th:nth-child(1) { width: 5%; }
+  table.ledger-core th:nth-child(2) { width: 16%; }
+  table.ledger-core th:nth-child(4), table.ledger-core th:nth-child(5) { width: 13%; }
+  table.ledger-values { table-layout: fixed; font-size: 7.8pt; }
+  table.ledger-values th, table.ledger-values td {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
   }
-  footer.report-footer {
-    margin-top: 1.6em;
-    padding-top: 8px;
-    border-top: 1px solid #ccc;
-    font-size: 8.5pt;
-    color: #555;
-  }
-  .no-data {
-    color: #777;
-    font-style: italic;
-  }
+  .ledger-note { page-break-inside: avoid; margin: 0 0 0.55em 0; }
+  .cell-token { display: block; color: #667; font-size: 4pt; white-space: nowrap; }
+  .seq { width: 2.4em; white-space: nowrap; }
+  .lead-value { font-size: 13pt; font-weight: bold; color: #0b3d5c; }
+  .tech-trail { page-break-before: always; }
+  .muted { color: #555; font-size: 8.5pt; }
+  .document-image { max-width: 100%; max-height: 12cm; object-fit: contain; page-break-inside: avoid; }
 </style>
 </head>
 <body>
 
-  <h1>{{ app_name }} — Laudo de Avaliação</h1>
-  <div class="subtitle">Método Comparativo Direto de Dados de Mercado — Tratamento Científico por Regressão Linear</div>
+  <h1>{{ app_name }} — {{ document_kind }}</h1>
+  <div class="subtitle">
+    {% if cost_route %}
+    Método da quantificação de custo — orçamento, BDI e depreciação documentados.
+    {% else %}
+    Método Comparativo Direto de Dados de Mercado — tratamento científico por regressão.
+    {% endif %}
+    {% if document_is_final %}
+    Laudo vinculado ao perfil, às regras e à revisão profissional identificados abaixo.
+    {% else %}
+    Saída técnica para revisão profissional; não substitui o laudo final do avaliador.
+    {% endif %}
+  </div>
+
+  <div class="{% if document_is_final %}final-banner{% else %}minuta-banner{% endif %}">
+    <strong>{{ issuance_label }}</strong>
+    {{ not_approved_label }}.
+    {% if not document_is_final %}
+    Grau de fundamentação ou precisão da tabela, quando informado,
+    não equivale a prontidão integral de emissão nem a aprovação automática.
+    {% endif %}
+    {% if issuance_reasons %}
+    <ul>
+      {% for reason in issuance_reasons %}
+      <li>{{ reason }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
 
   <div class="meta-block">
-    <p><b>Data de referência:</b> {{ data_referencia }}</p>
-    <p><b>Solicitante:</b> {{ solicitante or "Não informado" }}</p>
-    <p><b>Finalidade:</b> {{ finalidade or "Não informado" }}</p>
-    <p><b>Objetivo:</b> Determinação do valor de mercado do imóvel avaliando{{ (" (" + target_col + ")") if target_col else "" }}, pelo Método Comparativo Direto de Dados de Mercado, com tratamento científico por Inferência Estatística (Regressão Linear Múltipla), conforme NBR 14653-2.</p>
+    <p><b>Solicitante:</b> {{ applicant }}</p>
+    <p><b>Finalidade:</b> {{ purpose }}</p>
+    <p><b>Objetivo da avaliação:</b> {{ objective }}</p>
+    <p><b>Bem e direitos avaliados:</b> {{ asset_identification_display }}</p>
+    <p><b>Direitos:</b> {{ rights_display }}</p>
+    <p><b>Data-base (referência):</b>
+      {% if reference_date %}{{ reference_date }}
+      {% else %}<span class="pending">{{ reference_date_display }}</span>
+      {% endif %}
+    </p>
+    <p><b>Data de emissão desta revisão:</b> {{ generated_at }}</p>
+    {% if inspection_date %}
+    <p><b>Data de vistoria (informada no pedido, sem comprovar realização):</b> {{ inspection_date }}</p>
+    {% endif %}
+    <p><b>Unidade do valor-alvo:</b>
+      {% if unit_pending %}<span class="pending">{{ unit_display }} — não se presume BRL nem BRL/m²</span>
+      {% else %}{{ unit_display }}{% endif %}
+    </p>
+    <p><b>Estimando:</b> {{ target_estimand or "não informado" }}{% if target_col %} (coluna {{ target_col }}){% endif %}</p>
+    <p><b>Fontes dos dados:</b>
+      {% if sources %}
+        {% for src in sources %}
+          {{ src.id }} {{ src.label }}{% if src.citation %} ({{ src.citation }}){% endif %}{% if not loop.last %}; {% endif %}
+        {% endfor %}
+      {% else %}
+        Planilha de mercado utilizada nesta avaliação; identificadores técnicos na trilha ao final.
+        Não se inserem URL ou foto de mercado não pesquisadas.
+      {% endif %}
+    </p>
   </div>
 
-  <div class="disclaimer">
-    <b>Pressupostos e ressalvas:</b> os dados de mercado e as características do imóvel avaliando foram
-    considerados verídicos e representativos, conforme informados pelo usuário. Este laudo não dispensa
-    vistoria técnica in loco nem substitui a responsabilidade técnica do profissional habilitado.
-  </div>
-
-  {% if market_summary_rows %}
-  <h2>Diagnóstico do Mercado (NBR 14653-2 §10.1-f)</h2>
-  <p>Amostra de mercado utilizada na modelagem: <b>{{ market_summary_n }}</b> dados.</p>
-  <table>
-    <thead>
-      <tr>
-        <th>Variável-base</th>
-        <th>Mínimo</th>
-        <th>Média</th>
-        <th>Máximo</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in market_summary_rows %}
-      <tr>
-        <td>{{ row.name }}</td>
-        <td>{{ row.min }}</td>
-        <td>{{ row.mean }}</td>
-        <td>{{ row.max }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
+  <h2>Perfil, método e escopo qualificado</h2>
+  <table class="metrics-grid">
+    <tr><td class="label">Perfil resolvido</td><td>{{ qualification_profile_display }}</td></tr>
+    <tr><td class="label">Base de valor</td><td>{{ value_basis_display }}</td></tr>
+    <tr><td class="label">Método e justificativa</td><td>{{ methodology_display }}</td></tr>
+    <tr><td class="label">Escopo do bem</td><td>{{ qualification_profile.asset_scope or "PENDENTE" }}</td></tr>
+    <tr><td class="label">Destinatário</td><td>{{ qualification_profile.recipient_id or "PENDENTE" }}</td></tr>
+    <tr><td class="label">Estado do caso</td><td>{{ case_release_status }}</td></tr>
+    <tr><td class="label">Fingerprint do resultado</td><td class="long-wrap">{{ result_fingerprint or "PENDENTE" }}</td></tr>
   </table>
+  {% if document_state_blockers %}
+  <h3>Pendências que impedem laudo final</h3>
+  <ul>
+    {% for blocker in document_state_blockers %}
+    <li class="long-wrap"><b>{{ blocker.code }}</b> — {{ blocker.message }}</li>
+    {% endfor %}
+  </ul>
   {% endif %}
 
-  <h2>Especificação da Avaliação (Tabela 1 — NBR 14653-2)</h2>
-  <p>
-    Grau de Fundamentação atingido: <span class="badge">{{ grau_fundamentacao_label }}</span>
-    &nbsp;&nbsp;
-    Grau de Precisão atingido: <span class="badge">{{ grau_precisao_label }}</span>
+  <h2>Caracterização e pressupostos</h2>
+  <p><b>Região:</b> {{ region_characterization or "PENDENTE — caracterização da região não informada" }}</p>
+  <p><b>Imóvel:</b> {{ property_characterization or "PENDENTE — caracterização do imóvel não informada" }}</p>
+  <p><b>Diagnóstico do mercado:</b> {{ market_diagnosis }}</p>
+  {% if assumptions %}
+  <ul>{% for assumption in assumptions %}<li>{{ assumption }}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="pending">Pressupostos e ressalvas específicos não informados.</p>
+  {% endif %}
+
+  <h2>{% if document_is_final %}Resultado da avaliação{% else %}Resultado para revisão{% endif %}</h2>
+  <p class="lead-value">Estimativa pontual: {{ point_display }}
+    <span class="muted">(armazenado: {{ point_raw }}; arredondamento de resumo com {{ display_rounding_decimals }} casas)</span>
   </p>
-  {% if grau_precisao_note %}
-  <p class="no-data">{{ grau_precisao_note }}</p>
+  <p class="muted">
+    Os números são cópia do resultado já calculado. Este relatório
+    <b>não recalcula {% if cost_route %}o custo{% else %}regressão{% endif %}</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
+  </p>
+
+  <h2>Identificação do resultado</h2>
+  <table class="metrics-grid">
+    <tr>
+      <td class="label">Valor adotado e política</td>
+      <td>{{ adopted_value_display }} — {{ adopted_value_reason }}</td>
+    </tr>
+    <tr>
+      <td class="label">Estimativa pontual (snapshot.value.point)</td>
+      <td>{{ point_display }} <span class="no-data">(bruto: {{ point_raw }})</span></td>
+    </tr>
+    <tr>
+      <td class="label">IC da média (80%) — não é intervalo preditivo nem mediana</td>
+      <td>{{ mean_ci80_display }}</td>
+    </tr>
+    <tr>
+      <td class="label">Intervalo preditivo — distinto do IC da média</td>
+      <td>{{ prediction_interval_display }}</td>
+    </tr>
+    <tr>
+      <td class="label">Campo de arbítrio (intervalo de arbitragem)</td>
+      <td>{{ arbitration_interval_display }}</td>
+    </tr>
+    <tr>
+      <td class="label">Intervalo de valores admissíveis</td>
+      <td>{{ admissible_interval_display }}</td>
+    </tr>
+    <tr>
+      <td class="label">Média versus mediana</td>
+      <td>O ponto acima é a estimativa do snapshot (em geral média condicional / estimando declarado). Mediana, quando houver, aparece só na descritiva amostral e não substitui este ponto.</td>
+    </tr>
+  </table>
+  <h3>Observações do avaliador</h3>
+  {% if observations %}
+  <ul>{% for observation in observations %}<li>{{ observation }}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="pending">Pendência: observações do avaliador não informadas.</p>
+  {% endif %}
+
+  <h2>Regras aplicáveis e evidências</h2>
+  {% if qualification_rules %}
+  {% for rule in qualification_rules %}
+  <div class="rule-card">
+    <p><b class="col-id">{{ rule.rule_id }}</b> — <b>{{ rule.status_label }}</b> <span class="col-id">[{{ rule.status }}]</span></p>
+    <p>{{ rule.explanation }}</p>
+    <p><b>Fonte / edição:</b> {{ rule.source_display }}</p>
+    <p><b>Cláusula:</b> {{ rule.clause or "PENDENTE" }}</p>
+    <p><b>Valor observado:</b> {{ rule.observed_display }}</p>
+    <p><b>Evidência:</b> {{ rule.evidence_display }}</p>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="pending">Resultados do classificador canônico não fornecidos.</p>
+  {% endif %}
+
+  <h2>Revisão, assinatura e aceitação institucional</h2>
+  <p><b>Profissional responsável / qualificação legal:</b> {{ professional_identity_display }}</p>
+  <p><b>Revisão profissional:</b> {{ professional_review_display }}</p>
+  <p><b>Assinatura digital:</b> {{ digital_signature.status or "não verificada" }}.
+     A assinatura comprova autoria/integridade conforme a verificação registrada; não aprova o conteúdo técnico.</p>
+  <p><b>Aceitação do destinatário:</b> {{ institution_acceptance_display }}</p>
+
+  <h2>Documentos e fotografias autorizados</h2>
+  {% if documentary_attachments %}
+  {% for attachment in documentary_attachments %}
+  <div class="attachment">
+    <p><b>{{ attachment.name }}</b> — {{ attachment.media_type }} — {{ attachment.status }} — SHA-256 {{ attachment.sha256 or "PENDENTE" }}</p>
+    {% if attachment.image_data_uri %}<img class="document-image" src="{{ attachment.image_data_uri }}" alt="{{ attachment.name }}">{% endif %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="no-data">Nenhum arquivo documental foi fornecido para incorporação autorizada neste relatório.</p>
+  {% endif %}
+
+  <h2>Amostra — n recebido, observado, preparado e efetivo são distintos</h2>
+  <table class="metrics-grid">
+    <tr><td class="label">n recebido (snapshot.sample.received)</td><td>{{ n_received }}</td></tr>
+    <tr><td class="label">n com alvo observado (observed_target)</td><td>{{ n_observed }}</td></tr>
+    <tr><td class="label">n preparado (prepared)</td><td>{{ n_prepared }}</td></tr>
+    <tr><td class="label">n efetivo / usado (used)</td><td>{{ n_used }}</td></tr>
+    <tr><td class="label">n excluído (excluded)</td><td>{{ n_excluded }}</td></tr>
+    <tr><td class="label">Quantidade de used_row_ids no snapshot</td><td>{{ used_ids|length }}</td></tr>
+    <tr><td class="label">Quantidade de excluded_row_ids no snapshot</td><td>{{ excluded_ids|length }}</td></tr>
+  </table>
+  {% if used_count_mismatch or excluded_count_mismatch %}
+  <p class="pending">Pendência: a contagem n não coincide com o comprimento da lista de row_ids no snapshot. O relatório não corrige isso silenciosamente.</p>
+  {% endif %}
+
+  <h2>Enquadramento e limitações prioritárias</h2>
+  <p>
+    Grau de fundamentação informado: <span class="badge">{{ grau_fundamentacao_label }}</span>
+    {% if grau_fundamentacao_points is not none %} — pontos: {{ grau_fundamentacao_points }}{% endif %}
+    &nbsp;&nbsp; Precisão: <span class="badge">{{ precisao_status_label }}</span>
+    / <span class="badge">{{ grau_precisao_label }}</span>
+  </p>
+  <p class="muted">O grau da tabela, quando informado, não equivale a prontidão de emissão nem a laudo aprovado.</p>
+  {% if precisao_note %}<p class="disclaimer">{{ precisao_note }}</p>{% endif %}
+  {% if priority_limitations %}
+  <ul>
+    {% for issue in priority_limitations %}
+    <li class="long-wrap"><b>{{ issue.origin_label }}</b> — {{ issue.message }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <h2>Avisos e limitações (todos os issues do snapshot)</h2>
+  <p>Ressalvas não são omitidas nem substituídas por banner de sucesso. Cada origem permanece distinguível.</p>
+  {% if has_issues %}
+    {% for bucket, label in [("normative","Normativos"), ("statistical","Estatísticos"), ("documentary","Documentais"), ("search","Busca"), ("inference","Inferência"), ("other","Outros")] %}
+      <h3>{{ label }}</h3>
+      {% if issues_by_origin[bucket] %}
+        {% for issue in issues_by_origin[bucket] %}
+        <div class="issue issue-{{ bucket }}">
+          <span class="origin-badge">{{ issue.origin_label }}</span>
+          <span class="severity-badge severity-{{ issue.severity }}">{{ issue.severity }}</span>
+          <b>{{ issue.code }}</b> — {{ issue.message }}
+          {% if issue.affected_ids %}<div class="no-data">IDs afetados: {{ issue.affected_ids|join(" ") }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="no-data">Nenhum aviso classificado como {{ label|lower }} neste snapshot.</p>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="no-data">O snapshot não listou issues. A ausência de lista não é aprovação automática.</p>
+  {% endif %}
+
+  <h2>Precisão — status distinguível de grau</h2>
+  <p>
+    Status: <span class="badge">{{ precisao_status_label }}</span>
+    (código: {{ precisao_status }})
+    &nbsp;&nbsp; Grau informado: <span class="badge">{{ grau_precisao_label }}</span>
+  </p>
+  {% if precisao_note %}<p class="disclaimer">{{ precisao_note }}</p>{% endif %}
+  {% if precisao_amplitude_pct is not none %}
+  <p>Amplitude percentual informada no snapshot: {{ precisao_amplitude_pct }}.</p>
+  {% endif %}
+
+  <h2>Fundamentação (grau da tabela ≠ prontidão de emissão)</h2>
+  <p>Grau de fundamentação informado: <span class="badge">{{ grau_fundamentacao_label }}</span>
+     {% if grau_fundamentacao_points is not none %} — pontos: {{ grau_fundamentacao_points }}{% endif %}
+  </p>
+  {% if grau_fundamentacao_label == "Grau I" %}
+  <p><b>Justificativa para adoção do Grau I:</b> {{ grade_i_justification }}</p>
   {% endif %}
   {% if item_scores %}
   <table>
     <thead>
-      <tr>
-        <th>Item</th>
-        <th>Descrição</th>
-        <th>Grau Atingido</th>
-        <th>Detalhe</th>
-      </tr>
+      <tr><th>Item</th><th>Descrição</th><th>Grau / status</th><th>Pontos</th><th>Detalhe / evidência</th></tr>
     </thead>
     <tbody>
       {% for it in item_scores %}
       <tr>
         <td>{{ it.item }}</td>
-        <td>{{ it.description }}</td>
+        <td class="long-wrap">{{ it.description }}</td>
         <td>{{ it.grau_label }}</td>
-        <td>{{ it.detail }}</td>
+        <td>{{ it.points if it.points is not none else "PENDENTE" }}</td>
+        <td class="long-wrap">{{ it.detail }} {% if it.evidence_status %}(evidência: {{ it.evidence_status }}){% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p class="no-data">Detalhamento por item não disponível.</p>
+  <p class="no-data">Itens de fundamentação não detalhados no snapshot — campo pendente, sem narrativa fabricada.</p>
   {% endif %}
 
-  {% if exhaustive is sameas false %}
-  <div class="disclaimer">
-    <b>Ressalva metodológica sobre a busca de variáveis/transformações:</b> o espaço de combinações
-    (variável x transformação) excedeu o limite de segurança combinatória e a busca recorreu ao
-    fallback documentado de poda por correlação (top-N variáveis mais correlacionadas com o alvo){% if combinations_tested %}, tendo testado {{ combinations_tested }} combinações{% endif %}.
-    A garantia de ótimo global sobre TODO o espaço de busca NÃO se aplica a este resultado.
+  <h2>Documentos — declarado, presente e verificado são distintos</h2>
+  {% if documents %}
+  <table>
+    <thead><tr><th>Documento</th><th>Status</th><th>Proveniência</th></tr></thead>
+    <tbody>
+      {% for doc in documents %}
+      <tr class="status-{{ doc.status }}">
+        <td class="long-wrap">{{ doc.name }}</td>
+        <td>{{ doc.status_label }} ({{ doc.status }})</td>
+        <td class="long-wrap">{{ doc.provenance or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="no-data">Pontuação documental declarada não vira comprovação. Somente o status "verificado" indica verificação.</p>
+  {% else %}
+  <p class="pending">Pendência: nenhum documento declarado, presente ou verificado foi informado.</p>
+  {% endif %}
+
+  <h2>Busca de modelos</h2>
+  {% if search_approximate %}
+  <div class="disclaimer issue-search">
+    <b>Busca aproximada (não exaustiva).</b>
+    {% if search_summary %}{{ search_summary }}
+    {% else %}
+    A enumeração do espaço avaliado não é garantia de ótimo global nem de avaliação completa do critério de ranking.
+    {% endif %}
+    {% if search_mode %} Cobertura/método lidos do registro de busca: {{ search_mode }}.{% endif %}
+    {% if combinations_tested %} Especificações avaliadas: {{ combinations_tested }}.{% endif %}
+    {% if search_possible %} Espaço declarado: {{ search_possible }}.{% endif %}
+    {% if search_coverage %} Cobertura: {{ search_coverage }}.{% endif %}
+    {% if search_budget %} Orçamento de avaliações: {{ search_budget }}.{% endif %}
+    {% if search_objective %} Objetivo: {{ search_objective }}.{% endif %}
   </div>
-  {% elif exhaustive is sameas true %}
-  <p class="no-data">
-    Busca exaustiva: todas{% if combinations_tested %} ({{ combinations_tested }}){% endif %} as combinações
-    válidas de variável x transformação foram testadas; o modelo selecionado é o ótimo sobre todo o
-    espaço de busca.
+  {% elif search_exhaustive is sameas true or search_coverage == "exhaustive" %}
+  <p>{% if search_summary %}{{ search_summary }}{% else %}
+    Busca declarada como exaustiva no snapshot{% if combinations_tested %} ({{ combinations_tested }} combinações){% endif %}. Isso descreve a enumeração, não uma aprovação do valor.
+    {% endif %}
   </p>
+  {% elif search_coverage_known %}
+  <p>{% if search_summary %}{{ search_summary }}{% else %}A cobertura da busca foi registrada no snapshot.{% endif %}</p>
+  {% else %}
+  <p class="no-data">A cobertura da busca não consta deste snapshot; a minuta não infere o modo pela quantidade de linhas nem afirma ótimo global.</p>
+  {% endif %}
+  {% if search_limitations %}
+  <ul>
+    {% for item in search_limitations %}
+    <li>{{ item }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if search_message %}<p>{{ search_message }}</p>{% endif %}
+
+  <h2>Limitações de inferência</h2>
+  {% if inference_limitations %}
+  <ul>
+    {% for item in inference_limitations %}
+    <li>{{ item }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="no-data">Nenhuma limitação de inferência adicional foi anexada no contexto. A ausência de texto não elimina as limitações do estimando.</p>
   {% endif %}
 
-  {% if search_message %}
-  <div class="disclaimer">
-    <b>Observações adicionais da busca de variáveis/transformações:</b> {{ search_message }}
-  </div>
+  <h2>Recomendações concretas (next_actions)</h2>
+  {% if next_actions %}
+  <table>
+    <thead><tr><th>Código</th><th>Prioridade</th><th>Motivo</th><th>Próximo passo</th><th>Limitações</th></tr></thead>
+    <tbody>
+      {% for action in next_actions %}
+      <tr>
+        <td class="col-id">{{ action.code }}</td>
+        <td>{{ action.priority }}</td>
+        <td class="long-wrap">{{ action.reason }}</td>
+        <td class="long-wrap">{{ action.next_step }}</td>
+        <td class="long-wrap">{{ action.limitations }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="pending">Pendência: o snapshot não trouxe next_actions.</p>
   {% endif %}
 
-  <h2>Método e Procedimento — Modelo de Regressão</h2>
-  <p>Fórmula do modelo ajustado:</p>
-  <div class="formula-box">{{ formula or "Não disponível" }}</div>
-
+  {% if cost_route %}
+  <h2>Memória da quantificação de custo</h2>
+  <p>A memória abaixo reproduz o resultado armazenado. Preço de mercado, conversão cambial e atualização temporal não foram usados como fatores implícitos.</p>
+  <table>
+    <thead><tr><th>Parcela</th><th>Valor integral</th><th>Apresentação</th></tr></thead>
+    <tbody>
+      {% for item in cost_memory_rows %}
+      <tr><td>{{ item.label }}</td><td>{{ item.raw }}</td><td>{{ item.display }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <h3>Itens integrais</h3>
+  <table>
+    <thead><tr><th>ID</th><th>Categoria</th><th>Quantidade</th><th>Custo unitário</th><th>Total</th><th>Fonte</th></tr></thead>
+    <tbody>
+      {% for item in cost_items %}
+      <tr><td>{{ item.item_id }}</td><td>{{ item.category }}</td><td>{{ item.quantity }} {{ item.unit or '' }}</td><td>{{ item.unit_cost }} {{ item.currency or '' }}</td><td>{{ item.amount }} {{ item.currency or '' }}</td><td>{{ item.source }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <h2>Especificação estatística do modelo</h2>
+  <p>
+    Equação na escala de ajuste (<b>{{ fitting_scale }}</b>).
+    O valor do snapshot não foi recalculado a partir desta fórmula arredondada.
+  </p>
+  {% if formula_present %}
+  <div class="formula-box">{{ formula_display or formula }}</div>
+  {% if formula_storage and formula_storage != formula_display %}
+  <p class="muted">Precisão de armazenamento: <span class="formula-box">{{ formula_storage }}</span></p>
+  {% endif %}
+  {% else %}
+  <p class="no-data">Fórmula e coeficientes canônicos não foram fornecidos neste snapshot; a equação não foi inventada.</p>
+  {% endif %}
+  {% for note in formula_notes %}
+  <p class="disclaimer">{{ note }}</p>
+  {% endfor %}
+  <h3>Equação com a variável dependente na unidade original</h3>
+  {% if original_scale_formula_present %}
+  <div class="formula-box">{{ original_scale_formula }}</div>
+  {% if original_scale_formula_storage and original_scale_formula_storage != original_scale_formula %}
+  <p class="muted">Precisão de armazenamento: <span class="formula-box">{{ original_scale_formula_storage }}</span></p>
+  {% endif %}
+  <p>Método de retransformação: <b>{{ retransformation_method }}</b>. Estimando: <b>{{ retransformation_estimand }}</b>.</p>
+  {% else %}
+  <p class="pending">Pendência: forma na unidade original e método de retransformação não comprovados pelo snapshot.</p>
+  {% endif %}
+  {% endif %}
+  {% if variable_meanings %}
+  <h3>Significado das variáveis na especificação</h3>
+  <table>
+    <thead><tr><th>Variável</th><th>Papel</th><th>Significado</th></tr></thead>
+    <tbody>
+      {% for item in variable_meanings %}
+      <tr>
+        <td class="col-id">{{ item.variable }}</td>
+        <td>{{ item.role }}</td>
+        <td class="long-wrap">{{ item.meaning }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if transform_rows %}
+  <h3>Transformações das variáveis explicativas</h3>
+  <table>
+    <thead><tr><th>Variável</th><th>Transformação informada</th></tr></thead>
+    <tbody>
+      {% for row in transform_rows %}
+      <tr><td>{{ row.variable }}</td><td>{{ row.transform }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <h3>Critérios de enquadramento e escalas das variáveis</h3>
+  {% if variable_classification %}
+  <table>
+    <thead><tr><th>Variável</th><th>Critério de enquadramento</th><th>Codificação</th><th>Categorias</th><th>Escala</th></tr></thead>
+    <tbody>{% for row in variable_classification %}<tr>
+      <td>{{ row.variable }}</td><td>{{ row.criterion or "PENDENTE" }}</td>
+      <td>{{ row.coding or "PENDENTE" }}</td><td>{{ row.categories or "—" }}</td><td>{{ row.scale_values or "—" }}</td>
+    </tr>{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="pending">Pendência: critérios de enquadramento e escalas não informados.</p>{% endif %}
   {% if coef_rows %}
   <table>
     <thead>
       <tr>
         <th>Variável</th>
-        <th>Coeficiente</th>
+        <th>Coeficiente (apresentação)</th>
+        <th>Coeficiente (precisão do snapshot)</th>
         <th>P-valor</th>
         <th>VIF</th>
       </tr>
@@ -237,91 +689,321 @@
     <tbody>
       {% for row in coef_rows %}
       <tr>
-        <td>{{ row.variable }}</td>
+        <td class="long-wrap">{{ row.variable }}</td>
         <td>{{ row.coefficient }}</td>
-        <td>{{ row.pvalue }}</td>
+        <td>{{ row.coefficient_full }}</td>
+        <td>{{ row.pvalue }}<span class="cell-token">{{ row.pvalue_token }}</span></td>
         <td>{{ row.vif }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   <p class="no-data">
-    Observação (Anexo A.2.1.5.2): a norma não define limiar de corte para o VIF (Fator de Inflação de
-    Variância) — atenção especial é recomendada para correlações superiores a 0,80. O VIF acima é
-    apresentado a título informativo e não reprova o modelo.
+    A norma não define limiar de corte para o VIF — o valor é informativo e não reprova o modelo.
+    Campos técnicos sem evidência permanecem pendentes; não se fabrica narrativa.
   </p>
   {% else %}
-  <p class="no-data">Tabela de coeficientes não disponível.</p>
+  <p class="no-data">Tabela de coeficientes não disponível no snapshot.</p>
   {% endif %}
 
-  <h2>Tratamento dos Dados e Identificação do Resultado</h2>
+  <h3>Ajustamento (R²) — não é critério de avaliação superior</h3>
+  {% if metrics_present %}
   <table class="metrics-grid">
-    <tr><td class="label">R²</td><td>{{ metrics.r2 }}</td></tr>
-    <tr><td class="label">R² Ajustado</td><td>{{ metrics.r2_adjusted }}</td></tr>
-    <tr><td class="label">Estatística F (p-valor)</td><td>{{ metrics.f_statistic }} ({{ metrics.f_pvalue }})</td></tr>
-    <tr><td class="label">Durbin-Watson</td><td>{{ metrics.durbin_watson }}</td></tr>
+    <tr><td class="label">Coeficiente de correlação R</td><td>{{ metrics.r }}<span class="cell-token">{{ metrics.tokens.r }}</span></td></tr>
+    <tr><td class="label">R²</td><td>{{ metrics.r2 }}<span class="cell-token">{{ metrics.tokens.r2 }}</span></td></tr>
+    <tr><td class="label">R² ajustado</td><td>{{ metrics.r2_adjusted }}<span class="cell-token">{{ metrics.tokens.r2_adjusted }}</span></td></tr>
+    <tr><td class="label">Estatística F</td><td>{{ metrics.f_statistic }}<span class="cell-token">{{ metrics.tokens.f_statistic }}</span></td></tr>
+    <tr><td class="label">p-valor do teste F</td><td>{{ metrics.f_pvalue }}<span class="cell-token">{{ metrics.tokens.f_pvalue }}</span></td></tr>
+    <tr><td class="label">Durbin-Watson</td><td>{{ metrics.durbin_watson }}<span class="cell-token">{{ metrics.tokens.durbin_watson }}</span></td></tr>
   </table>
-
-  {% if chart_b64 %}
-  <p><b>Gráfico: Preços Observados vs. Valores Estimados</b> (NBR 14653-2, §8.2.1.4.1 / §10.1-k)</p>
-  <img class="chart-img" src="data:image/png;base64,{{ chart_b64 }}" alt="Observado vs. Estimado">
+  {% if metrics.r2_relation.present %}<p class="muted">{{ metrics.r2_relation.text }} Valores registrados: R² obtido de R = {{ metrics.r2_relation.r_squared }}; R² do ajuste = {{ metrics.r2_relation.r2 }}; diferença = {{ metrics.r2_relation.difference }}.</p>{% endif %}
+  <p class="disclaimer">
+    {{ metrics.note }}
+    Um R² maior não significa, por si só, avaliação superior, maior grau normativo, nem laudo melhor.
+    Erro de ajustamento da amostra utilizada não é desempenho de validação externa.
+  </p>
   {% else %}
-  <p class="no-data">Gráfico Observado vs. Estimado não disponível.</p>
+  <p class="no-data">{{ metrics.note }}</p>
   {% endif %}
 
-  {% if has_avaliando %}
-  <h2>Imóvel Avaliando</h2>
-  {% if avaliando_items %}
+  {% set diag = statistical_diagnostics %}
+  <h3>Diagnósticos estatísticos exigidos</h3>
+  {% if diag.outliers.present %}
+  <p><b>Dados discrepantes e influentes:</b> detectados {{ diag.outliers.detected }}<span class="cell-token">{{ diag.outliers.tokens.detected }}</span>; excluídos {{ diag.outliers.excluded }}<span class="cell-token">{{ diag.outliers.tokens.excluded }}</span>; influentes {{ diag.outliers.influential }}<span class="cell-token">{{ diag.outliers.tokens.influential }}</span>.</p>
+  {% for definition in diag.outliers.definition_rows %}
+  <p class="muted"><b>{{ definition.label }}:</b> {{ definition.text }} <span class="col-id">[{{ definition.key }}]</span></p>
+  {% endfor %}
+  {% else %}<p class="pending">Contagem de outliers não fornecida.</p>{% endif %}
+  {% if diag.normal_frequency.present %}
+  <table><thead><tr><th>Intervalo padronizado</th><th>Referência (%)</th><th>Observados</th><th>Amostra (%)</th></tr></thead><tbody>
+  {% for row in diag.normal_frequency.rows %}<tr><td>[-{{ row.z }}; +{{ row.z }}]<span class="cell-token">{{ row.tokens.z }}</span></td><td>{{ row.nominal_percent }}<span class="cell-token">{{ row.tokens.nominal_percent }}</span></td><td>{{ row.observed_count }}<span class="cell-token">{{ row.tokens.observed_count }}</span></td><td>{{ row.observed_percent }}<span class="cell-token">{{ row.tokens.observed_percent }}</span></td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="pending">Cotejo 68%/90%/95% dos resíduos padronizados não fornecido.</p>{% endif %}
+  {% for matrix in [diag.correlation, diag.correlation_design] %}
+  {% if matrix.present %}
+  <p><b>Matriz de correlações:</b> {{ matrix.scale_label }}, {{ matrix.sample_label }}, n={{ matrix.n }}. <span class="muted">Metadados: escala={{ matrix.scale }}; amostra={{ matrix.sample }}.</span></p>
+  {% for panel in matrix.panels %}
+  <p class="muted">Painel {{ panel.number }} de {{ matrix.panels|length }} — colunas {{ panel.variables|join(", ") }}.</p>
+  <table class="correlation-panel"><thead><tr><th>Variável (linha)</th>{% for variable in panel.variables %}<th>{{ variable }}</th>{% endfor %}</tr></thead><tbody>
+  {% for row in panel.rows %}<tr><th>{{ row.variable }}</th>{% for value in row["values"] %}<td>{{ value }}<span class="cell-token">{{ row.cell_tokens[loop.index0] }}</span></td>{% endfor %}</tr>{% endfor %}
+  </tbody></table>
+  {% endfor %}
+  {% endif %}{% endfor %}
+  {% if diag.elasticities.present %}
+  <p><b>Elasticidades no ponto de estimação:</b> método {{ diag.elasticities.method_label }}, ponto {{ diag.elasticities.point_label }}, passo relativo {{ diag.elasticities.relative_step }}. <span class="muted">Metadados: método={{ diag.elasticities.method }}; ponto={{ diag.elasticities.point }}.</span></p>
+  <table><thead><tr><th>Variável</th><th>Elasticidade</th><th>Valor-base</th><th>Predição-base</th><th>Passo</th><th>Derivada</th></tr></thead><tbody>
+  {% for row in diag.elasticities["items"] %}<tr><td>{{ row.variable }}<span class="cell-token">{{ row.tokens.variable }}</span></td><td>{{ row.elasticity }}<span class="cell-token">{{ row.tokens.elasticity }}</span></td><td>{{ row.base_value }}<span class="cell-token">{{ row.tokens.base_value }}</span></td><td>{{ row.base_prediction }}<span class="cell-token">{{ row.tokens.base_prediction }}</span></td><td>{{ row.step }}<span class="cell-token">{{ row.tokens.step }}</span></td><td>{{ row.derivative }}<span class="cell-token">{{ row.tokens.derivative }}</span></td></tr>{% endfor %}
+  </tbody></table>
+  {% for warning in diag.elasticities.warnings %}<p class="disclaimer">{{ warning }}</p>{% endfor %}
+  {% else %}<p class="pending">Elasticidades no ponto de estimação não fornecidas.</p>{% endif %}
+
+  {% if external_validation and external_validation.present %}
+  <h3>Validação externa (quando executada)</h3>
+  <p>Método informado: {{ external_validation.method }}. {{ external_validation.summary }}</p>
+  {% elif external_validation %}
+  <h3>Validação externa</h3>
+  <p class="no-data">{{ external_validation.summary }}</p>
+  {% endif %}
+
+  {% if alternatives %}
+  <h3>Alternativas registradas no snapshot</h3>
   <table>
-    <thead><tr><th>Variável</th><th>Valor Informado</th></tr></thead>
+    <thead><tr><th>Identificador</th><th>Resumo</th></tr></thead>
     <tbody>
-      {% for k, v in avaliando_items %}
-      <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+      {% for alt in alternatives %}
+      <tr><td>{{ alt.id }}</td><td class="long-wrap">{{ alt.summary }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endif %}
 
-  <table class="metrics-grid">
-    <tr><td class="label">Estimativa pontual de valor{{ (" (" + target_col + ")") if target_col else "" }}</td><td>{{ central_estimate }}</td></tr>
-    <tr><td class="label">Intervalo de confiança de 80% (Tabela 5)</td><td>{{ ic80_inferior }} a {{ ic80_superior }}</td></tr>
-    <tr><td class="label">Campo de arbítrio (±15%, NBR 14653-1 3.8 / NBR 14653-2 8.2.1.5.1)</td><td>{{ campo_arbitrio_inferior }} a {{ campo_arbitrio_superior }}</td></tr>
-    <tr><td class="label">Valores admissíveis (interseção IC 80% ∩ campo de arbítrio — Anexo A.10.1.1)</td><td>{{ valores_admissiveis_inferior }} a {{ valores_admissiveis_superior }}</td></tr>
-  </table>
+  <h2>Gráficos de resíduos e ajustamento (legendas em português)</h2>
+  <p>
+    Legendas em português (quando renderizados): Resíduos versus valores ajustados;
+    Histograma dos resíduos; Observado versus estimado.
+    Não se utilizam títulos em inglês.
+  </p>
+  {% if charts.observed_vs_estimated %}
+  <div class="chart-block">
+    <p><b>Gráfico: Observado versus estimado</b></p>
+    <img class="chart-img" src="data:image/png;base64,{{ charts.observed_vs_estimated }}" alt="Observado versus estimado">
+  </div>
+  {% endif %}
+  {% if charts.residuals_vs_fitted %}
+  <div class="chart-block">
+    <p><b>Gráfico: Resíduos versus valores ajustados</b></p>
+    <img class="chart-img" src="data:image/png;base64,{{ charts.residuals_vs_fitted }}" alt="Resíduos versus valores ajustados">
+  </div>
+  {% endif %}
+  {% if charts.residuals_hist %}
+  <div class="chart-block">
+    <p><b>Gráfico: Histograma dos resíduos{% if statistical_diagnostics.standardized_residuals.present %} padronizados{% endif %}</b></p>
+    <img class="chart-img" src="data:image/png;base64,{{ charts.residuals_hist }}" alt="Histograma dos resíduos padronizados">
+  </div>
+  {% endif %}
+  {% if chart_warning %}
+  <p class="disclaimer">Aviso de gráfico: {{ chart_warning.message }}. O cálculo do snapshot permanece inalterado; séries desalinhadas não foram plotadas.</p>
+  {% endif %}
+  {% if not charts %}
+  <p class="no-data">{{ chart_absence_reason or "Os gráficos de resíduos e ajustamento não constam desta minuta porque as séries alinhadas não foram fornecidas no contexto do relatório. O cálculo do snapshot permanece inalterado." }}</p>
   {% endif %}
 
-  {% if market_data_table %}
-  <h2>Planilha dos Dados de Mercado Utilizados (NBR 14653-2 §10.1-i)</h2>
+  {% if has_subject %}
+  <h2>Imóvel avaliando (características informadas no contexto)</h2>
+  <table>
+    <thead><tr><th>Variável</th><th>Valor informado</th></tr></thead>
+    <tbody>
+      {% for k, v in subject_items %}
+      <tr><td class="long-wrap">{{ k }}</td><td class="long-wrap">{{ v }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if subject_geolocation %}
+  <p><b>Geolocalização do avaliando:</b> latitude {{ subject_geolocation.latitude }}, longitude {{ subject_geolocation.longitude }}; endereço {{ subject_geolocation.address or "PENDENTE" }}; fonte {{ subject_geolocation.source or "PENDENTE" }}; sistema {{ subject_geolocation.coordinate_system }}.</p>
+  {% endif %}
+  {% endif %}
+
+  {% if market_summary_rows %}
+  <h2>Descritiva amostral (mínimo, média, mediana, máximo)</h2>
+  <p class="disclaimer">
+    Esta tabela é descritiva da amostra informada (n = {{ market_summary_n }}).
+    <b>Não é diagnóstico substantivo completo do mercado</b> nem substitui análise de homogeneidade,
+    liquidez, segmentação ou representatividade.
+  </p>
   <table>
     <thead>
       <tr>
-        {% for col in market_data_table.columns %}
-        <th>{{ col }}</th>
-        {% endfor %}
+        <th>Variável-base</th>
+        <th>Unidade</th>
+        <th>Mínimo</th>
+        <th>Média</th>
+        <th>Mediana</th>
+        <th>Máximo</th>
       </tr>
     </thead>
     <tbody>
-      {% for row in market_data_table.rows %}
+      {% for row in market_summary_rows %}
       <tr>
-        {% for v in row %}
-        <td>{{ v }}</td>
-        {% endfor %}
+        <td class="long-wrap">{{ row.name }}</td>
+        <td>{{ row.unit or "—" }}</td>
+        <td>{{ row.min }}</td>
+        <td>{{ row.mean }}</td>
+        <td>{{ row.median }}</td>
+        <td>{{ row.max }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
-  {% if market_data_table.truncated %}
-  <p class="no-data">
-    Exibindo {{ market_data_table.shown_rows }} de {{ market_data_table.total_rows }} registros
-    (tabela truncada para manter o laudo em tamanho gerenciável).
-  </p>
-  {% endif %}
   {% endif %}
 
-  <footer class="report-footer">
-    Laudo gerado automaticamente pelo CONFENGE MODELA PRO — requer revisão e assinatura de profissional
-    habilitado (Engenheiro de Avaliações) antes de uso oficial, conforme NBR 14653-2 §10.1-m.
-  </footer>
+  <div class="ledger">
+  <h2>Registros efetivamente usados (integral)</h2>
+  <p>
+    Entrega integral: todos os <b>{{ used_ids|length }}</b> identificadores de
+    <code>used_row_ids</code> constam neste PDF (tabela paginada em paisagem e lista do anexo).
+    Não há truncamento às primeiras 200 linhas.
+  </p>
+  {% if used_rows %}
+  <h3>Identificação, fonte e geolocalização</h3>
+  <table class="ledger-core">
+    <thead>
+      <tr>
+        <th class="seq">nº</th>
+        <th class="col-id">row_id</th>
+        <th>Fonte</th><th>Endereço</th><th>Latitude</th><th>Longitude</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in used_rows %}
+      <tr>
+        <td class="seq">{{ row.seq }}</td>
+        <td class="col-id">{{ row.row_id }}<span class="cell-token">{{ row.cell_tokens.row_id }}</span></td>
+        <td class="long-wrap">{{ row.source }}<span class="cell-token">{{ row.cell_tokens.source }}</span></td>
+        <td class="long-wrap">{{ row.address or "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.address }}</span></td><td class="col-num">{{ row.latitude if row.latitude is not none else "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.latitude }}</span></td><td class="col-num">{{ row.longitude if row.longitude is not none else "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.longitude }}</span></td>
+      </tr>
+      <tr><td colspan="6" class="ledger-note"><b>Justificativa:</b> {{ row.justification }}<span class="cell-token">{{ row.cell_tokens.justification }}</span>{% if row.label %}<b>Rótulo:</b> {{ row.label }}<span class="cell-token">{{ row.cell_tokens.label }}</span>{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% for panel in used_value_panels %}
+  <h3>Valores da amostra — painel {{ panel.number }} de {{ used_value_panels|length }}</h3>
+  <table class="ledger-values"><thead><tr><th>nº</th><th>row_id</th>{% for col in panel.columns %}<th>{{ col }}<span class="cell-token">{{ panel.header_tokens[loop.index0] }}</span></th>{% endfor %}</tr></thead><tbody>
+  {% for row in panel.rows %}<tr><td class="seq">{{ row.seq }}</td><td class="col-id">{{ row.row_id }}<span class="cell-token">{{ row.row_id_token }}</span></td>{% for cell in row.cells %}<td class="col-num">{{ cell }}<span class="cell-token">{{ row.cell_tokens[loop.index0] }}</span></td>{% endfor %}</tr>{% endfor %}
+  </tbody></table>
+  {% endfor %}
+  {% else %}
+  <p class="no-data">Nenhum used_row_id no snapshot.</p>
+  {% endif %}
+
+  <h2>Registros excluídos (integral)</h2>
+  {% if excluded_rows %}
+  <table class="ledger-core">
+    <thead>
+      <tr>
+        <th class="seq">nº</th>
+        <th class="col-id">row_id</th>
+        <th>Fonte</th>
+        <th>Justificativa</th>
+        <th>Endereço</th><th>Latitude</th><th>Longitude</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in excluded_rows %}
+      <tr>
+        <td class="seq">{{ row.seq }}</td>
+        <td class="col-id">{{ row.row_id }}<span class="cell-token">{{ row.cell_tokens.row_id }}</span></td>
+        <td class="long-wrap">{{ row.source }}<span class="cell-token">{{ row.cell_tokens.source }}</span></td>
+        <td class="long-wrap">{{ row.justification }}<span class="cell-token">{{ row.cell_tokens.justification }}</span></td>
+        <td class="long-wrap">{{ row.address or "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.address }}</span></td>
+        <td class="col-num">{{ row.latitude if row.latitude is not none else "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.latitude }}</span></td>
+        <td class="col-num">{{ row.longitude if row.longitude is not none else "PENDENTE" }}<span class="cell-token">{{ row.cell_tokens.longitude }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% for panel in excluded_value_panels %}
+  <h3>Valores excluídos — painel {{ panel.number }} de {{ excluded_value_panels|length }}</h3>
+  <table class="ledger-values"><thead><tr><th>nº</th><th>row_id</th>{% for col in panel.columns %}<th>{{ col }}<span class="cell-token">{{ panel.header_tokens[loop.index0] }}</span></th>{% endfor %}</tr></thead><tbody>
+  {% for row in panel.rows %}<tr><td class="seq">{{ row.seq }}</td><td class="col-id">{{ row.row_id }}<span class="cell-token">{{ row.row_id_token }}</span></td>{% for cell in row.cells %}<td class="col-num">{{ cell }}<span class="cell-token">{{ row.cell_tokens[loop.index0] }}</span></td>{% endfor %}</tr>{% endfor %}
+  </tbody></table>
+  {% endfor %}
+  {% else %}
+  <p class="no-data">Nenhum excluded_row_id no snapshot.</p>
+  {% endif %}
+  </div>
+
+  <div class="annex">
+    <h2>Anexo — demonstrativo da pontuação de fundamentação e precisão</h2>
+    {% if item_scores %}
+    <table><thead><tr><th>Item</th><th>Descrição</th><th>Grau/status</th><th>Pontos</th><th>Evidência</th></tr></thead><tbody>
+    {% for it in item_scores %}<tr><td>{{ it.item }}</td><td>{{ it.description }}</td><td>{{ it.grau_label }}</td><td>{{ it.points if it.points is not none else "PENDENTE" }}</td><td>{{ it.detail }} {{ it.evidence_status }}</td></tr>{% endfor %}
+    </tbody></table>
+    <p>Grau de precisão: {{ grau_precisao_label }}{% if precisao_amplitude_pct is not none %}; amplitude {{ precisao_amplitude_pct }}%{% endif %}.</p>
+    {% else %}<p class="pending">Demonstrativo por item não fornecido.</p>{% endif %}
+
+    <h2>Anexo integral — identificadores usados e excluídos</h2>
+    <p>
+      Este anexo faz parte dos mesmos bytes do PDF. A lista abaixo é completa
+      (não é recorte das primeiras 200 linhas).
+    </p>
+    <h3>Identificadores usados (n={{ used_ids|length }})</h3>
+    <p class="id-ledger" id="used-ids-integral">{{ used_ids_joined }}</p>
+    <h3>Identificadores excluídos (n={{ excluded_ids|length }})</h3>
+    <p class="id-ledger" id="excluded-ids-integral">{{ excluded_ids_joined }}</p>
+
+    {% for annex in annexes %}
+    <h3>{{ annex.title }}</h3>
+    {% if annex.note %}<p>{{ annex.note }}</p>{% endif %}
+    {% if annex.columns %}
+    <table>
+      <thead>
+        <tr>
+          {% for col in annex.columns %}
+          <th class="long-wrap">{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in annex.rows %}
+        <tr>
+          {% for cell in row %}
+          <td class="long-wrap">{{ cell }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="tech-trail">
+  <h2>Trilha técnica (não substitui o resumo)</h2>
+  <p class="muted">
+    Identificadores técnicos, hashes e campos congelados MP/1 ficam nesta trilha.
+    O resumo anterior é a minuta para revisão; esta seção preserva a ligação com a evidência.
+  </p>
+  {% if model_id %}<p>Identificador do modelo: {{ model_id }}</p>{% endif %}
+  {% if model_revision %}<p>Revisão do modelo: {{ model_revision }}</p>{% endif %}
+  {% if job_id %}<p>Job: {{ job_id }}</p>{% endif %}
+  {% if project_id %}<p>Projeto: {{ project_id }}</p>{% endif %}
+  {% if model_sha %}<p>SHA do modelo: {{ model_sha }}</p>{% endif %}
+  {% if code_sha %}<p>SHA de código: {{ code_sha }}</p>{% endif %}
+  {% if input_sha256 %}<p>SHA da entrada: {{ input_sha256 }}</p>{% endif %}
+  {% if technical_sources %}
+  <p>Identificadores técnicos de fonte:
+    {% for src in technical_sources %}{{ src.id }}={{ src.citation }}{% if not loop.last %}; {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+  <p>
+    Os números abaixo são cópia do snapshot. Este relatório
+    <b>não recalcula {% if cost_route %}o custo{% else %}regressão{% endif %}</b> e <b>não reconstrói o ponto a partir de intervalos</b>.
+  </p>
+  <div class="frozen-box" id="snapshot-frozen">{% for line in frozen_lines %}{{ line }}
+{% endfor %}</div>
+  <h3>Proveniência (sem caminhos locais nem segredos)</h3>
+  <div class="frozen-box">{{ provenance_safe }}</div>
+  </div>
 
 </body>
 </html>
