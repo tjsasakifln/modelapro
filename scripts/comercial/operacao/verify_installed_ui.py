@@ -72,6 +72,7 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
     }
     browser = None
     page = None
+    playwright_manager = None
     try:
         try:
             from importlib.metadata import version
@@ -79,80 +80,81 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
         except ImportError as exc:
             raise BrowserVerificationError(f"Playwright controller is not installed: {exc}") from exc
         result["playwright_version"] = version("playwright")
-        with sync_playwright() as playwright:
-            try:
-                browser = playwright.chromium.launch(headless=True)
-            except Exception as exc:
-                raise BrowserVerificationError(f"Chromium did not start: {exc}") from exc
-            result["browser_version"] = browser.version
-            context = browser.new_context(viewport={"width": 1440, "height": 1000})
-            page = context.new_page()
-            page.on(
-                "console",
-                lambda message: result["console_errors"].append(message.text)
-                if message.type == "error"
-                else None,
-            )
-            page.on("pageerror", lambda error: result["page_errors"].append(str(error)))
-            page.goto(url, wait_until="domcontentloaded", timeout=90000)
-            page.get_by_text("MODELA PRO", exact=True).first.wait_for(timeout=90000)
-            page.get_by_role(
-                "heading", name="1. Encomenda e perfil", exact=True
-            ).wait_for(state="visible", timeout=60000)
-            build_label = page.get_by_text(TEST_BUILD_LABEL, exact=True).first
-            try:
-                build_label.wait_for(state="visible", timeout=30000)
-                result["test_build_label_visible"] = True
-            except Exception:
-                result["test_build_label_visible"] = False
+        playwright_manager = sync_playwright()
+        playwright = playwright_manager.start()
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception as exc:
+            raise BrowserVerificationError(f"Chromium did not start: {exc}") from exc
+        result["browser_version"] = browser.version
+        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+        page = context.new_page()
+        page.on(
+            "console",
+            lambda message: result["console_errors"].append(message.text)
+            if message.type == "error"
+            else None,
+        )
+        page.on("pageerror", lambda error: result["page_errors"].append(str(error)))
+        page.goto(url, wait_until="domcontentloaded", timeout=90000)
+        page.get_by_text("MODELA PRO", exact=True).first.wait_for(timeout=90000)
+        page.get_by_role(
+            "heading", name="1. Encomenda e perfil", exact=True
+        ).wait_for(state="visible", timeout=60000)
+        build_label = page.get_by_text(TEST_BUILD_LABEL, exact=True).first
+        try:
+            build_label.wait_for(state="visible", timeout=30000)
+            result["test_build_label_visible"] = True
+        except Exception:
+            result["test_build_label_visible"] = False
 
-            profile = page.locator("[data-testid='stSelectbox']").filter(
-                has_text="Perfil de qualificação (versionado, catálogo conhecido)"
+        profile = page.locator("[data-testid='stSelectbox']").filter(
+            has_text="Perfil de qualificação (versionado, catálogo conhecido)"
+        )
+        profile.first.wait_for(state="visible", timeout=60000)
+        if profile.count() != 1:
+            raise BrowserVerificationError("installed UI profile selector is absent or duplicated")
+        profile.get_by_role("combobox").click()
+        options = page.locator("[role='option']")
+        options.first.wait_for(timeout=15000)
+        labels = {text.strip() for text in options.all_inner_texts() if text.strip()}
+        if labels != EXPECTED_PROFILE_LABELS:
+            raise BrowserVerificationError(
+                f"installed UI catalog differs from the six expected labels: {sorted(labels)}"
             )
-            profile.first.wait_for(state="visible", timeout=60000)
-            if profile.count() != 1:
-                raise BrowserVerificationError("installed UI profile selector is absent or duplicated")
-            profile.get_by_role("combobox").click()
-            options = page.locator("[role='option']")
-            options.first.wait_for(timeout=15000)
-            labels = {text.strip() for text in options.all_inner_texts() if text.strip()}
-            if labels != EXPECTED_PROFILE_LABELS:
-                raise BrowserVerificationError(
-                    f"installed UI catalog differs from the six expected labels: {sorted(labels)}"
-                )
-            page.keyboard.press("Escape")
+        page.keyboard.press("Escape")
 
-            uploader = page.locator("[data-testid='stFileUploader']").filter(
-                has_text="Arquivo de dados de mercado"
-            ).locator("input[type=file]")
-            uploader.first.wait_for(state="attached", timeout=60000)
-            if uploader.count() != 1:
-                raise BrowserVerificationError("installed UI market-data uploader is absent or duplicated")
-            uploader.set_input_files(str(input_path))
-            # The first packaged preview intentionally triggers the deferred
-            # scientific/document import closure on a clean Windows profile.
-            page.locator("input[placeholder='ex.: 73,5']").first.wait_for(timeout=180000)
-            body = page.inner_text("body")
-            lowered = body.lower()
-            forbidden = [badge for badge in FORBIDDEN_BADGES if badge in lowered]
-            if forbidden:
-                raise BrowserVerificationError(f"installed UI displayed forbidden acceptance badges: {forbidden}")
-            if "Dados não utilizados" not in body:
-                raise BrowserVerificationError("installed UI did not render the API-backed sample preview")
-            if result["page_errors"]:
-                raise BrowserVerificationError(f"installed UI raised page errors: {result['page_errors']}")
-            if not result["test_build_label_visible"]:
-                raise BrowserVerificationError("installed UI omitted its mandatory synthetic TEST build label")
-            result["profile_labels"] = sorted(labels)
-            result["preview_visible"] = True
-            result["status"] = "PASSED"
-            page.screenshot(path=str(screenshot), full_page=True)
-            result["screenshot"] = {
-                "path": screenshot.name,
-                "size": screenshot.stat().st_size,
-                "sha256": _sha256(screenshot),
-            }
-            return result
+        uploader = page.locator("[data-testid='stFileUploader']").filter(
+            has_text="Arquivo de dados de mercado"
+        ).locator("input[type=file]")
+        uploader.first.wait_for(state="attached", timeout=60000)
+        if uploader.count() != 1:
+            raise BrowserVerificationError("installed UI market-data uploader is absent or duplicated")
+        uploader.set_input_files(str(input_path))
+        # The first packaged preview intentionally triggers the deferred
+        # scientific/document import closure on a clean Windows profile.
+        page.locator("input[placeholder='ex.: 73,5']").first.wait_for(timeout=180000)
+        body = page.inner_text("body")
+        lowered = body.lower()
+        forbidden = [badge for badge in FORBIDDEN_BADGES if badge in lowered]
+        if forbidden:
+            raise BrowserVerificationError(f"installed UI displayed forbidden acceptance badges: {forbidden}")
+        if "Dados não utilizados" not in body:
+            raise BrowserVerificationError("installed UI did not render the API-backed sample preview")
+        if result["page_errors"]:
+            raise BrowserVerificationError(f"installed UI raised page errors: {result['page_errors']}")
+        if not result["test_build_label_visible"]:
+            raise BrowserVerificationError("installed UI omitted its mandatory synthetic TEST build label")
+        result["profile_labels"] = sorted(labels)
+        result["preview_visible"] = True
+        result["status"] = "PASSED"
+        page.screenshot(path=str(screenshot), full_page=True)
+        result["screenshot"] = {
+            "path": screenshot.name,
+            "size": screenshot.stat().st_size,
+            "sha256": _sha256(screenshot),
+        }
+        return result
     except BaseException as exc:
         result["status"] = "FAILED"
         result["error"] = {"type": type(exc).__name__, "detail": str(exc)}
@@ -171,6 +173,11 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
         if browser is not None:
             try:
                 browser.close()
+            except Exception:
+                pass
+        if playwright_manager is not None:
+            try:
+                playwright_manager.stop()
             except Exception:
                 pass
         (evidence / f"{phase}-installed-ui.json").write_text(

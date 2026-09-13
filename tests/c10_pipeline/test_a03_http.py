@@ -38,8 +38,17 @@ def test_post_jobs_202_and_get_recovers_result_twice():
         assert resp.status_code == 202, resp.text
         body = resp.json()
         assert body["job_id"]
+        assert isinstance(body["access_token"], str) and body["access_token"]
         assert body["status_url"] == f"/jobs/{body['job_id']}"
         job_id = body["job_id"]
+
+        assert client.get(
+            f"/jobs/{job_id}/result", headers={"X-Job-Token": "wrong"}
+        ).status_code == 403
+        assert client.get(
+            f"/jobs/{job_id}/result",
+            headers={"X-Job-Token": body["access_token"]},
+        ).status_code == 200
 
         status = client.get(f"/jobs/{job_id}")
         assert status.status_code == 200
@@ -128,6 +137,7 @@ def test_idempotent_resubmit_does_not_duplicate_work():
     assert second.status_code == 202
     assert first.json()["job_id"] == second.json()["job_id"]
     assert second.json().get("idempotent_replay") is True
+    assert second.json().get("access_token") is None
     assert runner.submitted == [first.json()["job_id"]]
     assert log.names().count("search_models") == 1
 

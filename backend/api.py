@@ -555,7 +555,15 @@ def _create_job_record(store, *, idempotency_key: str, project_id: Optional[str]
     else:
         is_new = True
     RuntimeBindings.submission_index[idempotency_key] = job_id
-    return {"job_id": job_id, "state": created.get("state") or "queued", "created": is_new}
+    return {
+        "job_id": job_id,
+        "state": created.get("state") or "queued",
+        "created": is_new,
+        # A newly created job has no other authenticated way for its caller to
+        # learn this capability.  Replays deliberately use the guarded token
+        # recovery endpoint instead of returning the stored secret again.
+        "access_token": created.get("access_token") if is_new else None,
+    }
 
 
 def _cancel_flag(job_store, runner, job_id: str) -> Callable[[], bool]:

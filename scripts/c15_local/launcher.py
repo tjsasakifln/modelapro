@@ -104,6 +104,10 @@ def service_environment(cfg) -> dict[str, str]:
     """Bind the packaged UI client to the API address selected by the launcher."""
     env = os.environ.copy()
     env.setdefault("MODELA_API_URL", cfg.API_PUBLIC_URL)
+    # The first preview in a frozen process loads the scientific import graph.
+    # Keep the normal installed path above the measured cold-start time while
+    # preserving an operator's explicit timeout choice.
+    env.setdefault("MODELA_API_TIMEOUT", "120")
     return env
 
 
