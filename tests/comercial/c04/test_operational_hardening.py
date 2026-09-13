@@ -53,10 +53,13 @@ def test_windows_private_acl_command_excludes_inherited_users_and_owner_rights()
     assert f"*{user_sid}:(OI)(CI)F" in command
     assert "SYSTEM:(OI)(CI)F" in command
     assert "*S-1-5-32-544:(OI)(CI)F" in command
-    assert "S-1-5-32-545" not in joined
+    assert command.count("/remove:g") == 3
+    assert "*S-1-3-4" in command
+    assert "*S-1-5-32-545" in command
+    assert "*S-1-1-0" in command
+    assert "/T" in command
     assert "Users" not in joined
     assert "Everyone" not in joined
-    assert "S-1-3-4" not in joined
     assert "OWNER RIGHTS" not in joined
 
 
@@ -87,7 +90,8 @@ def test_ensure_local_directories_restricts_windows_runtime_root(tmp_path, monke
     assert observed
     assert observed[0][1] == str(root)
     assert all(item[2] == "/inheritance:r" for item in observed)
-    assert all("S-1-5-32-545" not in " ".join(item) for item in observed)
+    assert all("/grant:r" in item and "*S-1-5-32-545" not in item[item.index("/grant:r"):item.index("/remove:g")] for item in observed)
+    assert all(item.count("/remove:g") >= 1 and "*S-1-5-32-545" in item for item in observed)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX chmod bits; Windows uses restrict_private_path")
