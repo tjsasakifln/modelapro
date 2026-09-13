@@ -57,7 +57,7 @@ def test_windows_private_acl_command_excludes_inherited_users_and_owner_rights()
     assert "*S-1-3-4" in command
     assert "*S-1-5-32-545" in command
     assert "*S-1-1-0" in command
-    assert "/T" in command
+    assert "/T" not in command
     assert "Users" not in joined
     assert "Everyone" not in joined
     assert "OWNER RIGHTS" not in joined

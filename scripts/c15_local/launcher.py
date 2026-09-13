@@ -170,8 +170,6 @@ def windows_private_acl_command(path: str, user_sid: str, *, is_dir: bool) -> li
         "/remove:g",
         "*S-1-1-0",
     ]
-    if is_dir:
-        command.append("/T")
     return command
 
 
@@ -221,6 +219,9 @@ def ensure_local_directories(cfg) -> None:
     for path in paths:
         os.makedirs(path, mode=0o700, exist_ok=True)
         restrict_private_path(path)
+    log_file = os.path.join(cfg.LOG_DIR, "modelapro.log")
+    if os.path.isfile(log_file):
+        restrict_private_path(log_file)
 
 
 def _print_commands(cfg) -> None:
