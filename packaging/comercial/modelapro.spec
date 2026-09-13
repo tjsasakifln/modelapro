@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
+from scripts.comercial.operacao.build_windows import _source_data_files
 
 root = Path(SPEC).resolve().parents[2]
 frontend_sources = [
@@ -30,11 +31,13 @@ native_evidence = [
     (str(native_root / "licenses"), "native-runtime/licenses"),
     (str(native_root / "fontconfig"), "native-runtime/fontconfig"),
 ]
-module_datas = [
-    item
-    for item in collect_data_files("modules")
-    if Path(item[0]).name != "trusted_vendor_anchor.json"
-]
+module_datas = _source_data_files(
+    root,
+    "modules",
+    excluded_names=frozenset({"trusted_vendor_anchor.json"}),
+)
+frontend_datas = _source_data_files(root, "frontend")
+profile_datas = _source_data_files(root, "profiles")
 anchor_value = os.environ.get("MODELA_BUILD_TRUSTED_ANCHOR", "").strip()
 trusted_anchor = (
     Path(anchor_value)
@@ -55,12 +58,12 @@ if (
 ):
     raise RuntimeError("verified build source identity resource is invalid")
 datas = (
-    collect_data_files("frontend")
+    frontend_datas
     + collect_data_files("streamlit")
     + copy_metadata("streamlit", recursive=True)
     + copy_metadata("modelapro")
     + module_datas
-    + collect_data_files("profiles")
+    + profile_datas
     + frontend_sources
     + native_evidence
     + [(str(trusted_anchor), "modules/commercial_license")]
