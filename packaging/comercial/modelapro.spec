@@ -9,9 +9,12 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 root = Path(SPEC).resolve().parents[2]
-source_data_files = runpy.run_path(
+source_helpers = runpy.run_path(
     str(root / "packaging" / "comercial" / "source_data.py")
-)["source_data_files"]
+)
+source_data_files = source_helpers["source_data_files"]
+source_submodules = source_helpers["source_submodules"]
+validate_runtime_metadata = source_helpers["validate_runtime_metadata"]
 frontend_sources = [
     (str(path), str(path.parent.relative_to(root)))
     for path in sorted((root / "frontend").rglob("*.py"))
@@ -60,17 +63,22 @@ if (
     or not re.fullmatch(r"[0-9a-f]{40}", str(build_identity_payload.get("tree_sha") or ""))
 ):
     raise RuntimeError("verified build source identity resource is invalid")
+runtime_metadata_value = os.environ.get("MODELA_BUILD_RUNTIME_METADATA_DIR", "").strip()
+runtime_metadata = Path(runtime_metadata_value) if runtime_metadata_value else None
+if not runtime_metadata:
+    raise RuntimeError("source-derived runtime metadata directory is absent")
+validate_runtime_metadata(root, runtime_metadata)
 datas = (
     frontend_datas
     + collect_data_files("streamlit")
     + copy_metadata("streamlit", recursive=True)
-    + copy_metadata("modelapro")
     + module_datas
     + profile_datas
     + frontend_sources
     + native_evidence
     + [(str(trusted_anchor), "modules/commercial_license")]
     + [(str(build_identity), ".")]
+    + [(str(runtime_metadata), runtime_metadata.name)]
     + [
         (str(root / "THIRD_PARTY_NOTICES.md"), "."),
         (str(root / "SECURITY.md"), "."),
@@ -81,19 +89,20 @@ datas = (
     ]
 )
 hiddenimports = (
-    collect_submodules("backend")
-    + collect_submodules("frontend")
-    + collect_submodules("modules")
+    source_submodules(root, "backend")
+    + source_submodules(root, "frontend")
+    + source_submodules(root, "modules")
+    + source_submodules(root, "profiles")
+    + source_submodules(root / "scripts", "c15_local")
     + collect_submodules("streamlit")
     + collect_submodules("pyhanko")
     + collect_submodules("pyhanko_certvalidator")
     + collect_submodules("pypdf")
-    + ["c15_local.launcher"]
 )
 
 a = Analysis(
     [str(root / "scripts" / "c15_local" / "launcher.py")],
-    pathex=[str(root)],
+    pathex=[str(root), str(root / "scripts")],
     binaries=native_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
