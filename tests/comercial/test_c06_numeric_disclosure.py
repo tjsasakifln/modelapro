@@ -578,6 +578,7 @@ def test_material_disclosure_change_invalidates_review_of_real_worker_result(tmp
 
     baseline = assess(snapshot)
     event = {"fingerprint": baseline["result_fingerprint"], "professional_id": "TESTE",
+             "report_content_fingerprint": "a" * 64,
              "motive": "Revisão sintética", "version": "TESTE-1", "decision": "approved"}
     assert assess(snapshot, [event])["stale_review_events"] == []
     for name in ("standardized_residuals", "normal_frequency_comparison", "correlation_matrix",
