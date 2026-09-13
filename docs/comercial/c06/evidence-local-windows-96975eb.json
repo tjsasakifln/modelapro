@@ -1,0 +1,75 @@
+{
+  "scope": "LOCAL_ONEDIR_PREFLIGHT_FAILED_NOT_HOSTED_OR_INNO",
+  "source_sha": "96975ebb8e181e72e63e4729b89b0e1cfdf83928",
+  "tree_sha": "943e300b6492d5e40ac5465afba145f5a4346bc0",
+  "local_root": "/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3tokenfix.DXILG5",
+  "initial_status": "FAILED",
+  "initial_error": {
+    "detail": "POST http://127.0.0.1:29875/jobs/job_44f19a1e0d4149149b5889c06a422443/documents returned HTTP 409: {\"schema_version\":\"MP-DOCUMENTS/1\",\"error\":\"PDF verification failed: ['MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_CELL', 'MUTATED_SAMPLE_PANEL_HEADER', 'MUTATED_SAMPLE_PANEL_HEADER', 'MUTATED_SAMPLE_PANEL_HEADER', 'MUTATED_",
+    "type": "VerificationError"
+  },
+  "verified_bundle_files": 2811,
+  "verified_bundle_bytes": 369886906,
+  "bundle_inventory_sha256": "7718e2a7a207167fe73a1e1ca9fc0c5c5871a047050039e925b796b9f9b4e2ab",
+  "template_origin_mismatch": {
+    "source": {
+      "sha256": "1678a4e3fe7f7d0d1c4639382a8b6bb63de27a3bf33b5b81f8befd73876be95b",
+      "size": 45406
+    },
+    "bundled": {
+      "sha256": "fb652ee493a096755cfafa6f83fc8d2732945a913aa4e9709950f060f8acf423",
+      "size": 34461
+    }
+  },
+  "installed_process_shutdown": {
+    "child_handle_close_failures": [],
+    "child_observation_error": null,
+    "child_processes_exited": true,
+    "method": "parent_termination_with_job_containment",
+    "observed_child_handle_count": 2,
+    "observed_child_pids": [
+      42568,
+      57060
+    ],
+    "parent_pid": 24612,
+    "parent_returncode": 1,
+    "remaining_child_pids_before_fallback": [],
+    "service_ports_closed": true,
+    "status": "PASSED"
+  },
+  "evidence_files": {
+    "proof/local-build-method.json": {
+      "sha256": "f510ca240fb635bb6c252a565daa4feac46273258d04fec4513950a68cb68e1f",
+      "size": 3158
+    },
+    "proof/bundle-file-inventory.json": {
+      "sha256": "9bc914b071712d56233eefa3d4ddbaac5b10c95c193fb8dd1be9325cae44af38",
+      "size": 490596
+    },
+    "proof/evidence/initial.json": {
+      "sha256": "a835f59aef90389285333ec33848ce7a083c78f51aecc3e66251b5a0a6597631",
+      "size": 5076
+    },
+    "proof/evidence/initial-installed-ui.json": {
+      "sha256": "e4523894d5023b0e7c1642f872cc53658b39f8e8f17fa0d4a0890fc0bc09f647",
+      "size": 1305
+    },
+    "proof/evidence/initial-installed-bundle.json": {
+      "sha256": "d0e1ddc380b47ea574c2ca45300555a099479375aa4fbe762d117f1aa7080e82",
+      "size": 1114
+    },
+    "proof/evidence/initial-product.log": {
+      "sha256": "7bb650bb9d097e38c80ff230aa35778d4eb21dde71159d3d183e76dbb9f335a1",
+      "size": 620
+    },
+    "proof/check-pdf.log": {
+      "sha256": "c7bfecdbedbc8519d6e6fba2a3efed7a601474d983f96d8bebb1902bef9f8e1a",
+      "size": 58
+    },
+    "build-source-identity.json": {
+      "sha256": "d1c6bfcd428340d1d17309cb45bb70b4c01a204557e98857e286fe9049fb429e",
+      "size": 168
+    }
+  },
+  "remaining": "Correct data selection in spec, rebuild clean source, repeat lifecycle; no hosted failure inferred."
+}

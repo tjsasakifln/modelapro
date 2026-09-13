@@ -1,0 +1,15 @@
+{
+  "schema_version": "MP-C03-PRESENTATION/1",
+  "synthetic": true,
+  "note": "Saída resumida esperada de assess_document_state para o exemplo produtor, quando o conteúdo de relatório também está presente.",
+  "is_final": true,
+  "document_kind": "Laudo final — pronto para assinatura profissional",
+  "case_release_status": "ready_for_professional_signoff",
+  "calculation_status": "valid",
+  "grade_requirement_status": "met",
+  "profile_id": "urban-comparative-market-professional",
+  "result_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+  "report_content_fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+  "blockers": [],
+  "institution_acceptance": {"status": "not_recorded"}
+}

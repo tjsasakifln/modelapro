@@ -1,0 +1,295 @@
+CONFENGE MODELA PRO — Minuta técnica para revisão
+profissional
+Método Comparativo Direto de Dados de Mercado — tratamento científico por regressão. Saída técnica
+para revisão profissional; não substitui o laudo do avaliador. 
+Minuta (rascunho) — saída técnica, não é laudo aprovado
+Este documento não é laudo aprovado automaticamente. Grau de fundamentação ou precisão
+da tabela, quando informado, não equivale a prontidão integral de emissão nem a aprovação
+automática. 
+no_automatic_report_approval
+grau_is_not_issuance_readiness
+documentary_declared_is_not_verified_proof
+Solicitante:  Avaliacao sintetica BASE_SHA P03
+Finalidade:  minuta tecnica de revisao — caso linear sintetico identificado
+Data-base (referência): 2024-06-01 
+Data de vistoria: 2024-06-15 
+Data de emissão desta minuta: 2026-09-11T21:16:46+00:00
+Fontes:
+Unidade do valor-alvo: BRL (BRL) 
+Coluna-alvo / estimando: preco — subject_prediction
+Job:  job_81b99ec68b6340fabbef3aa574b9b7fc
+Valores congelados do ResultSnapshot (MP/1)
+Os números abaixo são cópia do snapshot usado pela tela. Este relatório não recalcula regressão
+e não reconstrói o ponto a partir de intervalos. A apresentação pode arredondar; o cálculo do
+valor não usa a fórmula arredondada. 
+MP1_POINT=735000
+MP1_MEAN_CI80_LOWER=735000
+MP1_MEAN_CI80_UPPER=735000
+MP1_PRED_LOWER=734999.999999999
+MP1_PRED_UPPER=735000
+MP1_ARB_LOWER=null
+MP1_ARB_UPPER=null
+MP1_ADM_LOWER=null
+MP1_ADM_UPPER=null
+MP1_REFERENCE_DATE=2024-06-01
+MP1_INSPECTION_DATE=2024-06-15
+MP1_TARGET_UNIT=BRL
+MP1_N_RECEIVED=24
+MP1_N_OBSERVED=24
+MP1_N_PREPARED=24
+MP1_N_USED=24
+MP1_N_EXCLUDED=0
+MP1_ISSUANCE=draft
+MP1_PRECISAO_STATUS=classified
+Identificação do resultado
+Estimativa pontual (snapshot.value.point)R$ 735.000,00 (bruto: 735000)
+IC da média (80%) — não é intervalo preditivo
+nem mediana
+R$ 735.000,00 a R$ 735.000,00
+• 
+• 
+• 
+Minuta para revisão profissional — página 1 de 8
+Intervalo preditivo — distinto do IC da médiaR$ 735.000,00 a R$ 735.000,00
+Campo de arbítrio (intervalo de arbitragem)—
+Intervalo de valores admissíveis —
+Média versus mediana O ponto acima é a estimativa do snapshot (em geral
+média condicional / estimando declarado). Mediana,
+quando houver, aparece só na descritiva amostral e não
+substitui este ponto.
+Amostra — n recebido, observado, preparado e efetivo são distintos
+n recebido (snapshot.sample.received)24
+n com alvo observado (observed_target)24
+n preparado (prepared) 24
+n efetivo / usado (used) 24
+n excluído (excluded) 0
+Quantidade de used_row_ids no snapshot24
+Quantidade de excluded_row_ids no snapshot0
+Avisos e limitações (todos os issues do snapshot)
+Ressalvas não são omitidas nem substituídas por banner de sucesso. Cada origem permanece
+distinguível.
+Normativos
+Normativoinfo grau_nao_e_emissao — O grau calculado (fundamentação/precisão) não autoriza
+emissão automática de laudo. issuance permanece a cargo do profissional (C10: draft / review_required /
+ready_for_professional_review). 
+Estatísticos
+Nenhum aviso classificado como estatísticos neste snapshot.
+Documentais
+Nenhum aviso classificado como documentais neste snapshot.
+Busca
+Nenhum aviso classificado como busca neste snapshot.
+Inferência
+Nenhum aviso classificado como inferência neste snapshot.
+Outros
+Outro info read_metadata — CSV lido: encoding=utf-8, delimiter=';', bom=False, bytes=717. 
+Outro info ingest_summary — Ingestão: 24 registros recebidos, 24 com alvo observado; nenhum
+alvo ausente foi imputado; preditores não imputados nesta camada. 
+Outro info identifier_excluded — Identificador 'row_id' não entra em X. 
+IDs afetados: row_id
+Minuta para revisão profissional — página 2 de 8
+Outro info identifier_excluded — Identificador 'id' não entra em X. 
+IDs afetados: id
+Outro info role_excluded — Coluna 'bairro' com papel 'excluded' não entra em X. 
+IDs afetados: bairro
+Precisão — status distinguível de grau
+Status: Precisão classificada (código: classified)    Grau informado: Grau III
+Amplitude percentual informada no snapshot: 3.1677638592363227e-14.
+Fundamentação (grau da tabela ≠ prontidão de emissão)
+Grau de fundamentação informado: Não classificado — pontos: 12 
+Item Descrição Grau /
+status
+Detalhe / evidência
+tabela1
+.item1
+Caracterização do
+imóvel avaliando
+Penden
+te
+Item 1 documental não informado; ausência não vale aprovação. Um
+controle de UI sem proveniência não verifica este item. (evidência:
+pending)
+tabela1
+.item2
+Quantidade mínima de
+dados de mercado
+Grau IIIn=24, k=1. Mínimos: I=6, II=8, III=12. (evidência: calculated)
+tabela1
+.item3
+Identificação dos dados
+de mercado
+Penden
+te
+Item 3 documental não informado; ausência não vale aprovação. Um
+controle de UI sem proveniência não verifica este item. (evidência:
+pending)
+tabela1
+.item4
+Extrapolação Grau IIINenhuma extrapolação: todas as variáveis quantitativas no intervalo
+amostral [min, max]. (evidência: calculated)
+tabela1
+.item5
+Nível de significância
+dos regressores (teste
+t)
+Grau IIIPior p-valor entre regressores: 0.0000. (evidência: calculated)
+tabela1
+.item6
+Nível de significância
+do modelo global (teste
+F)
+Grau IIIF-prob (p-valor do teste F): 0.0000. (evidência: calculated)
+Documentos — declarado, presente e verificado são distintos
+Documento Status Proveniência
+Declarado (declared) —
+Pontuação documental declarada não vira comprovação. Somente o status "verificado" indica
+verificação.
+Busca de modelos
+Pendência: o snapshot não declara se a busca foi exaustiva ou aproximada.
+Limitações de inferência
+Nenhuma limitação de inferência adicional foi anexada no contexto. A ausência de texto não
+elimina as limitações do estimando.
+Minuta para revisão profissional — página 3 de 8
+Recomendações concretas (next_actions)
+Código Pr
+io
+ri
+da
+de
+Motivo Próximo passo Limitações
+provide_subject_characteristic30 Falta característica
+do sujeito (imóvel
+avaliando) exigida
+pelo esquema.
+Fornecer a
+característica do
+sujeito na mesma base
+e unidade das
+variáveis do modelo.
+['Sem a característica,
+extrapolação e
+previsão do avaliando
+permanecem
+pendentes.', 'Sem
+dados suficientes para
+estimar o ganho desta
+ação.']
+incompatible_alternative_comparison80 Há alternativas com
+unidade, data-base
+ou estimand
+distintos ou
+ausentes; a
+comparação
+numérica entre elas
+não é válida nessas
+condições.
+Revisar unidade, data-
+base e estimand até
+que as alternativas
+sejam comparáveis.
+Não tratar a diferença
+entre especificações
+como medida de
+precisão.
+['Comparações só
+usam valores na
+mesma unidade, data-
+base e estimand.',
+'Ausência de unidade
+ou data não é
+preenchida por BRL,
+BRL/m2 ou data atual.']
+Especificação estatística do modelo
+Número do modelo: Pendência: número do modelo não informado. Revisão: Pendência:
+revisão do modelo não informada. SHA do modelo:
+5b8b70fe0792a1e15aabdf8fbf067c0ffbb9d470b8a35d753d745e01605d27c6. SHA de código:
+6d54f902b85a5a37bfbf154d39f74cf854ff9b2b. SHA da entrada:
+d18380c34c0b3e299735c97463f0388076d4c799f4cd4ac17e5d723df1745d15. 
+Fórmula (apresentação). O valor do snapshot não foi recalculado a partir desta fórmula
+arredondada:
+Pendência: fórmula não informada
+Variável Coeficiente (apresentação)Coeficiente (precisão do snapshot)P-valor VIF
+const -0.000000 -9.50527122392932e-10 — —
+area 10000.000000 10000 — —
+A norma não define limiar de corte para o VIF — o valor é informativo e não reprova o modelo.
+Campos técnicos sem evidência permanecem pendentes; não se fabrica narrativa. 
+Ajustamento (R²) — não é critério de avaliação superior
+R² —
+R² ajustado —
+Estatística F (p-valor) — (—)
+Durbin-Watson —
+O R² descreve o ajustamento da especificação estatística aos dados efetivamente usados. Um R² maior não
+significa, por si só, avaliação superior, maior grau normativo, nem laudo melhor. 
+Minuta para revisão profissional — página 4 de 8
+Alternativas registradas no snapshot
+Identificador Resumo
+area:inv_sqrt|y:identity|int:1 rejected
+area:inv_sqr|y:identity|int:1 rejected
+area:inverse|y:identity|int:1 rejected
+area:ln|y:identity|int:1 rejected
+area:sqrt|y:identity|int:1 rejected
+Gráficos de resíduos e ajustamento (legendas em português)
+Legendas em português (quando renderizados): Resíduos versus valores ajustados; Histograma dos
+resíduos; Observado versus estimado. Não se utilizam títulos em inglês. 
+Gráficos não fornecidos no contexto e sem séries de resíduos/ajustados — seção pendente.
+Minuta para revisão profissional — página 5 de 8
+Registros efetivamente usados (integral)
+Entrega integral: todos os 24 identificadores de used_row_ids constam neste PDF (tabela paginada em paisagem e lista do anexo). Não há
+truncamento às primeiras 200 linhas. 
+row_id Fonte Justificativa Rótulo id bairro area preco
+R000000 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-00 Centro 50.0 500000.0
+R000001 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-01 Centro 52.0 520000.0
+R000002 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-02 Centro 54.0 540000.0
+R000003 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-03 Centro 56.0 560000.0
+R000004 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-04 Centro 58.0 580000.0
+R000005 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-05 Centro 60.0 600000.0
+R000006 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-06 Centro 62.0 620000.0
+R000007 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-07 Centro 64.0 640000.0
+R000008 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-08 Centro 66.0 660000.0
+R000009 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-09 Centro 68.0 680000.0
+R000010 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-10 Centro 70.0 700000.0
+R000011 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-11 Centro 72.0 720000.0
+R000012 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-12 Centro 74.0 740000.0
+R000013 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-13 Centro 76.0 760000.0
+R000014 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-14 Centro 78.0 780000.0
+R000015 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-15 Centro 80.0 800000.0
+R000016 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-16 Centro 82.0 820000.0
+R000017 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-17 Centro 84.0 840000.0
+R000018 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-18 Centro 86.0 860000.0
+R000019 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-19 Centro 88.0 880000.0
+R000020 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-20 Centro 90.0 900000.0
+R000021 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-21 Centro 92.0 920000.0
+R000022 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-22 Centro 94.0 940000.0
+R000023 Pendência: fonte não informadaIncluído na amostra efetiva do snapshot (justificativa não informada no contexto) IM-23 Centro 96.0 960000.0
+Planilha integral — página 6 de 8
+Registros excluídos (integral)
+Nenhum excluded_row_id no snapshot.
+Planilha integral — página 7 de 8
+Anexo integral — identificadores usados e excluídos
+Este anexo faz parte dos mesmos bytes do PDF . A lista abaixo é completa (não é recorte das primeiras
+200 linhas). 
+Identificadores usados (n=24)
+R000000 R000001 R000002 R000003 R000004 R000005 R000006 R000007 R000008 R000009 R000010 R000011 R000012
+R000013 R000014 R000015 R000016 R000017 R000018 R000019 R000020 R000021 R000022 R000023
+Identificadores excluídos (n=0)
+Proveniência (sem caminhos locais nem segredos)
+{'filename': 'mercado.csv', 'composed_by': 'c10.worker', 'peers': {'ingest_market': {'kind': 'real', 
+'ref': 'modules.data_loader.ingest_market'}, 'fit_dataset': {'kind': 'real', 'ref': 
+'modules.preprocessing.fit_dataset'}, 'transform_subject': {'kind': 'real', 'ref': 
+'modules.preprocessing.transform_subject'}, 'search_models': {'kind': 'real', 'ref': 
+'modules.optimal_combination.search_models'}, 'fit_candidate': {'kind': 'real', 'ref': 
+'modules.model_builder.fit_candidate'}, 'evaluate_fitted': {'kind': 'real', 'ref': 
+'modules.model_builder.evaluate_fitted'}, 'assess_normative': {'kind': 'real', 'ref': 
+'modules.nbr14653_validation.assess_normative'}, 'evaluate_procedure': {'kind': 'real', 'ref': 
+'modules.model_evaluation.evaluate_procedure'}, 'render_report': {'kind': 'real', 'ref': 
+'modules.results_generator.render_report'}, 'build_evidence_bundle': {'kind': 'real', 'ref': 
+'modules.evidence_bundle.build_evidence_bundle'}, 'recommend_next_actions': {'kind': 'real', 'ref': 
+'modules.decision_support.recommend_next_actions'}, 'evaluate_batch': {'kind': 'real', 'ref': 
+'modules.valuation_batch.evaluate_batch'}, 'fit_target_transform': {'kind': 'real', 'ref': 
+'modules.target_transform.fit_target_transform'}, 'transform_target': {'kind': 'real', 'ref': 
+'modules.target_transform.transform_target'}, 'inverse_target_prediction': {'kind': 'real', 'ref': 
+'modules.target_transform.inverse_target_prediction'}}, 'sample_ledger_present': True, 
+'subject_categorical_survived': True}
+Minuta gerada para revisão profissional — CONFENGE MODELA PRO. Cálculo concluído não implica documento entregue se a
+renderização falhar. Este texto não é laudo aprovado automaticamente e não dispensa a responsabilidade técnica do
+profissional habilitado. 
+Anexo integral — página 8 de 8

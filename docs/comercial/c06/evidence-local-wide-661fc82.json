@@ -1,0 +1,101 @@
+{
+  "scope": "LOCAL_INTERMEDIATE_FAILED_NOT_FINAL_CI",
+  "exit_code": 1,
+  "tests": 1828,
+  "passed": 1822,
+  "failed": 5,
+  "skipped": 1,
+  "duration_seconds": 1672.9,
+  "identity_files_verified": 36,
+  "identity": {
+    "schema": "MP-C06-EVIDENCE/1",
+    "pr_head_sha": null,
+    "base_sha": null,
+    "tested_commit_sha": "661fc826efaaf997228a15909e4a0afc00fb76d0",
+    "tree_sha": "490f2a3751f8774220d211a2cde08fdd8a9fb033",
+    "parents": [
+      "4c892d94d383904acb5d4a283d85ea8cfb888234",
+      "9d166a300660e9d96112ad4d74385ab0e47ba217"
+    ],
+    "event": "local",
+    "run_id": "local-c06-661fc82",
+    "run_attempt": "1",
+    "job": "local",
+    "source_dirty": false,
+    "tracked_source_changes": [],
+    "tracked_source_dirty_after": false,
+    "unexpected_untracked_source": [],
+    "files": {
+      "collection.json": "c459cd25a8cfabf9e9df958a3600768d36ba72b741ddefdb800aa0d8baef3977",
+      "inventory-check.log": "dd2afb575bcf62fc3e7d20cf1acce77aed98d61fa937fbdfcfb2064f08fc63b4",
+      "ui-e2e/P02/desktop-empty.png": "109318a88c155dcd1df064ac1b66f32dac592ecc1f26b74fc1f295d6dec14f54",
+      "ui-e2e/P02/narrow-result.png": "a538a15afc2a69ec64d2a1a6dc6c0aad6d4a459e6df02dca51fa43c32f68f123",
+      "ui-e2e/P02/requests.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "ui-e2e/P02/result-csv.png": "145ebda7341f23ec04cde0bde846ae62c5a571e6a6a00fc287a72bef7bfb3c84",
+      "ui-e2e/P02/result-xlsx.png": "afd8a9fe0340fa32c4c8a1daf0b58165dea303087c0f5f2a024e93c64f870304",
+      "ui-e2e/P02/trace.zip": "ea28c1385ba9111c7f7672d396d0e81b25d8503b1d6fbcfc1e0c6c94f5b2dcda",
+      "ui-e2e/c06-cost-flow/artifact-inventory.json": "7d35a63c01a3992d5c59ff6b5a86624123b41d37dafb2696041ef9dcd7e20158",
+      "ui-e2e/c06-cost-flow/browser-cost-flow-body.txt": "c1ff82dab233547b107632082ddb8f6264788a0e080363f9e1672c25937c46d4",
+      "ui-e2e/c06-cost-flow/browser-cost-flow-failure.png": "20855668d306fbdf935d6c1b98d273b2cbbed3b74029366aedeb32b0993e9475",
+      "ui-e2e/c06-document-flow/SYNTHETIC_TEST_signed_report.pdf": "3e5c9af885289548f68c6a1d14be34f3698cecb11832e9a08348f2bbeb8761ed",
+      "ui-e2e/c06-document-flow/SYNTHETIC_TEST_unsigned_report.pdf": "0df84c49e4edaed9647d78600d430484e51bffb64e3e409a880c1d44f8163b9f",
+      "ui-e2e/c06-document-flow/artifact-inventory.json": "ec9d61b126e18db27f80edd5b2b8947132f6252810bf3fa93d12c60a3ff6938b",
+      "ui-e2e/c06-document-flow/store/jobs/job_23b9a83db449444cb388cf024e0be54c/artifacts/document_history.zip": "c7a2cd050a4b4ebcaa314ca2e90cc8b92be2746af9a97b6f75b7217961f09847",
+      "ui-e2e/c06-document-flow/store/jobs/job_23b9a83db449444cb388cf024e0be54c/artifacts/evidence_bundle.zip": "c4aefc8487586f27f9cda0bb4c00852262126d75ed3a8b712a18ebb736f806f0",
+      "ui-e2e/c06-document-flow/store/jobs/job_23b9a83db449444cb388cf024e0be54c/artifacts/report.docx": "efe5f831f2e482e55b1d3b97282d223bbeb97c04caae416fd67256852bf70403",
+      "ui-e2e/c06-document-flow/store/jobs/job_23b9a83db449444cb388cf024e0be54c/artifacts/report.pdf": "0df84c49e4edaed9647d78600d430484e51bffb64e3e409a880c1d44f8163b9f",
+      "ui-e2e/c06-document-flow/store/jobs/job_23b9a83db449444cb388cf024e0be54c/artifacts/signature_request.json": "9acab4231201702c5c01b8192eb073550ffb205e500fddfb229d67eb9b805521",
+      "ui-e2e/c06-document-flow/store/jobs/job_23b9a83db449444cb388cf024e0be54c/artifacts/signed_report.pdf": "3e5c9af885289548f68c6a1d14be34f3698cecb11832e9a08348f2bbeb8761ed",
+      "ui-e2e/c06-document-flow/store/jobs/job_23b9a83db449444cb388cf024e0be54c/artifacts/submission.zip": "8ace2ea487319247a3d1cc2a42bec4f3e1f40c0a5e911d8b7e9ebb235592e354",
+      "ui-e2e/c06-document-flow/store/jobs/job_23b9a83db449444cb388cf024e0be54c/evidence/artifacts/report.pdf": "441cccafec4ebb6a68bd861d6d24f86f9a4083b1f8a3e5d6799262128be2fcb6",
+      "ui-e2e/c06-output-conformance/inventory.json": "f3dace15076a442fffe7b8cf217f568e04d707296b4e14bc5026f616b13c0143",
+      "ui-e2e/c06-output-conformance/output_representation_manifest.json": "89d6516d53dddffd922f42c847b218e88bc937ae97dd2da8e13f9f320b404dc4",
+      "ui-e2e/c06-output-conformance/report.docx": "b58553c8119dbe823b713f9f9a352b7f63b75e9b55da0f1e8b4d2f586932bdf6",
+      "ui-e2e/c06-output-conformance/report.pdf": "bd4dd86ed71ec8c5b1a54aa1810e18563577324be1fe3e6e1643e50d301b2ee6",
+      "ui-e2e/c06-output-conformance/report_context.json": "dbbf885f4ee0fad52fc091f4a91269ed166780b26601e1c59790d2266015e77f",
+      "ui-e2e/c06-output-conformance/sample.xlsx": "3f2e44000a04df5917f121fddef41b281ddb24153f165234635336ea137d74f0",
+      "ui-e2e/c06-output-conformance/snapshot.json": "405f3899c67813d1df8ba2709dcfcd55d58f22fcb4023d43cc0fb4a546602c89",
+      "ui-e2e/c16_ui.png": "f09c080cd33416eca174ccbc838e94cc71d6aea61d26e42b80936925e73e2d74",
+      "ui-e2e/pw_trace.zip": "5d9b8648a776775527eecbb3549d7a382339ddfab4b600786440957dfe961869",
+      "ui-e2e/report.pdf": "d2b53039cb4accf6de0eb0be04de3fdf4652dd05eb33a9af80411f9165d384a4",
+      "ui-e2e/ui_api.log": "b62041f4e1b4764dd64e280c86d04ad31693ea3e977f7ce5ec7ed22048322af1",
+      "ui-e2e/ui_body.txt": "ad94f3d490186f9312dbd837f6199977098cac305ba14e331c7d7618c788077c",
+      "wide.junit.xml": "41482485e75639fd9a27a10326a5d2ff9e4db158b75bd10862fcbb7e5d998344",
+      "wide.log": "ef0ada17c2c6107ad219b63676e8a17ee52f486b2ed675dafb1b9b2abad836a0"
+    },
+    "package_hashes": {}
+  },
+  "failures_and_subsequent_fixes": [
+    {
+      "classname": "tests.c10_pipeline.test_a05_security_peers",
+      "name": "test_frozen_peer_import_paths_match_contract",
+      "corrective_commit": "54ec011be8ef261eb4c8fa922234daded9af0075",
+      "resolution": "Adapter contract updated and real delegation proved"
+    },
+    {
+      "classname": "tests.comercial.c03.test_a01_a03_professional_report",
+      "name": "test_a02_numbers_profile_rules_and_each_interval_are_frozen",
+      "corrective_commit": "eb14f1a83b18bc7c4925e08951b486e423e8eada",
+      "resolution": "Retain aggregate finding alongside precise cell findings"
+    },
+    {
+      "classname": "tests.comercial.test_c06_browser_cost_flow",
+      "name": "test_browser_cost_calculation_without_market_file_can_be_saved_and_reopened",
+      "corrective_commit": "48c470ae141f38744364fd9e32d18588f49a6367",
+      "resolution": "Select and assert actual displayed label"
+    },
+    {
+      "classname": "tests.comercial.test_c06_numeric_disclosure",
+      "name": "test_material_disclosure_change_invalidates_review_of_real_worker_result",
+      "corrective_commit": "76bbcf18479ecc4979872caccf414dc197ee2fc0",
+      "resolution": "Bind test review event to its current document digest"
+    },
+    {
+      "classname": "tests.pro_workflow.p03.test_a03_formula_series",
+      "name": "test_p03_a03_log_scale_distinct_from_monetary_mean",
+      "corrective_commit": "0031892de1d652de453631cb05c53e994e6c7bc9",
+      "resolution": "Explicit log retransform limitation without formula change"
+    }
+  ],
+  "source_evidence_directory": "/home/tjsasakifln/code/modelapro-c06-wide-661fc82/artifacts-c06-wide"
+}

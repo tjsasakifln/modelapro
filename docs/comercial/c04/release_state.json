@@ -1,0 +1,25 @@
+{
+  "schema_version": "MP-COM-RELEASE-STATE/1",
+  "campaign_id": "MP-COM-20260912-V2/C04",
+  "base_sha": "8d66c7973c659174e06d7223c9a9a8181e8eeabf",
+  "as_of": "2026-09-11",
+  "states": {
+    "TECHNICAL_QUALIFICATION": "WAITING_FOR_COMPONENTS",
+    "NORMATIVE_SCOPE_VERIFICATION": "WAITING_FOR_COMPONENTS",
+    "COMMERCIAL_PACKAGE_VERIFICATION": "IMPLEMENTED_PARTIAL",
+    "INDEPENDENT_TECHNICAL_REVIEW": "BLOCKED_EXTERNAL_EVIDENCE",
+    "REAL_CASE_VALIDATION": "BLOCKED_EXTERNAL_EVIDENCE",
+    "INSTITUTION_PROFILE_VERIFICATION": "BLOCKED_EXTERNAL_EVIDENCE",
+    "INSTITUTION_ACCEPTANCE": "BLOCKED_EXTERNAL_EVIDENCE",
+    "COMMERCIAL_RELEASE_READY": false
+  },
+  "allowed_claim": "C04 provides tested distribution/security/operation components for a local single-user product candidate; it does not authorize commercial release.",
+  "forbidden_claims": [
+    "Windows installer verified",
+    "repository redistribution rights cleared",
+    "LGPD compliant",
+    "bank or insurer acceptance",
+    "independent technical review complete",
+    "commercial release ready"
+  ]
+}

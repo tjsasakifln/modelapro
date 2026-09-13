@@ -1,0 +1,58 @@
+{
+  "id": "MP-COM-20260912/C06",
+  "role": "integrador e dono da prova final; único publicador da composição na #20",
+  "branch": "mp-pro-20260911/p04-referencia-consolidacao",
+  "pr_number": 20,
+  "pr_base": "mp-20260911/integracao-final",
+  "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "historical_delivery": "delivery-precomposition.json",
+  "evidence_matrix": "integration-matrix.md",
+  "head_note": "A identidade da candidata e os runs estão na matriz e no topo da PR; não inferir aprovação de ancestral.",
+  "product_state": {
+    "INTEGRATION_COMPLETE": "TECHNICALLY_CLOSED_ON_B",
+    "NUMERIC_VERIFICATION": "CONFIRMED_ON_C15_WIDE_SUITE",
+    "NORMATIVE_SCOPE_VERIFICATION": "CONFIRMED_ON_C15_WIDE_SUITE",
+    "DOCUMENT_AND_SIGNATURE_FLOW": "CONFIRMED_TESTE_ONLY",
+    "WINDOWS_DISTRIBUTION_VERIFIED": "DISTINCT_TREE_A3_TO_B",
+    "SECURITY_AND_THIRD_PARTY_REVIEW": "TECHNICAL_INVENTORY_CONFIRMED",
+    "REAL_CASE_VALIDATION": "NOT_RUN_EXTERNAL",
+    "INDEPENDENT_PROFESSIONAL_REVIEW": "NOT_RUN_EXTERNAL",
+    "INSTITUTION_ACCEPTANCE_BY_PROFILE": "NOT_RUN_EXTERNAL",
+    "COMMERCIAL_RELEASE_READY": false
+  },
+  "producer_heads_incorporated": {
+    "C01": "3910a20fa34f4b2b57e58dd2063cb7ec09c55b64",
+    "C02": "f0d8eaa4056e9197f90102d888707755c300b00b",
+    "C03": "c9ccb43fbb2ba65a6f2082cdb8347134d45bd310",
+    "C04": "fbb9c9327e320ce385183d4988b731c4ef3e7996",
+    "C05": "a877c14fca2f4ff175ee5419d25f914f044e40a4"
+  },
+  "internal_remaining": [],
+  "external_requirements": "integration-matrix.md#dependências-externas-exatas-não-são-desculpa-para-código-faltante",
+  "nao_autorizado_e_nao_feito": [
+    "merge em main ou na #17",
+    "auto-merge, deploy, lançamento público, venda",
+    "compra de normas, certificados ou serviços",
+    "submissão de dados a instituições",
+    "assinatura de laudo ou contrato em nome de pessoa"
+  ],
+  "published_candidate": {
+    "head_sha": "263ec1dcbaa7850459453215faf1066da402cb43",
+    "role": "B_technical_close_not_commercial_release",
+    "a3_sha": "271b08ddf412ceb733d98c3c6281b145289f5b18",
+    "windows_a3_run": "34733840472",
+    "windows_a3_run_attempt": "1",
+    "windows_a3_scope": "OPERATIONAL_SAME_TREE_ONLY",
+    "windows_a3_installer_sha256": "73b768cc39eb19f811d4c8659aac8b6b70dc14aceb13063bb4129a11ef196ffc",
+    "windows_a3_to_b_run": "34734531128",
+    "windows_b_run": "34735590438",
+    "windows_b_run_attempt": "1",
+    "windows_b_scope": "DISTINCT_SOURCE_RECALCULATION",
+    "windows_b_installer_sha256": "695709e264d166310610a24c3bc6bcf474868421f06be76f8b340d6da565c729",
+    "c15_pr_run": "34735590433",
+    "c15_push_run": "34735588458",
+    "c15_collection_nodeids": 1832,
+    "c15_junit": "1832 passed / 0 failed / 1 skipped (wheel-smoke)",
+    "status_at_recording": "B_C15_PR_AND_PUSH_SUCCESS_WINDOWS_DISTINCT_TREE_SUCCESS_COMMERCIAL_RELEASE_READY_FALSE"
+  }
+}

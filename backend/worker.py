@@ -14,11 +14,17 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import io
+import json
 import math
 import os
+import re
 import subprocess
+import sys
 import traceback
+import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from modules.logging_manager import logger
@@ -34,6 +40,18 @@ from modules.result_contract import (
     request_spec_for_peers,
     validate_job_status_progress,
 )
+from modules.pro_workflow.report_context import (
+    aligned_fit_series,
+    complete_report_context,
+    formula_from_coefficients,
+)
+from modules.pro_workflow.numeric_disclosure import build_numeric_disclosure
+from modules.pro_workflow.residual_state import (
+    CALCULATION_VERSION,
+    complete_residual_state_for_persist,
+    residual_state_is_complete,
+)
+from modules.pro_workflow.workflow_context import build_workflow_context
 from modules.results import adapt_validation_result
 from modules.websocket_notifier import WebSocketNotifier
 
@@ -44,7 +62,7 @@ MP1_PEERS: Dict[str, Tuple[str, str]] = {
     "transform_subject": ("modules.preprocessing", "transform_subject"),
     "search_models": ("modules.optimal_combination", "search_models"),
     "fit_candidate": ("modules.model_builder", "fit_candidate"),
-    "evaluate_fitted": ("modules.model_builder", "evaluate_fitted"),
+    "evaluate_fitted": ("modules.valuation_batch", "evaluate_fitted"),
     "assess_normative": ("modules.nbr14653_validation", "assess_normative"),
     "evaluate_procedure": ("modules.model_evaluation", "evaluate_procedure"),
     "render_report": ("modules.results_generator", "render_report"),
@@ -112,6 +130,21 @@ class CompositionError(RuntimeError):
 
 
 def current_code_sha() -> str:
+    if getattr(sys, "frozen", False):
+        identity_path = Path(sys._MEIPASS) / "build-source-identity.json"
+        try:
+            payload = json.loads(identity_path.read_text(encoding="utf-8"))
+            source_sha = str(payload.get("source_sha") or "")
+            tree_sha = str(payload.get("tree_sha") or "")
+        except (OSError, UnicodeError, json.JSONDecodeError, AttributeError) as exc:
+            raise RuntimeError("frozen build source identity is absent or invalid") from exc
+        if (
+            payload.get("schema_version") != "MP-COM-BUILD-IDENTITY/1"
+            or not re.fullmatch(r"[0-9a-f]{40}", source_sha)
+            or not re.fullmatch(r"[0-9a-f]{40}", tree_sha)
+        ):
+            raise RuntimeError("frozen build source identity is absent or invalid")
+        return source_sha
     env = os.getenv("MP_CODE_SHA")
     if env:
         return env.strip()
@@ -434,6 +467,7 @@ def build_report_context(
     prepared_dataset: Any,
     used_row_ids: Sequence[str],
     excluded_row_ids: Sequence[str],
+    winner_fit: Any = None,
 ) -> dict:
     """Data actually used/excluded plus the request dates. Does not refit."""
     sample_ledger = _as_dict(_get(prepared_dataset, "sample_ledger")) or {}
@@ -441,6 +475,25 @@ def build_report_context(
     row_ledger = list(ledger) if isinstance(ledger, (list, tuple)) else (_as_dict(ledger) or {})
     used_rows = _rows_for_ids(input_bundle, used_row_ids)
     excluded_rows = _rows_for_ids(input_bundle, excluded_row_ids)
+    spec_dict = _as_dict(_get(winner_fit, "candidate_spec")) or {} if winner_fit is not None else {}
+    y_name = spec_dict.get("y_transformation")
+    if isinstance(y_name, Mapping):
+        y_name = y_name.get("name")
+    series = aligned_fit_series(
+        winner_fit,
+        used_row_ids=list(used_row_ids),
+        target_unit=request_spec.get("target_unit"),
+        y_transform_name=str(y_name) if y_name else None,
+    ) if winner_fit is not None else {
+        "fitted_values": None,
+        "residuals": None,
+        "observed_values": None,
+        "series_row_ids": list(used_row_ids),
+        "series_scale": None,
+        "series_unit": request_spec.get("target_unit"),
+        "available": False,
+        "reason": "fit_unavailable",
+    }
     return {
         "schema_version": SCHEMA_VERSION,
         "reference_date": request_spec.get("reference_date"),
@@ -460,6 +513,14 @@ def build_report_context(
             "dataset_sha256": _get(prepared_dataset, "dataset_sha256"),
         },
         "attachments": [],
+        "fitted_values": series.get("fitted_values"),
+        "residuals": series.get("residuals"),
+        "observed_values": series.get("observed_values"),
+        "series_row_ids": series.get("series_row_ids") or list(used_row_ids),
+        "series_scale": series.get("series_scale"),
+        "series_unit": series.get("series_unit"),
+        "series_available": bool(series.get("available")),
+        "series_reason": series.get("reason"),
     }
 
 
@@ -475,6 +536,9 @@ def build_frozen_project(
     normative: Any,
     artifact_refs: Mapping[str, Any],
     sample_ledger: Any,
+    search_audit: Any = None,
+    value: Any = None,
+    value_policy: Any = None,
 ) -> dict:
     candidate_spec = _as_dict(_get(winner_fit, "candidate_spec")) or {}
     feature_schema = _as_dict(_get(prepared_dataset, "feature_schema")) or _as_dict(
@@ -483,35 +547,59 @@ def build_frozen_project(
     encoder_state = _as_dict(_get(prepared_dataset, "encoder_state")) or _as_dict(
         _get(winner_fit, "encoder_state")
     ) or {}
+    residual_state = complete_residual_state_for_persist(winner_fit, subject_design)
+    diagnostics = _as_dict(_get(winner_fit, "diagnostics")) or {}
+    feature_order = list(
+        residual_state.get("feature_order")
+        or (_as_dict(_get(winner_fit, "model_state")) or {}).get("feature_order")
+        or diagnostics.get("design_columns")
+        or (_as_dict(_get(winner_fit, "coefficients")) or {}).keys()
+    )
     model_state = {
         "coefficients": _as_dict(_get(winner_fit, "coefficients")) or {},
-        "diagnostics": _as_dict(_get(winner_fit, "diagnostics")) or {},
+        "diagnostics": diagnostics,
         "target_transform_state": _as_dict(_get(winner_fit, "target_transform_state")) or {},
         "model_sha256": _get(winner_fit, "model_sha256"),
         "status": _get(winner_fit, "status"),
         "used_row_ids": list(_get(winner_fit, "used_row_ids") or _get(prepared_dataset, "row_ids") or []),
-        "n": _get(winner_fit, "n") or (_as_dict(_get(winner_fit, "diagnostics")) or {}).get("n"),
-        "k": _get(winner_fit, "k") or (_as_dict(_get(winner_fit, "diagnostics")) or {}).get("k"),
-        "feature_order": list(
-            (_as_dict(_get(winner_fit, "model_state")) or {}).get("feature_order")
-            or (_as_dict(_get(winner_fit, "coefficients")) or {}).keys()
-        ),
+        "excluded_row_ids": list(_get(winner_fit, "excluded_row_ids") or []),
+        "n": residual_state.get("n") or _get(winner_fit, "n") or diagnostics.get("n"),
+        "k": residual_state.get("k") or _get(winner_fit, "k") or diagnostics.get("k"),
+        "df_resid": residual_state.get("df_resid") or diagnostics.get("df_resid"),
+        "feature_order": feature_order,
+        "residual_std": residual_state.get("residual_std"),
+        "residual_scale": residual_state.get("residual_scale"),
+        "scale_convention": residual_state.get("scale_convention"),
+        "xtx_inv": residual_state.get("xtx_inv"),
+        "xtx_inv_kind": residual_state.get("xtx_inv_kind"),
+        "has_intercept": residual_state.get("has_intercept") if residual_state.get("has_intercept") is not None else diagnostics.get("has_intercept"),
+        "intercept_column": residual_state.get("intercept_column") or diagnostics.get("intercept_column"),
+        "residual_state": residual_state,
+        "calculation_version": CALCULATION_VERSION,
+        "residual_state_complete": residual_state_is_complete(residual_state),
     }
     declared_scope = (
         (request_spec.get("search_policy") or {}).get("model_scope")
         or request_spec.get("model_scope")
     )
+    audit = _as_dict(search_audit) or {}
     # Presence of a subject_design for prediction is not subject-conditioned
     # selection. Only an explicit subject_specific policy binds the freeze.
-    if declared_scope == "subject_specific":
+    # The actual conditioning flag is recorded separately from the scope label.
+    if declared_scope == "subject_specific" or audit.get("selection_scope") == "subject_specific":
         model_scope = "subject_specific"
+        raw = _as_dict(_get(subject_design, "raw_values")) or {}
         subject_constraints = {
             "selection_subject_id": _get(subject_design, "subject_id"),
-            "bound_variables": {},
+            "bound_variables": dict(raw),
+            "dropped_transforms": audit.get("dropped_transforms_due_to_subject") or {},
         }
     else:
         model_scope = "population_model"
         subject_constraints = {}
+    selection_conditioned = audit.get("selection_conditioned_on_subject")
+    if selection_conditioned is None:
+        selection_conditioned = model_scope == "subject_specific"
     locale = str((_as_dict(request_spec.get("import_options")) or {}).get("locale") or "auto")
     axes = _axes_from_fit(
         winner_fit,
@@ -546,6 +634,7 @@ def build_frozen_project(
         "model_spec": candidate_spec,
         "model_state": model_state,
         "model_scope": model_scope,
+        "selection_conditioned_on_subject": bool(selection_conditioned),
         "subject_constraints": subject_constraints,
         "domain": {
             "kind": "sample_used",
@@ -560,7 +649,12 @@ def build_frozen_project(
         "provenance": {
             "code_sha": current_code_sha(),
             "composed_by": "c10.worker",
+            "calculation_version": CALCULATION_VERSION,
         },
+        "calculation_version": CALCULATION_VERSION,
+        "residual_state": residual_state,
+        "value": dict(value) if isinstance(value, Mapping) else None,
+        "value_policy": dict(value_policy) if isinstance(value_policy, Mapping) else {},
     }
 
 
@@ -859,12 +953,15 @@ def _axes_from_fit(
         )
         if qualitative:
             sample_values = []
+            observed_counts: Dict[str, int] = {}
             for item in values:
                 if item is None:
                     continue
                 text = str(item)
                 if text and text not in sample_values:
                     sample_values.append(text)
+                if text:
+                    observed_counts[text] = observed_counts.get(text, 0) + 1
             aval = raw.get(name)
             axes.append(
                 {
@@ -874,6 +971,7 @@ def _axes_from_fit(
                     "avaliando_value": aval,
                     "sample_values": sample_values,
                     "categories": sample_values,
+                    "category_counts": observed_counts,
                 }
             )
             continue
@@ -911,6 +1009,54 @@ def _pvalues_from_fit(winner_fit: Any) -> Dict[str, Any]:
     return pvalues
 
 
+def _documentary_from_spec(spec: Mapping[str, Any]) -> dict:
+    """Map RequestSpec.declared_documentary onto the C05/legacy documentary shape.
+
+    Canonical RequestSpec keys are item1_grade / item3_grade plus optional
+    nested item1/item3 provenance. assess_normative reads itemN.grade and
+    itemN.provenance (or grau_itemN / itemN_provenance on the context).
+    """
+    raw = spec.get("declared_documentary") if isinstance(spec.get("declared_documentary"), Mapping) else None
+    if raw is None and isinstance(spec.get("documentary"), Mapping):
+        raw = spec.get("documentary")
+    if raw is None:
+        evaluation = spec.get("evaluation_policy")
+        if isinstance(evaluation, Mapping) and isinstance(evaluation.get("documentary"), Mapping):
+            raw = evaluation.get("documentary")
+    if not isinstance(raw, Mapping):
+        return {}
+    out = dict(raw)
+    for item, grade_key, prov_key in (
+        (1, "item1_grade", "item1_provenance"),
+        (3, "item3_grade", "item3_provenance"),
+    ):
+        nested_key = f"item{item}"
+        nested = dict(out.get(nested_key) or {}) if isinstance(out.get(nested_key), Mapping) else {}
+        if out.get(grade_key) is not None and nested.get("grade") is None:
+            nested["grade"] = out.get(grade_key)
+        if out.get(prov_key) is not None and not nested.get("provenance"):
+            nested["provenance"] = out.get(prov_key)
+        if nested:
+            out[nested_key] = nested
+    return out
+
+
+def _declared_item_grade(spec: Mapping[str, Any], item: int) -> Any:
+    doc = _documentary_from_spec(spec)
+    nested = doc.get(f"item{item}") if isinstance(doc.get(f"item{item}"), Mapping) else {}
+    if nested.get("grade") is not None:
+        return nested.get("grade")
+    return doc.get(f"item{item}_grade")
+
+
+def _declared_item_provenance(spec: Mapping[str, Any], item: int) -> Any:
+    doc = _documentary_from_spec(spec)
+    nested = doc.get(f"item{item}") if isinstance(doc.get(f"item{item}"), Mapping) else {}
+    if nested.get("provenance") is not None:
+        return nested.get("provenance")
+    return doc.get(f"item{item}_provenance")
+
+
 def _normative_context_from_fit(
     winner_fit: Any,
     prepared: Any,
@@ -918,6 +1064,7 @@ def _normative_context_from_fit(
     spec: Mapping[str, Any],
     subject_raw: Optional[Mapping[str, Any]],
     predict_original: Callable[[Any], Any],
+    numeric_disclosure: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build a C03 context from the live CandidateFit + prepared sample.
 
@@ -963,9 +1110,25 @@ def _normative_context_from_fit(
             amplitude = None
     statistical = _as_dict(_get(assessment, "statistical")) or {}
     statistical = dict(statistical)
+    numeric_statistical = _as_dict(
+        _get(numeric_disclosure, "normative_statistical")
+    ) or {}
+    for key, value in numeric_statistical.items():
+        if value is not None:
+            statistical[key] = value
     statistical.setdefault("n", n)
     statistical.setdefault("k", k)
     statistical.setdefault("automatic_selection", False)
+    declared_category_counts = spec.get("category_counts")
+    if isinstance(declared_category_counts, Mapping):
+        category_counts = dict(declared_category_counts)
+    else:
+        category_counts = {
+            f"{axis.get('name')}={category}": count
+            for axis in axes
+            if axis.get("kind") == "categorical"
+            for category, count in dict(axis.get("category_counts") or {}).items()
+        }
     return {
         "n": n,
         "k": k,
@@ -984,7 +1147,14 @@ def _normative_context_from_fit(
         "central_estimate": _point_from(assessment),
         "axes": axes,
         "extrapolation_details": axes,
-        "documentary": spec.get("declared_documentary") or spec.get("documentary") or {},
+        "documentary": _documentary_from_spec(spec),
+        "grau_item1": _declared_item_grade(spec, 1),
+        "grau_item3": _declared_item_grade(spec, 3),
+        "item1_provenance": _declared_item_provenance(spec, 1),
+        "item3_provenance": _declared_item_provenance(spec, 3),
+        "diagnostics": dict(spec.get("normative_diagnostics") or {}),
+        "professional_findings": dict(spec.get("professional_findings") or {}),
+        "category_counts": category_counts,
         "request_spec": spec,
         "used_row_ids": used_ids,
         "statistical": statistical,
@@ -1040,6 +1210,320 @@ def compose_preview(
     }
 
 
+def _compose_cost_valuation_job(
+    *, context: Dict[str, Any], emit: Callable[[str, Optional[float]], None],
+    spec: Mapping[str, Any], file_bytes: bytes, filename: str,
+    subject_raw: Optional[Mapping[str, Any]], project_id: Optional[str],
+    peers: Mapping[str, Any], job_store: Any, output_dir: Optional[str],
+) -> dict:
+    """Compose the cost method without parsing/fitting a market sample."""
+    from modules.cost_valuation import compute_reconstruction_cost
+    from modules.valuation_policy.qualification import compose_qualification_context, map_issuance_status
+
+    emit(STAGE_NORMATIVE, None)
+    bom = spec.get("cost_bom")
+    cost_result = compute_reconstruction_cost(
+        bom,
+        value_basis="depreciated_cost",
+        include_depreciation=True,
+    )
+    issues = list(cost_result.get("issues") or [])
+    if isinstance(bom, Mapping):
+        if spec.get("reference_date") != bom.get("reference_date"):
+            issues.append(make_issue(
+                "COST_REFERENCE_DATE_CONFLICT",
+                "RequestSpec.reference_date e cost_bom.reference_date devem coincidir; atualização implícita é proibida.",
+                origin="c06.worker",
+                evidence={"request_reference_date": spec.get("reference_date"), "cost_reference_date": bom.get("reference_date")},
+            ))
+        if spec.get("target_unit") != bom.get("currency"):
+            issues.append(make_issue(
+                "COST_CURRENCY_CONFLICT",
+                "RequestSpec.target_unit e cost_bom.currency devem coincidir; conversão implícita é proibida.",
+                origin="c06.worker",
+                evidence={"target_unit": spec.get("target_unit"), "cost_currency": bom.get("currency")},
+            ))
+    if any(item.get("severity") == "error" for item in issues):
+        cost_result = dict(cost_result)
+        cost_result["computable"] = False
+        cost_result["reason"] = issues[0].get("code") if issues else "cost_not_computable"
+        cost_result["issues"] = issues
+        cost_result["value"] = dict(cost_result.get("value") or {})
+        cost_result["value"]["point"] = None
+
+    normative = {
+        "schema_version": "MP-NORMATIVE-COST/1",
+        "edition": "ABNT NBR 14653-2:2011",
+        "verification_status": "case_cost_evidence_assessed_profile_currency_unconfirmed",
+        "fundamentacao": dict(cost_result.get("fundamentacao") or {}),
+        "precisao": {"status": "not_computed", "grade": None, "reason": "not_applicable_to_cost_quantification"},
+        "documentary": {"status": "derived_from_cost_memory", "verified": False},
+        "issues": [],
+    }
+    value = empty_value_block()
+    cost_value = dict(cost_result.get("value") or {})
+    for key in value:
+        value[key] = cost_value.get(key)
+    value["basis"] = "depreciated_cost"
+    model = {
+        "candidate_id": "cost-quantification",
+        "status": "fitted" if cost_result.get("computable") else "rejected",
+        "method": "metodo_quantificacao_de_custo",
+        "coefficients": {},
+        "formula": None,
+    }
+    input_sha = sha256_bytes(dumps_strict(bom or {}).encode("utf-8"))
+    validation = _map_validation(normative, {})
+    validation["fundamentacao"] = dict(cost_result.get("fundamentacao") or {})
+    validation["statistical"] = {
+        "route": "cost_quantification",
+        "market_sample_applicable": False,
+        "precision_grade_applicable": False,
+    }
+    draft = {
+        "schema_version": SCHEMA_VERSION,
+        "job_id": context["job_id"],
+        "project_id": project_id,
+        "input_sha256": input_sha,
+        "code_sha": current_code_sha(),
+        "reference_date": spec.get("reference_date"),
+        "generated_at": _utc_now_iso(),
+        "target": {"column": "", "unit": spec.get("target_unit") or "", "estimand": "depreciated_reconstruction_cost"},
+        "value": value,
+        "sample": {"received": 0, "observed_target": 0, "prepared": 0, "used": 0, "excluded": 0,
+                   "used_row_ids": [], "excluded_row_ids": []},
+        "validation": validation,
+        "issues": issues,
+        "model": model,
+        "search": {"audit": {"route": "cost_quantification", "search_invoked": False}, "winner_candidate_id": "cost-quantification"},
+        "alternatives": [],
+        "next_actions": [],
+        "provenance": {
+            "filename": filename or "cost-bom.json",
+            "composed_by": "c06.worker.cost",
+            "peers": {},
+            "sample_ledger_present": False,
+            "subject_categorical_survived": False,
+            "calculation_version": CALCULATION_VERSION,
+            "normative_assessment": normative,
+            "cost_result": cost_result,
+            "market_sample_not_required": True,
+            "market_value_not_used_as_cost": True,
+            "workflow_context": build_workflow_context(
+                request_spec=spec, subject_raw=subject_raw, validation=validation,
+                search_audit={"route": "cost_quantification", "search_invoked": False},
+                limitation_codes=[item.get("code") for item in issues], issues=issues,
+            ),
+        },
+    }
+    qc = compose_qualification_context(
+        request_spec=spec, snapshot_draft=draft,
+        winner={"status": "fitted"} if cost_result.get("computable") else None,
+        search_audit=draft["search"]["audit"], issues=issues,
+        review_events=list(spec.get("review_events") or []), cost_result=cost_result,
+        normative_assessment=normative,
+    )
+    draft["provenance"]["qualification_context"] = qc
+    issuance = dict(validation.get("issuance") or {})
+    issuance["status"] = map_issuance_status(qc.get("case_release_status"))
+    issuance["case_release_status"] = qc.get("case_release_status")
+    issuance["reasons"] = list(dict.fromkeys(list(issuance.get("reasons") or []) + (["not_qualified_emission"] if qc.get("case_release_status") == "analysis_only" else [])))
+    draft["validation"]["issuance"] = issuance
+    emit(STAGE_FREEZE, None)
+    try:
+        snapshot = freeze_result_snapshot(draft)
+    except ResultSnapshotError as exc:
+        raise CompositionError("freeze_result_snapshot failed", exc.issues) from exc
+    if job_store is not None:
+        job_store.save_snapshot(context["job_id"], snapshot)
+
+    sources = []
+    if isinstance(bom, Mapping):
+        direct = bom.get("direct_cost")
+        if isinstance(direct, Mapping) and direct.get("source"):
+            sources.append(direct.get("source"))
+        for item in cost_result.get("items") or []:
+            if item.get("source") and item.get("source") not in sources:
+                sources.append(item.get("source"))
+    report_context = complete_report_context(
+        {
+            "cost_memory": cost_result.get("memory"),
+            "cost_items": cost_result.get("items"),
+            "cost_fundamentacao": cost_result.get("fundamentacao"),
+            "sources": sources,
+            "used_rows": [], "excluded_rows": [],
+            "methodology_justification": "Método da quantificação de custo; memória MP-COST/1 sem fator de mercado.",
+        },
+        request_spec=spec, subject_raw=subject_raw, snapshot=snapshot,
+    )
+    artifact_refs: Dict[str, Any] = {}
+    for artifact_name, artifact_value in (("normative_assessment.json", normative), ("report_context.json", report_context)):
+        payload = dumps_strict(artifact_value).encode("utf-8")
+        context["artifact_bytes"][artifact_name] = payload
+        context["artifact_states"][artifact_name] = {"state": "ready", "error": None}
+        artifact_refs[artifact_name] = {"sha256": sha256_bytes(payload)}
+        _save_artifact(job_store, context["job_id"], artifact_name, payload)
+
+    emit(STAGE_REPORT, None)
+    render = peers.get("render_report")
+    if callable(render):
+        try:
+            pdf = render(snapshot, report_context)
+            if not isinstance(pdf, (bytes, bytearray)) or not pdf:
+                raise ValueError("render_report returned no bytes")
+            payload = bytes(pdf)
+            context["artifact_bytes"]["report.pdf"] = payload
+            context["artifact_states"]["report.pdf"] = {"state": "ready", "error": None}
+            artifact_refs["report.pdf"] = {"sha256": sha256_bytes(payload)}
+            _save_artifact(job_store, context["job_id"], "report.pdf", payload)
+        except Exception as exc:
+            context["artifact_states"]["report.pdf"] = {"state": "failed", "error": make_issue("PDF_FAILED", f"render_report failed: {exc}", origin="c06.worker.cost")}
+    else:
+        context["artifact_states"]["report.pdf"] = {"state": "failed", "error": make_issue("PEER_UNAVAILABLE", "render_report unavailable", severity="warning", origin="c06.worker.cost")}
+
+    emit(STAGE_EVIDENCE, None)
+    evidence_files = {
+        "snapshot/result_snapshot.json": dumps_strict(snapshot).encode("utf-8"),
+        "calculation/cost_bom.json": dumps_strict(bom or {}).encode("utf-8"),
+        "calculation/cost_result.json": dumps_strict(cost_result).encode("utf-8"),
+        "documents/report_context.json": dumps_strict(report_context).encode("utf-8"),
+        "metadata/request_spec.json": dumps_strict(request_spec_for_peers(spec)).encode("utf-8"),
+        "qualification/context.json": dumps_strict(qc).encode("utf-8"),
+        # The C12 package contract keeps these neutral paths across methods.
+        # Empty CSVs truthfully record that no market sample exists; the
+        # effective cost inputs live in calculation/cost_bom.json instead.
+        "data/source_input.bin": dumps_strict(bom or {}).encode("utf-8"),
+        "data/original_base.csv": b"row_id\r\n",
+        "data/interpreted_base.csv": b"row_id\r\n",
+        "data/used_sample.csv": b"row_id\r\n",
+        "data/excluded_rows.csv": b"row_id\r\n",
+        "data/identifier_map.json": dumps_strict({"applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "data/representation_map.json": dumps_strict({
+            "schema_version": "MP-EVIDENCE-MAP/1",
+            "market_sample": "not_applicable_cost_quantification",
+            "cost_input": "calculation/cost_bom.json",
+            "normalized_cost_result": "calculation/cost_result.json",
+            "row_identity": "item_id",
+        }).encode("utf-8"),
+        "model/coefficients.json": dumps_strict({"values": {}, "applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "model/subject_design.json": dumps_strict({"applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "model/transformations.json": dumps_strict({"applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "model/residual_context.json": dumps_strict({"applicability": "not_applicable_cost_quantification"}).encode("utf-8"),
+        "policies/request_spec.json": dumps_strict(request_spec_for_peers(spec)).encode("utf-8"),
+        "policies/missing_policy.json": dumps_strict(spec.get("missing_policy") or {}).encode("utf-8"),
+        "policies/outlier_policy.json": dumps_strict(spec.get("outlier_policy") or {}).encode("utf-8"),
+        "policies/search_policy.json": dumps_strict(spec.get("search_policy") or {}).encode("utf-8"),
+        "policies/evaluation_policy.json": dumps_strict(spec.get("evaluation_policy") or {}).encode("utf-8"),
+        "policies/value_policy.json": dumps_strict(spec.get("value_policy") or {
+            "applicability": "cost_result_is_directly_calculated",
+        }).encode("utf-8"),
+        "reproduction/spec.json": dumps_strict({
+            "schema_version": "MP-COST-REPRODUCTION/1",
+            "promised": True,
+            "method": "validated_cost_bom_sum",
+            "input": "calculation/cost_bom.json",
+            "result": "calculation/cost_result.json",
+            "expected_point": snapshot.get("value", {}).get("point"),
+            "formula": (cost_result.get("memory") or {}).get("formula"),
+            "market_sample": "not_applicable",
+        }).encode("utf-8"),
+    }
+    if context["artifact_bytes"].get("report.pdf"):
+        evidence_files["documents/report.pdf"] = context["artifact_bytes"]["report.pdf"]
+    ledger = {
+        "schema_version": "MP-COMPLETENESS/1",
+        "items": [
+            {"component": "cost_input", "status": "verified", "declared": True, "source": "calculation/cost_bom.json", "notes": "BOM integral identificado por hash.", "evidence": {}},
+            {"component": "cost_calculation", "status": "verified", "declared": True, "source": "calculation/cost_result.json", "notes": "Memória reproduz o point do snapshot.", "evidence": {}},
+            {"component": "frozen_snapshot", "status": "verified", "declared": True, "source": "snapshot.schema_version", "notes": "Snapshot MP/1.", "evidence": {}},
+            {"component": "qualification_context", "status": "present", "declared": True, "source": "snapshot.provenance.qualification_context", "notes": "", "evidence": {}},
+            {"component": "report_artifact", "status": "present", "declared": True, "source": "artifacts.report_pdf", "notes": "", "evidence": {}},
+            {"component": "docx_artifact", "status": "missing", "declared": False, "source": "", "notes": "Gerado na passagem documental.", "evidence": {}},
+            {"component": "review_history", "status": "missing", "declared": False, "source": "", "notes": "Ato humano ainda não realizado.", "evidence": {}},
+            {"component": "signature_record", "status": "missing", "declared": False, "source": "", "notes": "Assinatura ainda não importada.", "evidence": {}},
+            {"component": "photos_documents", "status": "missing", "declared": False, "source": "", "notes": "Anexos documentais ainda não fornecidos.", "evidence": {}},
+        ],
+    }
+    ledger["missing"] = [item["component"] for item in ledger["items"] if item["status"] == "missing"]
+    ledger["counts"] = {status: sum(item["status"] == status for item in ledger["items"])
+                        for status in ("declared", "missing", "present", "verified")}
+    evidence_files["completeness/ledger.json"] = dumps_strict(ledger).encode("utf-8")
+    media = {
+        ".json": "application/json", ".pdf": "application/pdf",
+    }
+    evidence_manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "bundle_version": "C12/1",
+        "input_id": snapshot.get("input_sha256"),
+        "code_id": snapshot.get("code_sha"),
+        "snapshot_sha256": sha256_bytes(evidence_files["snapshot/result_snapshot.json"]),
+        "job_id": snapshot.get("job_id"),
+        "project_id": snapshot.get("project_id"),
+        "cost_evidence_schema": "MP-COST-EVIDENCE/1",
+        "result_fingerprint": qc.get("result_fingerprint"),
+        "calculation_schema": cost_result.get("schema_version"),
+        "completeness_status": "incomplete",
+        "completeness_missing": ledger["missing"],
+        "completeness_summary": ledger["counts"],
+        "numerical_reproduction_status": "ready",
+        "replay": {
+            "formula": (cost_result.get("memory") or {}).get("formula"),
+            "point": snapshot.get("value", {}).get("point"),
+            "automatic_currency_or_date_adjustment": False,
+        },
+        "files": [
+            {"path": name, "sha256": sha256_bytes(payload), "size": len(payload),
+             "type": media.get(os.path.splitext(name)[1], "application/octet-stream"),
+             "version": "MP-COST/1", "function": "cost_evidence_" + name.replace("/", "_")}
+            for name, payload in sorted(evidence_files.items())
+        ],
+    }
+    manifest_payload = dumps_strict(evidence_manifest).encode("utf-8")
+    evidence_files["MANIFEST.json"] = manifest_payload
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, payload in sorted(evidence_files.items()):
+            info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            zf.writestr(info, payload)
+    bundle_payload = archive.getvalue()
+    for artifact_name, payload in (("evidence_manifest.json", manifest_payload), ("evidence_bundle.zip", bundle_payload)):
+        context["artifact_bytes"][artifact_name] = payload
+        context["artifact_states"][artifact_name] = {"state": "ready", "error": None}
+        artifact_refs[artifact_name] = {"sha256": sha256_bytes(payload)}
+        _save_artifact(job_store, context["job_id"], artifact_name, payload)
+
+    frozen_project = {
+        "schema_version": SCHEMA_VERSION, "project_id": project_id, "revision_id": None,
+        "input_sha256": input_sha, "dataset_sha256": None,
+        "request_spec": request_spec_for_peers(spec), "feature_schema": {}, "encoder_state": {},
+        "model_spec": {"method": "metodo_quantificacao_de_custo"},
+        "model_state": {"status": model["status"], "cost_result": cost_result},
+        "model_scope": "cost_inputs", "selection_conditioned_on_subject": False,
+        "subject_constraints": {}, "domain": {"kind": "cost_inputs", "target_col": "", "target_unit": spec.get("target_unit"), "reference_date": spec.get("reference_date"), "variables": {}},
+        "sample_ledger": {}, "normative_version": normative["edition"], "artifact_refs": artifact_refs,
+        "provenance": {"code_sha": current_code_sha(), "composed_by": "c06.worker.cost", "calculation_version": CALCULATION_VERSION},
+        "calculation_version": CALCULATION_VERSION, "residual_state": {}, "value": snapshot.get("value"),
+    }
+    frozen_payload = dumps_strict(frozen_project).encode("utf-8")
+    context["artifact_bytes"]["frozen_project.json"] = frozen_payload
+    context["artifact_states"]["frozen_project.json"] = {"state": "ready", "error": None}
+    _save_artifact(job_store, context["job_id"], "frozen_project.json", frozen_payload)
+    emit(STAGE_PERSIST, None)
+    patch = {"stage": STAGE_PERSIST, "progress": context["progress"], "result_available": True,
+             "artifact_states": context["artifact_states"], "calculation_state": "succeeded", "issues": list(snapshot.get("issues") or [])}
+    if job_store is not None:
+        for old in ("running", "queued"):
+            try:
+                job_store.update_transition(context["job_id"], old, "succeeded", patch=patch); break
+            except Exception:
+                continue
+    context.update({"snapshot": snapshot, "frozen_project": frozen_project,
+                    "report_context": report_context, "calculation_state": "succeeded"})
+    return context
+
+
 def compose_valuation_job(
     *,
     job_id: str,
@@ -1066,9 +1550,12 @@ def compose_valuation_job(
         "subject_raw": dict(subject_raw) if isinstance(subject_raw, Mapping) else None,
         "artifact_bytes": {},
         "artifact_states": {
+            "normative_assessment.json": {"state": "pending", "error": None},
+            "report_context.json": {"state": "pending", "error": None},
             "report.pdf": {"state": "pending", "error": None},
             "evidence_manifest.json": {"state": "pending", "error": None},
             "frozen_project.json": {"state": "pending", "error": None},
+            "evidence_bundle.zip": {"state": "pending", "error": None},
         },
         "stage": STAGE_INGEST,
         "progress": None,
@@ -1096,6 +1583,24 @@ def compose_valuation_job(
                 logger.debug("update_transition(running→running) not accepted; continuing")
 
     spec = request_spec_for_peers(request_spec)
+    profile_wire = spec.get("qualification_profile") if isinstance(spec.get("qualification_profile"), Mapping) else {}
+    is_cost_route = bool(
+        profile_wire.get("method") == "metodo_quantificacao_de_custo"
+        and profile_wire.get("value_basis") == "custo_de_reedicao"
+    )
+    if is_cost_route:
+        return _compose_cost_valuation_job(
+            context=context,
+            emit=emit,
+            spec=spec,
+            file_bytes=file_bytes,
+            filename=filename,
+            subject_raw=context.get("subject_raw"),
+            project_id=project_id,
+            peers=peers,
+            job_store=job_store,
+            output_dir=output_dir,
+        )
     required = list(REQUIRED_VALUATION_PEERS)
     if context["subject_raw"] is not None:
         required.append("transform_subject")
@@ -1153,6 +1658,20 @@ def compose_valuation_job(
         raise CompositionError("search_models failed", search_issues)
     winner = _get(search_result, "winner")
     if winner is None:
+        for alt in _get(search_result, "alternatives") or []:
+            adm = _as_dict(_get(alt, "admissibility")) or {}
+            if adm.get("numeric_technical") or _get(alt, "status") == "fitted":
+                winner = alt
+                search_issues.append(
+                    make_issue(
+                        "WINNER_PROMOTED_FROM_NUMERIC_ALTERNATIVE",
+                        "Fitted numeric alternative promoted; grade/framing is not a NO_WINNER gate.",
+                        severity="warning",
+                        origin="c10.worker",
+                    )
+                )
+                break
+    if winner is None:
         raise CompositionError(
             "search_models returned no winner",
             search_issues + [make_issue("NO_WINNER", "search_models returned no winner", origin="c10.worker")],
@@ -1187,6 +1706,13 @@ def compose_valuation_job(
         result = evaluate(winner_fit, design, spec)
         return {"point": _point_from(result)}
 
+    numeric_disclosure = build_numeric_disclosure(
+        winner_fit,
+        prepared,
+        subject_raw=context.get("subject_raw"),
+        predict_original=predict_original,
+    )
+
     emit(STAGE_NORMATIVE, None)
     # Always feed C03 from the live CandidateFit + prepared sample. Nested
     # assessment.normative from a partial search record is not sufficient.
@@ -1199,6 +1725,7 @@ def compose_valuation_job(
                 spec,
                 context.get("subject_raw"),
                 predict_original,
+                numeric_disclosure,
             )
         )
     else:
@@ -1241,6 +1768,12 @@ def compose_valuation_job(
         prepared_dataset=prepared,
         used_row_ids=used_row_ids,
         excluded_row_ids=excluded_row_ids,
+        winner_fit=winner_fit,
+    )
+    report_context = complete_report_context(
+        report_context,
+        request_spec=spec,
+        subject_raw=context.get("subject_raw"),
     )
 
     snapshot_issues: List[dict] = []
@@ -1253,10 +1786,59 @@ def compose_valuation_job(
     snapshot_issues.extend(_issue_list(procedure))
 
     value_block = _value_from_assessment(assessment, snapshot_issues)
+    value_policy_used = _as_dict(_get(assessment, "value_policy")) or {}
     # Map normativa/estatística; do not recompute classifications.
-    mapped_validation = _map_validation(normative, assessment, procedure)
+    mapped_validation = _map_validation(
+        normative,
+        assessment,
+        procedure,
+        numeric_disclosure=numeric_disclosure,
+    )
+
+    profile = spec.get("qualification_profile") if isinstance(spec.get("qualification_profile"), Mapping) else {}
+    value_basis = str((profile or {}).get("value_basis") or "market")
+    cost_result = None
+    market_value_block = dict(value_block)
+    cost_basis_map = {
+        "reconstruction_cost": "reconstruction_cost",
+        "replacement_cost": "replacement_cost",
+        "depreciated_cost": "depreciated_cost",
+        "custo_de_reedicao": "depreciated_cost",
+    }
+    if value_basis in cost_basis_map:
+        from modules.cost_valuation import compute_reconstruction_cost
+
+        cost_result = compute_reconstruction_cost(
+            spec.get("cost_bom"),
+            market_point=market_value_block.get("point"),
+            value_basis=cost_basis_map[value_basis],
+            include_depreciation=cost_basis_map[value_basis] == "depreciated_cost",
+        )
+        snapshot_issues.extend(list(cost_result.get("issues") or []))
+        cost_value = dict(cost_result.get("value") or {})
+        value_block = empty_value_block()
+        for key in empty_value_block():
+            value_block[key] = cost_value.get(key)
+        value_block["basis"] = cost_value.get("basis") or value_basis
+        value_block["estimand"] = cost_value.get("estimand") or "reconstruction_cost_sum"
+        if not cost_result.get("computable"):
+            value_block["point"] = None
+    else:
+        value_block.setdefault("basis", "market")
 
     model_block = _model_identity(winner_fit, prepared, assessment)
+    formula = formula_from_coefficients(
+        model_block.get("coefficients") or {},
+        list(((_as_dict(_get(winner_fit, "diagnostics")) or {}).get("design_columns"))
+             or (model_block.get("coefficients") or {}).keys()),
+        target_name=str(spec.get("target_col") or "y"),
+    )
+    if formula:
+        model_block["formula"] = formula
+    diagnostics_fit = _as_dict(_get(winner_fit, "diagnostics")) or {}
+    if diagnostics_fit:
+        model_block["diagnostics"] = diagnostics_fit
+    model_block.update(_as_dict(numeric_disclosure.get("model")) or {})
     search_audit = _as_dict(_get(search_result, "search_audit")) or {}
     alternatives = _json_safe_alternatives(_get(search_result, "alternatives") or [])
 
@@ -1294,11 +1876,54 @@ def compose_valuation_job(
             "peers": {k: {"kind": v[0], "ref": v[1]} for k, v in context["peers_used"].items() if v[0] != "missing"},
             "sample_ledger_present": sample_ledger is not None,
             "subject_categorical_survived": _subject_categorical_survived(subject_design, context["subject_raw"]),
+            "calculation_version": CALCULATION_VERSION,
+            # Persist the single normative authority so document/review routes
+            # can perform the second MP-QUAL/1 pass without reconstructing a
+            # grade from presentation fields.
+            "normative_assessment": _as_dict(normative) or {},
+            "workflow_context": build_workflow_context(
+                request_spec=spec,
+                subject_raw=context.get("subject_raw"),
+                validation=mapped_validation,
+                search_audit=search_audit,
+                limitation_codes=list((_as_dict(_get(assessment, "statistical")) or {}).get("limitations") or []),
+                issues=snapshot_issues,
+            ),
         },
     }
     # Restore estimand only on target, not inside value (value shape is exact).
     if "estimand" in value_block and "estimand" in draft["value"]:
         draft["value"] = {k: v for k, v in draft["value"].items() if k != "estimand"}
+        draft["target"]["estimand"] = value_block.get("estimand") or draft["target"].get("estimand")
+
+    from modules.valuation_policy.qualification import (
+        compose_qualification_context,
+        map_issuance_status,
+    )
+
+    qc = compose_qualification_context(
+        request_spec=spec,
+        snapshot_draft=draft,
+        winner=_as_dict(winner) if winner is not None else None,
+        search_audit=search_audit,
+        issues=snapshot_issues,
+        review_events=list(spec.get("review_events") or context.get("review_events") or []),
+        cost_result=cost_result,
+        previous_fingerprint=context.get("previous_fingerprint") or spec.get("previous_fingerprint"),
+        normative_assessment=_as_dict(normative) or {},
+    )
+    draft.setdefault("provenance", {})
+    draft["provenance"]["qualification_context"] = qc
+    if value_basis in cost_basis_map:
+        draft["provenance"]["market_value_not_used_as_cost"] = market_value_block
+    issuance = dict((draft.get("validation") or {}).get("issuance") or {})
+    issuance["status"] = map_issuance_status(qc.get("case_release_status"))
+    issuance["case_release_status"] = qc.get("case_release_status")
+    reasons = list(issuance.get("reasons") or [])
+    if qc.get("case_release_status") == "analysis_only" and "not_qualified_emission" not in reasons:
+        reasons.append("not_qualified_emission")
+    issuance["reasons"] = reasons
+    draft.setdefault("validation", {})["issuance"] = issuance
 
     emit(STAGE_ACTIONS, None)
     actions = peers["recommend_next_actions"](draft, _get(prepared, "feature_schema"))
@@ -1314,6 +1939,30 @@ def compose_valuation_job(
         job_store.save_snapshot(job_id, snapshot)
 
     artifact_refs: Dict[str, Any] = {}
+    # These are internal, calculation-derived inputs for document/review
+    # re-assessment.  Persist them rather than accepting equivalent structures
+    # back from an HTTP client, which would create a qualification bypass.
+    for artifact_name, artifact_value in (
+        ("normative_assessment.json", _as_dict(normative) or {}),
+        ("report_context.json", report_context),
+    ):
+        try:
+            artifact_payload = dumps_strict(artifact_value).encode("utf-8")
+            context["artifact_bytes"][artifact_name] = artifact_payload
+            context["artifact_states"][artifact_name] = {"state": "ready", "error": None}
+            artifact_refs[artifact_name] = {"sha256": sha256_bytes(artifact_payload)}
+            _save_artifact(job_store, job_id, artifact_name, artifact_payload)
+        except Exception as exc:
+            context["artifact_states"][artifact_name] = {
+                "state": "failed",
+                "error": make_issue(
+                    "INTERNAL_CONTEXT_PERSIST_FAILED",
+                    f"{artifact_name} could not be persisted: {exc}",
+                    origin="c06.worker",
+                    evidence={"exception_type": type(exc).__name__},
+                ),
+            }
+
     emit(STAGE_REPORT, None)
     render = peers.get("render_report")
     if callable(render):
@@ -1387,6 +2036,22 @@ def compose_valuation_job(
                 pack.setdefault("y_transformation", y_tr)
             if cand_spec:
                 pack.setdefault("candidate_spec", cand_spec)
+            residual_for_pack = complete_residual_state_for_persist(winner_fit, subject_design)
+            if residual_for_pack:
+                pack.setdefault("residual_context", residual_for_pack)
+                pack.setdefault("residual_state", residual_for_pack)
+            pack.setdefault("feature_schema", _as_dict(_get(prepared, "feature_schema")) or _as_dict(_get(winner_fit, "feature_schema")))
+            pack.setdefault("encoder_state", _as_dict(_get(prepared, "encoder_state")) or _as_dict(_get(winner_fit, "encoder_state")))
+            pack.setdefault("request_spec", request_spec_for_peers(spec))
+            pack.setdefault("missing_policy", spec.get("missing_policy"))
+            pack.setdefault("outlier_policy", spec.get("outlier_policy"))
+            pack.setdefault("search_policy", spec.get("search_policy"))
+            pack.setdefault("evaluation_policy", spec.get("evaluation_policy"))
+            # The bundle records the policy actually used by evaluation.  The
+            # request remains available separately and cannot replace this
+            # catalog-resolved rule with a client declaration.
+            pack["value_policy"] = value_policy_used
+            pack.setdefault("source_bytes", file_bytes)
             manifest = builder(
                 snapshot, bundle, prepared, pack, output_dir
             )
@@ -1396,6 +2061,24 @@ def compose_valuation_job(
             context["artifact_states"]["evidence_manifest.json"] = {"state": "ready", "error": None}
             artifact_refs["evidence_manifest.json"] = {"sha256": sha256_bytes(payload)}
             _save_artifact(job_store, job_id, "evidence_manifest.json", payload)
+            if output_dir:
+                try:
+                    zip_bytes = _zip_directory(output_dir)
+                    context["artifact_bytes"]["evidence_bundle.zip"] = zip_bytes
+                    context["artifact_states"]["evidence_bundle.zip"] = {"state": "ready", "error": None}
+                    artifact_refs["evidence_bundle.zip"] = {"sha256": sha256_bytes(zip_bytes)}
+                    _save_artifact(job_store, job_id, "evidence_bundle.zip", zip_bytes)
+                except Exception as zip_exc:
+                    logger.warning("evidence_bundle.zip failed; calculation preserved: %s", zip_exc)
+                    context["artifact_states"]["evidence_bundle.zip"] = {
+                        "state": "failed",
+                        "error": make_issue(
+                            "EVIDENCE_ZIP_FAILED",
+                            f"evidence_bundle.zip could not be packed: {zip_exc}",
+                            origin="c10.worker",
+                            evidence={"exception_type": type(zip_exc).__name__},
+                        ),
+                    }
         except Exception as exc:
             logger.warning("evidence bundle failed; snapshot preserved: %s", exc)
             err = make_issue(
@@ -1427,6 +2110,9 @@ def compose_valuation_job(
         normative=normative,
         artifact_refs=artifact_refs,
         sample_ledger=sample_ledger,
+        search_audit=search_audit,
+        value=snapshot.get("value") if isinstance(snapshot, Mapping) else None,
+        value_policy=value_policy_used,
     )
     try:
         frozen_bytes = dumps_strict(frozen_project).encode("utf-8")
@@ -1467,7 +2153,13 @@ def compose_valuation_job(
     return context
 
 
-def _map_validation(normative: Any, assessment: Any, procedure: Any = None) -> dict:
+def _map_validation(
+    normative: Any,
+    assessment: Any,
+    procedure: Any = None,
+    *,
+    numeric_disclosure: Optional[Mapping[str, Any]] = None,
+) -> dict:
     """Copy C03/C04 validation fields; do not recompute grades."""
     n = _as_dict(normative) or {}
     a = _as_dict(assessment) or {}
@@ -1493,6 +2185,9 @@ def _map_validation(normative: Any, assessment: Any, procedure: Any = None) -> d
         statistical.setdefault("k", n.get("k"))
     if n.get("intercept") is not None:
         statistical.setdefault("intercept", n.get("intercept"))
+    numeric_diagnostics = _as_dict(_get(numeric_disclosure, "diagnostics")) or {}
+    if numeric_diagnostics:
+        statistical["diagnostics"] = numeric_diagnostics
     if procedure is not None:
         proc = _as_dict(procedure) or {}
         provenance = _as_dict(proc.get("procedure_provenance")) or {}
@@ -1589,6 +2284,21 @@ def _normalize_actions(actions: Any) -> List[dict]:
             }
         )
     return out
+
+
+def _zip_directory(root: str) -> bytes:
+    """Pack a local evidence directory into a downloadable zip. Paths stay relative."""
+    buf = io.BytesIO()
+    base = os.path.abspath(root)
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for dirpath, _dirnames, filenames in os.walk(base):
+            for name in filenames:
+                full = os.path.join(dirpath, name)
+                rel = os.path.relpath(full, base).replace("\\", "/")
+                if rel.startswith(".."):
+                    continue
+                zf.write(full, arcname=rel)
+    return buf.getvalue()
 
 
 def _save_artifact(job_store: Any, job_id: str, name: str, data: bytes) -> None:

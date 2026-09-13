@@ -1,0 +1,13 @@
+{
+  "campaign": "P03",
+  "lote": "MP-PRO-20260911",
+  "local_class": "IMPLEMENTED_VERIFIED",
+  "acceptances": {
+    "P03-A01": "pass",
+    "P03-A02": "pass",
+    "P03-A03": "pass",
+    "P03-A04": "pass",
+    "P03-A05": "pass",
+    "P03-A06": "pass"
+  }
+}

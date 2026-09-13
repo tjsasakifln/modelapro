@@ -24,7 +24,10 @@ def job_store(store_root):
     JobStore.reset_default()
     WebSocketNotifier().reset_connections()
     store = JobStore.configure_default(store_root, recover_abandoned=True)
+    from backend.api import bind_runtime, reset_runtime
+    bind_runtime(job_store=store, project_store=ProjectStore(store.root))
     yield store
+    reset_runtime()
     WebSocketNotifier().reset_connections()
     JobStore.reset_default()
 

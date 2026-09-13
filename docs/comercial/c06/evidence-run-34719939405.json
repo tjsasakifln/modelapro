@@ -1,0 +1,58 @@
+{
+  "schema": "MP-C06-EVIDENCE/1",
+  "pr_head_sha": null,
+  "base_sha": "c60fbebd11816e358756a50ca8a09b74a815aa34",
+  "tested_commit_sha": "1b57df2ccdce2c79852a3f731afad8131374e09a",
+  "tree_sha": "5126d87be0d6f86a9ee1efcf84506195974aaee1",
+  "parents": [
+    "fe02ed4112083f9b177b4f456577533782718b0c"
+  ],
+  "event": "push",
+  "run_id": "34719939405",
+  "run_attempt": "1",
+  "job": "wide-suite-linux",
+  "source_dirty": false,
+  "tracked_source_dirty_after": true,
+  "unexpected_untracked_source": [],
+  "files": {
+    "collection.json": "94e9d6e5eb6508873404345bfce6b953ab763283e31dbf31f6d6997e448dba00",
+    "inventory-check.log": "05a08806caca2e88409ed5b9713e9650bbee19501044a214cbce1b1a5b322730",
+    "ui-e2e/P02/desktop-empty.png": "68c9af41d36a7c4cb4ae5640de3da1432bf40bd06b45aaf393c84822732a87c3",
+    "ui-e2e/P02/narrow-result.png": "930c152a62912cc8f1a2c0d9bf03636361446494fed14a8595e7b30e7a71d0f4",
+    "ui-e2e/P02/requests.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "ui-e2e/P02/result-csv.png": "f72f22a4b0ad74cf3179d4212736dc4e232ecd8d5b6f59f4e34d3b412159f75a",
+    "ui-e2e/P02/result-xlsx.png": "4da3596dcb202f162b5905350453a406637177005eead2e8fffc03131d94f95b",
+    "ui-e2e/P02/trace.zip": "1e0555de5765e21461d73415e3e48f34373e53ade592ce78a020adde38c549a1",
+    "ui-e2e/c06-cost-flow/artifact-inventory.json": "aa24526d22c43e1a3bacf8131cc4ef1c6ffa10cc3329f8c06ffbc02ca9a4d10d",
+    "ui-e2e/c06-cost-flow/store/jobs/job_66f2bb1194684bb889cafd228a7a98ec/artifacts/evidence_bundle.zip": "8f20d229c64becf691516adb2f74b2ccffcab0d2581830fc5718c1ec98b965d0",
+    "ui-e2e/c06-cost-flow/store/jobs/job_66f2bb1194684bb889cafd228a7a98ec/artifacts/report.pdf": "bf29bf510ab78b951f7d1efec6dcab8a32f4f4fdce5ca82b2b648f015555aeca",
+    "ui-e2e/c06-document-flow/artifact-inventory.json": "ab3399ea67e9e47e1b2e02c6e760ba49fb02c883ecd16d222e73871f31a0f959",
+    "ui-e2e/c06-document-flow/browser-document-flow-body.txt": "aef7b48112956648dd8bdc059e7f1330068b2a8ac1b5cb5df3059a59fb2349e4",
+    "ui-e2e/c06-document-flow/browser-document-flow-failure.png": "3d5f4684e4e95ad40ba04bcb39f318a9096d72e6c17e5d7ee12c796cc9ce99d8",
+    "ui-e2e/c06-document-flow/store/jobs/job_9cf8552aa8434d70a4d8f038022f7656/artifacts/document_history.zip": "7cf69f8015ae71281c6681d67bc4e62eaf8a2b68ac45c9e95e761804eedce355",
+    "ui-e2e/c06-document-flow/store/jobs/job_9cf8552aa8434d70a4d8f038022f7656/artifacts/evidence_bundle.zip": "dd51dcc4f74fc2f07bb89e48397359d380ac056d74a944ecbbd24a0f65f9d832",
+    "ui-e2e/c06-document-flow/store/jobs/job_9cf8552aa8434d70a4d8f038022f7656/artifacts/report.docx": "c077b458d7b7c0f68e4f7442a8ad2d02a10311ef01492d5677e88f6de9dfdfa5",
+    "ui-e2e/c06-document-flow/store/jobs/job_9cf8552aa8434d70a4d8f038022f7656/artifacts/report.pdf": "bc8fc5a489bceb9021f323067c1c15e1140e25831a2765960a0d92a5e5d07326",
+    "ui-e2e/c06-document-flow/store/jobs/job_9cf8552aa8434d70a4d8f038022f7656/evidence/artifacts/report.pdf": "bdab05f31c733ce18edfe5a042f9d4814b042aab8798af3122b143c0d515e87f",
+    "ui-e2e/c16_ui.png": "10a0f513eab0753905130fdfe55dcd2d740796efde10dbbd523dd67985d4f53f",
+    "ui-e2e/pw_trace.zip": "92b19e875518d2522b961ea77d854dc0ddf867a9235f77593e0a095de1aacd21",
+    "ui-e2e/report.pdf": "690cb47f73dc497bb34e88adc2c78bd4c1150a492810a3cedc40e086253d6766",
+    "ui-e2e/ui_api.log": "3709cdef24237d3cb573f25e7666491ccfd85066065aa9cb875079be5577a604",
+    "ui-e2e/ui_body.txt": "c914adaf86316aeb4f09bd879198fc21eb02b83d3978b3cef70e33c8c7fd60d3",
+    "wide.junit.xml": "f57a9dbe17d4251e07f4ab4aa684233e9dc7d78413692fb307a693bfb92e8a63",
+    "wide.log": "dbd345a044f6a8d49305fb92f57484dac44ee240638dccc45f5ef760a6ee717f"
+  },
+  "package_hashes": {},
+  "status": "FAILURE_NOT_APPROVAL_OF_CURRENT_HEAD",
+  "wide_result": {
+    "collected": 1736,
+    "passed": 1734,
+    "failed": 1,
+    "skipped": 1,
+    "failed_cases": [
+      "tests.comercial.test_c06_browser_document_flow::test_browser_completes_test_report_review_and_external_signature"
+    ]
+  },
+  "downloaded_file_hashes_verified": true,
+  "source_mutation": "tracked_source_dirty_after=true; cause under investigation, remains disqualifying"
+}

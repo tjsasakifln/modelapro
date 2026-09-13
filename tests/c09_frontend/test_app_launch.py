@@ -1,10 +1,14 @@
 """Entrada real frontend/app.py — duas execuções in-process."""
 
+import os
 from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
-from frontend.components.layout import FIXTURE_SCREEN_NOTICE, WORK_FLOW_HEADINGS
+os.environ.setdefault("MODELA_API_TIMEOUT", "2")
+os.environ.setdefault("MODELA_DISABLE_WS", "1")
+
+from frontend.components.layout import FIXTURE_SCREEN_NOTICE
 
 APP = str(Path(__file__).resolve().parents[2] / "frontend" / "app.py")
 
@@ -25,16 +29,20 @@ def _collect_text(at: AppTest) -> str:
 
 
 def _run_once() -> str:
-    at = AppTest.from_file(APP, default_timeout=20)
+    at = AppTest.from_file(APP, default_timeout=40)
     at.run()
     if at.exception:
         raise AssertionError(at.exception)
     text = _collect_text(at)
-    joined_headings = " ".join(WORK_FLOW_HEADINGS)
-    assert "Importar e revisar interpretação" in joined_headings
-    assert "Valor da avaliação" in joined_headings or "Revisar valor" in joined_headings
-    assert "MODELA PRO" in text or "Importar" in text or "avaliação" in text.lower()
-    assert "R² Ajustado" not in text
+    blob = text.lower()
+    assert "encomenda" in blob
+    assert "amostra" in blob
+    assert "vistoria" in blob
+    assert "modelagem" in blob
+    assert "emissão" in blob or "emissao" in blob
+    assert "modela pro" in blob or "avaliação" in blob
+    assert "r² ajustado" not in blob
+    assert "aceito pelo banco" not in blob
     return text
 
 

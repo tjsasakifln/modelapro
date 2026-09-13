@@ -1,0 +1,570 @@
+{
+  "id": "bb-meci-avaliacao-imovel-pf",
+  "version": "0.3.0",
+  "kind": "institution",
+  "state": "verified",
+  "label": "Banco do Brasil — laudo de avaliação de imóvel urbano (pessoa física), conforme MECI",
+  "recipient_id": "banco-do-brasil",
+  "purpose": "garantia",
+  "purpose_taxonomy_source": "ABNT NBR 14653-1:2019, Seção 6 a)",
+  "value_basis": "valor_de_mercado",
+  "method": "metodo_comparativo_direto_regressao",
+  "asset_scope": "imovel_urbano",
+  "primary_edition": "MECI-202400940-VER01",
+  "act_type_established": "verificacao_de_laudo",
+  "act_type_detail": "Regime de duas camadas, nenhuma delas homologação de software: (a) CREDENCIAMENTO DE PESSOA JURÍDICA registrada no CREA/CAU (Edital 2023/01269 item 2.1) — não é credenciamento de profissional pessoa física nem de produto; (b) VERIFICAÇÃO DE LAUDO individual, em que o serviço só se considera executado com entrega e ACEITE por engenheiro do próprio Banco, condicionado à adequação às normas da ABNT, às normas do Banco e à Ordem de Serviço (DOCUMENTO 02, itens 3.1, 4 e 5).",
+  "sources": [
+    {
+      "id": "bb-meci-202400940-ver01",
+      "kind": "manual_do_emissor",
+      "title": "MECI — Manual de Engenharia do Crédito Imobiliário e Consórcios, Parte I: Avaliação de Imóvel Pessoa Física",
+      "edition_or_version": "MECI-202400940-VER01",
+      "url": "https://www.bb.com.br/docs/portal/disec/MECI-202400940-VER01.pdf",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "itens 2.3.3 (memória de cálculo e formatos de entrega), 3.1.7.2 (anexos obrigatórios), 3.2.2 (metodologia), 3.3.1 (conteúdo estatístico), 3.4.1 (grau alvo)",
+      "retrieval_note": "obtido na origem bb.com.br; bb.com.br responde HTTP 403 a clientes não-navegador",
+      "currency_status": "publicado_na_pagina_oficial_vigencia_nao_estabelecida"
+    },
+    {
+      "id": "bb-normas-elaboracao-laudos-2023-01269",
+      "kind": "norma_do_emissor",
+      "title": "Normas para elaboração de laudos — Edital de Credenciamento 2023/01269(7421)",
+      "edition_or_version": "NormasElaboracaoLaudos-v1",
+      "url": "https://www.bb.com.br/docs/portal/disec/NormasElaboracaoLaudos-v1.pdf",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "1.1.1/1.2 normas aplicáveis; 2.1 entrega via formulário; 10.4/10.5 graus na trilha Crédito Geral; 12.1.8/12.1.9 dados estruturados; 12.1.15/12.1.16 anexos estatísticos",
+      "currency_status": "trilha_distinta_do_MECI_ver_divergencia_de_grau"
+    },
+    {
+      "id": "bb-edital-credenciamento-2023-01269",
+      "kind": "edital_de_credenciamento",
+      "title": "Edital de Credenciamento nº 2023/01269(7421) e anexos",
+      "edition_or_version": "2023/01269(7421)",
+      "url": "https://www.bb.com.br/docs/portal/disec/Edital%20e%20Anexos2023-01269-7421.zip",
+      "consulted_on": "2026-09-11",
+      "content_conferred": true,
+      "conferred_scope": "item 2.1 objeto (credenciamento de PESSOA JURÍDICA); Anexo XI/item 6 pré-requisitos AVA-01; DOCUMENTO 02 itens 3.1/4/5 aceite do laudo; DOCUMENTO 05 ANS"
+    }
+  ],
+  "minimum_fundamentacao_grade": 2,
+  "minimum_grade_source": "MECI-202400940-VER01, item 3.4.1",
+  "decisive_rules": [
+    "parte1.bases_de_valor",
+    "bb.metodologia",
+    "bb.grau_minimo",
+    "bb.memoria_de_calculo.formato",
+    "bb.memoria_de_calculo.conteudo"
+  ],
+  "terminology_trap": "No Acordo de Nível de Serviço do Edital 2023/01269 (DOCUMENTO 05) a expressão 'Homologação da Plataforma de Laudos [...] através do Guia de Homologação' é o INSTRUMENTO DE MEDIÇÃO do indicador de qualidade: é a aprovação de CADA LAUDO submetido. NÃO é homologação de software de avaliação e não pode ser lida como tal.",
+  "what_this_profile_is_not": [
+    "Não é homologação, certificação, registro ou aprovação do MODELA PRO pelo Banco do Brasil.",
+    "Não é aceitação de nenhum laudo produzido por este software.",
+    "Nada obtido cria via de homologação de software no Banco do Brasil."
+  ],
+  "attribution_warning": "ATENÇÃO À LAVAGEM DE ATRIBUIÇÃO: o item 3.3.1 do MECI enuncia números de sabor normativo (intervalo de confiança de 80%, campo de arbítrio, Grau de Fundamentação II, probabilidades da normal padrão, F de Snedecor calculado). Aqui eles são requisito CONTRATUAL DO BANCO DO BRASIL, lidos no MECI — NÃO foram lidos da ABNT NBR 14653-2 nesta fonte. Permitido: 'o BB exige intervalo de confiança de 80%'. Vedado: 'a NBR 14653-2 exige, conforme o MECI'. Os limiares que o produto aplica como normativos vieram do texto da própria norma (docs/comercial/c05/sources.md), não daqui.",
+  "requirements": [
+    {
+      "id": "bb.metodologia",
+      "clause": "MECI-202400940-VER01, item 3.2.2",
+      "requirement": "Método comparativo direto de dados de mercado com tratamento por modelo de regressão linear é a regra; métodos alternativos apenas quando o MCDDM não for viável (imóvel em construção/reforma), sempre conforme a NBR 14653.",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "bb.grau_minimo",
+      "clause": "MECI-202400940-VER01, item 3.4.1",
+      "requirement": "Meta obrigatória de Grau de Fundamentação II para imóveis urbanos; Grau I admitido somente com justificativa.",
+      "verification": "calculated",
+      "criterion_ref": "requested_minimum_grade = 2; grade_requirement_status deve ser 'met'"
+    },
+    {
+      "id": "bb.memoria_de_calculo.formato",
+      "clause": "MECI-202400940-VER01, itens 2.3.3, 2.3.3.1, 2.3.3.2 e 3.1.7.2",
+      "requirement": "A memória de cálculo é ANEXO OBRIGATÓRIO do laudo, entregue em um de dois formatos: (a) se o avaliador usa SisDea, SisRen ou TS-Sisreg, o arquivo NATIVO do modelo de regressão gerado por esses aplicativos; (b) 'OUTROS APLICATIVOS' — qualquer software que não seja esses três — cumprem a exigência entregando RELATÓRIO PDF COMPLETO da inferência estatística.",
+      "verification": "documental",
+      "criterion_ref": "É a rota documental aplicável ao MODELA PRO: via (b), relatório PDF completo da inferência.",
+      "handoff": "C03 (laudos/evidências) é quem emite o PDF; C05 apenas registra o requisito."
+    },
+    {
+      "id": "bb.memoria_de_calculo.conteudo",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Lista fechada do conteúdo estatístico da memória de cálculo: equação com a variável dependente destransformada, R, R² e R² ajustado, significância do modelo e de cada variável, n, atributos do avaliando e os demais itens enumerados no dispositivo.",
+      "verification": "documental",
+      "attribution": "requisito contratual do BB — ver attribution_warning"
+    },
+    {
+      "id": "bb.anexos_estatisticos",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), itens 12.1.15 e 12.1.16",
+      "requirement": "Anexos obrigatórios: gráfico de resíduos, gráfico de preços observados versus estimados e tabela com o demonstrativo da pontuação de enquadramento nos graus de fundamentação e precisão.",
+      "verification": "documental"
+    },
+    {
+      "id": "bb.dados_estruturados",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), itens 3.2, 12.1.8 e 12.1.9",
+      "requirement": "Geolocalização do avaliando e de TODOS os elementos amostrais em graus decimais; planilha de amostra com dados numerados, endereço completo, coordenadas, fonte e as variáveis utilizadas ou dispensadas.",
+      "verification": "documental"
+    },
+    {
+      "id": "bb.aceite_por_engenheiro_do_banco",
+      "clause": "Edital 2023/01269, DOCUMENTO Nº 02, itens 3.1, 4 e 5",
+      "requirement": "O serviço só se considera executado com a entrega e o ACEITE por engenheiro do Banco, condicionado à adequação do laudo às normas da ABNT, às normas do Banco e à Ordem de Serviço.",
+      "verification": "professional_evidenced",
+      "criterion_ref": "É ato do destinatário: fica fora do controle do software e nunca é presumido."
+    },
+    {
+      "id": "bb.responsabilidade_tecnica",
+      "clause": "Edital 2023/01269, item 2.1 e Anexo XI/item 6 (atividade AVA-01)",
+      "requirement": "Credenciamento de pessoa jurídica registrada no CREA/CAU, com qualificação técnica comprovada pelos profissionais do quadro (formação superior em Engenharia Civil / Engenharia de Produção Civil / Arquitetura e curso de avaliação de imóveis).",
+      "verification": "professional_evidenced"
+    },
+    {
+      "id": "bb.formato_de_entrega",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), item 2.1",
+      "requirement": "Entrega do laudo pelo preenchimento do formulário do BB na plataforma indicada pelo Banco, com todas as abas preenchidas.",
+      "verification": "documental",
+      "state": "pending",
+      "criterion_ref": "A plataforma e o formulário concretos variam por trilha/edital; o texto controlador da trilha corrente (Edital 2024/00940) não foi obtido."
+    },
+    {
+      "id": "bb.divergencia_de_grau_entre_trilhas",
+      "clause": "MECI 3.4.1 vs Normas para elaboração de laudos 10.4/10.5",
+      "requirement": "CONFLITO REGISTRADO, não resolvido pela via mais fácil: o MECI (Avaliação de Imóvel PF) fixa meta de Grau II, enquanto as Normas para elaboração de laudos da trilha 'Crédito Geral BB' (Edital 2023/01269) pedem preferencialmente Grau III de fundamentação E de precisão e recusam laudos abaixo dos graus mínimos da NBR 14653-2. São trilhas distintas: a regra de uma linha de crédito NÃO se estende à outra. O perfil aplicável tem de ser escolhido pela trilha do trabalho.",
+      "verification": "professional_evidenced"
+    }
+  ],
+  "blocked_external_evidence": {
+    "exact_material": [
+      "Edital de Credenciamento nº 2024/00940(7421), texto integral — Banco do Brasil S.A., DISEC / Cesup Compras e Contratações (SP). É o instrumento controlador da trilha do MECI corrente.",
+      "GUIAR 2024/00940(7421) VER_04 — a página oficial de downloads do BB lista VER_04; a versão obtida nesta campanha foi VER_02 (outubro/2024), superada.",
+      "Confirmação de que MECI-202400940-VER01 é a revisão corrente do MECI."
+    ],
+    "why": "bb.com.br responde HTTP 403 a todo cliente não-navegador; os PDFs obtidos vieram de sessão de navegador real na própria origem.",
+    "responsible": "titular do projeto, por via autorizada (navegador na página oficial de downloads do BB, ou consulta ao Cesup). Nenhum contato institucional foi disparado nesta campanha.",
+    "consequence": "Nenhum item GUIAR é asserido como requisito vinculante neste perfil: as citações GUIAR disponíveis vêm de revisão superada. As regras deste perfil que sustentam alegação são as do MECI e das Normas para elaboração de laudos."
+  },
+  "notes": [
+    "Toda afirmação deste perfil é tensada 'conforme publicado em MECI-202400940-VER01, cuja vigência não foi estabelecida' — nunca 'o MECI vigente' nem 'o BB exige hoje'.",
+    "A regra de uma linha de crédito, tipologia ou região não se estende às demais."
+  ],
+  "source_set_sha256": "5c556e7bc10a10dcf94f39b5b73c0a0e8e42735e1dd11cf8bac9cf4fb8626afc",
+  "output_requirements": [
+    {
+      "id": "meci.3.3.1.a",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Equação utilizada com a variável dependente apresentada no laudo na forma NÃO TRANSFORMADA",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Equação na escala de ajuste e forma na unidade original são emitidas com método e estimando de retransformação explícitos. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.b",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Coeficientes atingidos: correlação (R), determinação (R²) e determinação ajustado (R² ajustado)",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Renderer consome e apresenta R assinado, R² e R² ajustado do snapshot, sem derivar R de R². Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.c",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Significâncias do modelo e das variáveis independentes",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Tabela apresenta p-valores por regressor e significância F somente quando o produtor fornece números finitos. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.d",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Número de dados utilizados",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Snapshot, PDF, DOCX e XLSX apresentam a contagem e a identidade da amostra efetiva. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes."
+    },
+    {
+      "id": "meci.3.3.1.e",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Atributos do imóvel avaliando (valores)",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Atributos do avaliando persistidos no contexto e apresentados em PDF, DOCX e XLSX. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.f",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Resultado da avaliação e intervalos atingidos (IC 80% E campo de arbítrio)",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Estimativa, IC 80% e campo de arbítrio distintos são transportados do snapshot e apresentados. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.g",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Gráfico de resíduos",
+      "kind": "chart",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Gráfico de resíduos é gerado a partir das séries alinhadas da amostra efetiva e verificado no PDF. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes."
+    },
+    {
+      "id": "meci.3.3.1.h",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Gráfico de aderência (observados versus estimados)",
+      "kind": "chart",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Gráfico observado versus estimado com bissetriz é gerado a partir das séries alinhadas e verificado no PDF. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes."
+    },
+    {
+      "id": "meci.3.3.1.i",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Demonstrativo da pontuação atingida (tabela de fundamentação e precisão)",
+      "kind": "table",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Tabela apresenta grau, pontos e evidência por item e é repetida como anexo integral. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes."
+    },
+    {
+      "id": "meci.3.3.1.j",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Histograma dos resíduos amostrais PADRONIZADOS",
+      "kind": "chart",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Histograma usa resíduos padronizados apenas com diagnóstico disponível, completo e alinhado à amostra efetiva. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.k",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Probabilidades da distribuição normal padrão nos intervalos [-1;+1], [-1,64;+1,64] e [-1,96;+1,96] (68%, 90%, 95%) cotejadas com as frequências observadas",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Tabela coteja frequências observadas e probabilidades nominais em ±1, ±1,64 e ±1,96. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.l",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Matriz de correlações das variáveis independentes e dependente",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Matriz integral na escala original é emitida; matriz de design adicional aparece quando fornecida. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.m1",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Valor do teste F de Snedecor (F calculado)",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "F calculado é transportado de model.metrics e impresso. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.m2",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Quantidade de outliers do modelo",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Contagens de detectados, excluídos e influentes são emitidas apenas com cobertura diagnóstica completa. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.3.1.n",
+      "clause": "MECI-202400940-VER01, item 3.3.1",
+      "requirement": "Intervalos de valores admissíveis, quando for o caso, informados no campo \"Observações\" do laudo",
+      "kind": "calculated",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Campo Observações profissional transportado ao PDF/DOCX e vinculado ao intervalo admissível calculado; ausência continua pendente. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.2.3.3.2.pdf",
+      "clause": "MECI-202400940-VER01, itens 2.3.3.2 e 3.1.7.2 II",
+      "requirement": "Relatório completo da inferência estatística em formato PDF, com gráficos (não só texto)",
+      "kind": "attachment",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Pipeline renderiza PDF real com WeasyPrint, incorpora gráficos e verifica conteúdo contra snapshot/contexto. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "meci.2.3.3.2.excel",
+      "clause": "MECI-202400940-VER01, itens 2.3.3.2 e 3.1.7.2 II",
+      "requirement": "A amostra exportada em arquivo formato Excel (.xlsx/.xls)",
+      "kind": "attachment",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "sample.xlsx contém exatamente row_ids efetivos, variáveis, fontes e coordenadas e é verificado contra o snapshot. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.2.3.3.2.projecoes",
+      "clause": "MECI-202400940-VER01, itens 2.3.3.2 e 3.1.7.2 II",
+      "requirement": "O PDF contém \"projeções\" e \"informações auxiliares\" exigidas pela norma de avaliações",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "PDF/DOCX apresentam ponto, IC da média, intervalo preditivo e informações auxiliares sem confundir seus papéis. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.1.7.2.anexo",
+      "clause": "MECI-202400940-VER01, item 3.1.7.2",
+      "requirement": "Memória de cálculo entregue como anexo do laudo — arquivo separado ou seção identificada, entregável em conjunto",
+      "kind": "attachment",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Anexos integrais de amostra e pontuação fazem parte dos bytes; dossiê inclui artefatos documentais integrais por hash. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "bb.guiar.assinatura_icp",
+      "clause": "GUIAR 2024/00940(7421), item 3.4.7",
+      "requirement": "Via de assinatura digital do PDF por certificado ICP-Brasil",
+      "kind": "attachment",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Fluxo importa PDF assinado, verifica integridade, cadeia, revogação, política PAdES e âncora oficial ITI pinada; certificado/assinatura reais continuam insumos externos e TESTE nunca satisfaz ICP. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "10.1.a",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "identificação do solicitante",
+      "kind": "human",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Solicitante tem porta persistida e representação em PDF/DOCX. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes."
+    },
+    {
+      "id": "10.1.b",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "finalidade do laudo, quando informada pelo solicitante",
+      "kind": "human",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Finalidade tem porta persistida e representação distinta do objetivo em PDF/DOCX. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes."
+    },
+    {
+      "id": "10.1.c",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "objetivo da avaliação",
+      "kind": "human",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Porta objetiva distinta da finalidade, persistida em report_context e emitida em PDF/DOCX; conteúdo permanece insumo humano. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "10.1.d",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "pressupostos, ressalvas e fatores limitantes (7.2 da Parte 1)",
+      "kind": "human",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Pressupostos, ressalvas e limitações persistidos e emitidos; lista vazia não satisfaz o caso. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "10.1.e",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "identificação e caracterização do imóvel avaliando (7.3 da Parte 1, no que couber)",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Identificação e características do avaliando entram no contexto persistido e em todas as representações documentais. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "10.1.f",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "diagnóstico do mercado (7.7.2 da Parte 1)",
+      "kind": "human",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Diagnóstico do mercado persistido e emitido como campo próprio; conteúdo permanece insumo profissional. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "10.1.g",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "indicação do(s) método(s) e procedimento(s) utilizado(s) (Seção 8 da Parte 1)",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Método, procedimento, equação, transformações e limitações são apresentados sem recalcular o snapshot. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.h",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "especificação da avaliação: grau de fundamentação e de precisão atingidos; demonstrativo da pontuação quando solicitado pelo contratante",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Graus, status de precisão, pontuação total e demonstrativo por item são apresentados. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "10.1.i",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "planilha dos dados utilizados",
+      "kind": "table",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "PDF/DOCX e sample.xlsx apresentam todos os row_ids efetivos, valores, fontes e justificativas sem truncamento. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "10.1.j",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "método comparativo: descrição das variáveis do modelo, com o critério de enquadramento de cada característica dos elementos amostrais e a escala das diferenças qualitativas",
+      "kind": "calculated",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Critério, codificação, categorias e escalas por variável têm estrutura validada e tabela própria; definição é insumo profissional. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "10.1.k",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "tratamento dos dados e identificação do resultado: cálculos efetuados, campo de arbítrio se for o caso, justificativas do resultado adotado e o gráfico de preços observados versus valores estimados",
+      "kind": "calculated",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Cálculos, gráfico e campo de arbítrio são emitidos; a justificativa do valor adotado é insumo profissional obrigatório. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "10.1.l",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "resultado da avaliação e sua data de referência",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Resultado e data de referência são campos distintos e verificados contra o snapshot. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes."
+    },
+    {
+      "id": "10.1.m",
+      "clause": "ABNT NBR 14653-2:2011, item 10.1",
+      "requirement": "qualificação legal completa e assinatura do(s) profissional(is) responsável(is)",
+      "kind": "human",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Identidade, conselho, registro e ART/RRT são campos persistidos e emitidos; assinatura externa é tratada em etapa própria. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "meci.3.4.1.grau_ii",
+      "clause": "MECI-202400940-VER01, item 3.4.1",
+      "requirement": "Permitir DEFINIR o Grau de Fundamentação II como alvo e REPORTAR o grau atingido no laudo (MECI 3.4.1).",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Alvo de fundamentação é consumido pela avaliação e o grau atingido é apresentado. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "meci.3.4.1.justificativa_grau_i",
+      "clause": "MECI-202400940-VER01, item 3.4.1",
+      "requirement": "Havendo Grau I, existir campo para a JUSTIFICATIVA exigida pelo MECI 3.4.1 ('Grau I admitido somente com justificativa').",
+      "kind": "calculated",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Porta e seção próprias para justificativa profissional, condicional a Grau I. Prova: tests/comercial/test_c06_output_conformance.py.",
+      "applies_when": "grade_i_attained"
+    },
+    {
+      "id": "meci.3.2.2.mcddm",
+      "clause": "MECI-202400940-VER01, item 3.2.2",
+      "requirement": "O método padrão do produto é o comparativo direto de dados de mercado com tratamento por regressão linear (MECI 3.2.2).",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Perfil, método comparativo direto e tratamento por regressão são identificados no documento. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "normas.12.1.16.tabela_anexa",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), item 12.1.16.1",
+      "requirement": "Apresentar em TABELA ANEXA o demonstrativo da pontuação atingida para enquadramento nos graus de fundamentação e precisão (Normas para elaboração de laudos, 12.1.16.1).",
+      "kind": "table",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Anexo próprio preserva item, grau, pontos e evidência; a tabela do corpo mantém a leitura operacional. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "normas.12.1.15.graficos",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), item 12.1.15",
+      "requirement": "Gráfico de resíduos E gráfico de preços observados versus estimados chegarem ao laudo (Normas para elaboração de laudos, 12.1.15).",
+      "kind": "chart",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "PDF incorpora e verifica gráficos de resíduos e observado versus estimado. Prova: tests/comercial/test_c06_output_conformance.py e testes C03 existentes.",
+      "owner": "C03",
+      "owner_detail": "C03"
+    },
+    {
+      "id": "normas.12.1.8.geolocalizacao",
+      "clause": "Normas para elaboração de laudos (Edital 2023/01269), itens 12.1.8 e 12.1.9",
+      "requirement": "Registrar geolocalização do avaliando e de TODOS os elementos amostrais em graus decimais, com endereço completo e fonte por dado (itens 12.1.8/12.1.9).",
+      "kind": "calculated",
+      "product_baseline": "human_input",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Portas WGS84 para avaliando, used_row_ids e excluded_row_ids, com endereço e fonte, validação de completude e planilhas integrais; dados são insumo humano/documental. Prova: tests/comercial/test_c06_output_conformance.py."
+    },
+    {
+      "id": "abnt.9.2.1.1.elasticidades",
+      "clause": "ABNT NBR 14653-2:2011, item 9.2.1.1 b)",
+      "requirement": "Para o Grau III, analisar as ELASTICIDADES em torno do ponto de estimação (NBR 14653-2, 9.2.1.1).",
+      "kind": "calculated",
+      "product_baseline": "emitted",
+      "verified_layer": "both",
+      "verified_on": "2026-09-12",
+      "verification_evidence": "Para Grau III, tabela consome elasticidades na unidade original somente com cobertura quantitativa completa e método declarado. Prova: tests/comercial/test_c06_output_conformance.py.",
+      "applies_when": "grade_iii_attained"
+    }
+  ],
+  "output_conformance_note": "Baseline de capacidade C06 verificada por contrato produção→contexto→PDF/DOCX/XLSX→manifesto de bytes. Campos profissionais e geolocalização documental permanecem human_input até serem fornecidos no caso; assinatura ICP-Brasil permanece etapa externa obrigatória até cadeia, revogação, política e âncora oficial serem verificadas. A versão 0.3.0 e source_set_sha256 foram preservados porque o conjunto normativo não mudou e projetos históricos referenciam essa identidade; a mudança corrige a implementação e sua evidência, não reinterpreta snapshots antigos."
+}

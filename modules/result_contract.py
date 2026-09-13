@@ -25,9 +25,13 @@ role; [] is an explicit error (no authorized predictors).
 
 Additive optional RequestSpec fields (documented, not required):
 - declared_documentary: {item1_grade, item3_grade} ints 1..3 or null
-- search_policy.target_degree: 1|2|3|null
+- search_policy.target_degree: 1|2|3|null (historical alias)
+- search_policy.minimum_fundamentacao_grade: 1|2|3|null (canonical for this lote)
 Unknown extra keys are preserved (additive compatibility) and not
-reinterpreted.
+reinterpreted. Historical grade aliases
+(minimum_fundamentacao_grade, min_fundamentacao_grade, target_degree)
+are folded at this boundary into search_policy.minimum_fundamentacao_grade.
+Conflicting present values are a structured conflict, not silent precedence.
 """
 
 from __future__ import annotations
@@ -76,7 +80,22 @@ ELIGIBILITY_STATUSES = frozenset(
 )
 
 ALLOWED_ARTIFACT_NAMES = frozenset(
-    {"report.pdf", "evidence_manifest.json", "frozen_project.json"}
+    {
+        "report.pdf",
+        "evidence_manifest.json",
+        "frozen_project.json",
+        "evidence_bundle.zip",
+        "report.docx",
+        "report_context.json",
+        "output_manifest.json",
+        "normative_assessment.json",
+        "document_state.json",
+        "document_attachments.json",
+        "signature_request.json",
+        "signed_report.pdf",
+        "submission.zip",
+        "document_history.zip",
+    }
 )
 
 DEGREE_MIN = 1
@@ -556,6 +575,13 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
     except ContractError as exc:
         raise RequestSpecError(str(exc), exc.issues) from exc
     spec = dict(raw)
+    raw_profile = spec.get("qualification_profile")
+    cost_request = bool(
+        isinstance(raw_profile, Mapping)
+        and raw_profile.get("method") == "metodo_quantificacao_de_custo"
+        and raw_profile.get("value_basis") == "custo_de_reedicao"
+        and isinstance(spec.get("cost_bom"), Mapping)
+    )
 
     if spec.get("schema_version") != SCHEMA_VERSION:
         raise RequestSpecError(
@@ -581,18 +607,18 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
         )
 
     raw_target = spec.get("target_col")
-    if raw_target is None and allow_empty_target:
+    if raw_target is None and (allow_empty_target or cost_request):
         spec["target_col"] = ""
     else:
         spec["target_col"] = _require_str(
-            raw_target, field="target_col", allow_empty=allow_empty_target
+            raw_target, field="target_col", allow_empty=allow_empty_target or cost_request
         )
 
     candidate_cols = spec.get("candidate_cols")
     if candidate_cols is None:
         spec["candidate_cols"] = None
     elif isinstance(candidate_cols, list):
-        if len(candidate_cols) == 0:
+        if len(candidate_cols) == 0 and not cost_request:
             raise RequestSpecError(
                 "candidate_cols=[] authorizes no predictors",
                 [make_issue(
@@ -812,14 +838,7 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
             "search_policy.mode must be a non-empty string",
             [make_issue("TYPE_ERROR", "search_policy.mode must be a non-empty string")],
         )
-    target_degree = None
-    if "target_degree" in search_policy:
-        target_degree = _validate_degree(
-            search_policy.get("target_degree"), field="search_policy.target_degree"
-        )
     spec["search_policy"] = dict(search_policy)
-    if "target_degree" in search_policy:
-        spec["search_policy"]["target_degree"] = target_degree
 
     evaluation_policy = spec.get("evaluation_policy")
     if not isinstance(evaluation_policy, Mapping):
@@ -854,6 +873,15 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
             )],
         )
     spec["evaluation_policy"] = dict(evaluation_policy)
+
+    from modules.pro_workflow.grade_policy import normalize_grade_aliases
+
+    normalize_grade_aliases(
+        spec,
+        validate_degree=_validate_degree,
+        request_spec_error=RequestSpecError,
+        make_issue=make_issue,
+    )
 
     spec["reference_date"] = _parse_iso_date(spec.get("reference_date"), field="reference_date")
     spec["inspection_date"] = _parse_iso_date(spec.get("inspection_date"), field="inspection_date")
@@ -894,6 +922,76 @@ def validate_request_spec(payload: Any, *, allow_empty_target: bool = False) -> 
             "item1_grade": _validate_degree(item1, field="declared_documentary.item1_grade"),
             "item3_grade": _validate_degree(item3, field="declared_documentary.item3_grade"),
         }
+
+    if spec.get("qualification_profile") not in (None, {}):
+        from modules.valuation_policy.qualification import (
+            QualificationProfileError,
+            validate_qualification_profile,
+        )
+
+        try:
+            spec["qualification_profile"] = validate_qualification_profile(
+                spec.get("qualification_profile")
+            )
+        except QualificationProfileError as exc:
+            raise RequestSpecError(str(exc), exc.issues) from exc
+    elif "qualification_profile" in spec and spec.get("qualification_profile") is None:
+        spec["qualification_profile"] = None
+
+    for field in (
+        "profile_evidence",
+        "output_manifest",
+        "signature",
+        "claim_evidence",
+        "institution_acceptance",
+        "professional_findings",
+        "normative_diagnostics",
+        "category_counts",
+    ):
+        value = spec.get(field)
+        if value is not None and not isinstance(value, Mapping):
+            raise RequestSpecError(
+                f"{field} must be a mapping when provided",
+                [make_issue("TYPE_ERROR", f"{field} must be a mapping")],
+            )
+        if isinstance(value, Mapping):
+            spec[field] = dict(value)
+
+    review_events = spec.get("review_events")
+    if review_events is not None:
+        if not isinstance(review_events, list) or not all(
+            isinstance(item, Mapping) for item in review_events
+        ):
+            raise RequestSpecError(
+                "review_events must be a list of mappings",
+                [make_issue("TYPE_ERROR", "review_events must be a list of mappings")],
+            )
+        spec["review_events"] = [dict(item) for item in review_events]
+
+    report_fingerprint = spec.get("report_content_fingerprint")
+    if report_fingerprint is not None and (
+        not isinstance(report_fingerprint, str)
+        or len(report_fingerprint) != 64
+        or any(ch not in "0123456789abcdefABCDEF" for ch in report_fingerprint)
+    ):
+        raise RequestSpecError(
+            "report_content_fingerprint must be a SHA-256 hex digest",
+            [make_issue(
+                "TYPE_ERROR",
+                "report_content_fingerprint must be a 64-character hex digest",
+            )],
+        )
+    if isinstance(report_fingerprint, str):
+        spec["report_content_fingerprint"] = report_fingerprint.lower()
+
+    if spec.get("cost_bom") is not None and not isinstance(spec.get("cost_bom"), Mapping):
+        raise RequestSpecError(
+            "cost_bom must be a mapping when provided",
+            [make_issue("TYPE_ERROR", "cost_bom must be a mapping")],
+        )
+    if cost_request:
+        spec["cost_bom"] = dict(spec["cost_bom"])
+        spec["_valuation_route"] = "cost"
 
     spec["_applied_defaults"] = issues
     return spec
@@ -1226,6 +1324,11 @@ def freeze_result_snapshot(payload: Any) -> dict:
             "provenance must be a mapping",
             frozen_issues + [make_issue("TYPE_ERROR", "provenance must be a mapping")],
         )
+    provenance_out = dict(provenance)
+    if provenance_out.get("qualification_context") is not None:
+        provenance_out["qualification_context"] = _validate_qualification_context(
+            provenance_out.get("qualification_context"), frozen_issues
+        )
 
     frozen = {
         **canonical,
@@ -1245,7 +1348,7 @@ def freeze_result_snapshot(payload: Any) -> dict:
         "search": dict(search),
         "alternatives": list(alternatives),
         "next_actions": list(next_actions),
-        "provenance": dict(provenance),
+        "provenance": provenance_out,
     }
 
     # Artifacts and their hashes stay off the frozen snapshot so a later PDF
@@ -1266,6 +1369,100 @@ def freeze_result_snapshot(payload: Any) -> dict:
         ) from exc
 
     return frozen
+
+
+def _validate_qualification_context(raw: Any, issues: List[dict]) -> dict:
+    """Additive MP-QUAL/1 block. Absence is allowed; presence is structural."""
+    if not isinstance(raw, Mapping):
+        raise ResultSnapshotError(
+            "provenance.qualification_context must be a mapping",
+            issues + [make_issue("TYPE_ERROR", "qualification_context must be a mapping")],
+        )
+    out = dict(raw)
+    if out.get("schema_version") != "MP-QUAL/1":
+        raise ResultSnapshotError(
+            "qualification_context.schema_version must be MP-QUAL/1",
+            issues + [make_issue(
+                "SCHEMA_VERSION",
+                f"qualification_context.schema_version must be 'MP-QUAL/1', got {out.get('schema_version')!r}",
+            )],
+        )
+    grade = out.get("grade_requirement_status")
+    if grade not in {"not_requested", "met", "not_met", "pending", "error"}:
+        raise ResultSnapshotError(
+            "qualification_context.grade_requirement_status invalid",
+            issues + [make_issue("INVALID_GRADE_STATUS", "grade_requirement_status invalid")],
+        )
+    release = out.get("case_release_status")
+    if release not in {
+        "analysis_only",
+        "review_required",
+        "ready_for_professional_signoff",
+        "signed_integrity_verified",
+    }:
+        raise ResultSnapshotError(
+            "qualification_context.case_release_status invalid",
+            issues + [make_issue("INVALID_CASE_RELEASE", "case_release_status invalid")],
+        )
+    rules = out.get("rule_results")
+    if not isinstance(rules, list):
+        raise ResultSnapshotError(
+            "qualification_context.rule_results must be a list",
+            issues + [make_issue("TYPE_ERROR", "rule_results must be a list")],
+        )
+    allowed = {
+        "passed",
+        "failed",
+        "pending_manual",
+        "not_applicable",
+        "unsupported",
+        "unverified",
+        "error",
+    }
+    cleaned = []
+    for index, rule in enumerate(rules):
+        if not isinstance(rule, Mapping):
+            raise ResultSnapshotError(
+                "rule_results entries must be mappings",
+                issues + [make_issue("TYPE_ERROR", f"rule_results[{index}] must be a mapping")],
+            )
+        item = dict(rule)
+        if item.get("status") not in allowed:
+            raise ResultSnapshotError(
+                "rule status invalid",
+                issues + [make_issue("INVALID_RULE_STATUS", f"rule_results[{index}].status invalid")],
+            )
+        if item.get("status") == "passed" and item.get("unverified"):
+            item["status"] = "unverified"
+            issues.append(
+                make_issue(
+                    "UNVERIFIED_NOT_PASSED",
+                    "unverified rule cannot be stored as passed",
+                    evidence={"rule_id": item.get("rule_id")},
+                )
+            )
+        if item.get("status") == "not_applicable" and not item.get("explanation"):
+            raise ResultSnapshotError(
+                "not_applicable requires an explanation",
+                issues + [make_issue(
+                    "NOT_APPLICABLE_WITHOUT_REASON",
+                    f"rule_results[{index}] not_applicable missing explanation",
+                )],
+            )
+        for key in ("rule_id", "source_id", "status", "explanation"):
+            if not isinstance(item.get(key), str) or not item.get(key):
+                raise ResultSnapshotError(
+                    f"rule_results[{index}].{key} required",
+                    issues + [make_issue("INVALID_RULE", f"rule_results[{index}].{key} required")],
+                )
+        cleaned.append(item)
+    out["rule_results"] = cleaned
+    if not isinstance(out.get("result_fingerprint"), str) or len(out.get("result_fingerprint") or "") < 16:
+        raise ResultSnapshotError(
+            "result_fingerprint required",
+            issues + [make_issue("MISSING_FIELD", "qualification_context.result_fingerprint required")],
+        )
+    return out
 
 
 def validate_job_status_progress(progress: Any) -> Optional[float]:

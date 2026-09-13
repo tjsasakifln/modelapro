@@ -277,7 +277,7 @@ class TestI11TrainRmseIsNotGeneralization:
                 "budget": 3,
                 "objective": "aic",
                 "seed": 17,
-                "target_degree": 1,
+
                 "y_transformations": ["identity"],
             }),
             subject_raw=subject_raw(),

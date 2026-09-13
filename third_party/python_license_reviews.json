@@ -1,0 +1,115 @@
+{
+  "schema_version": "MP-COM-PYTHON-LICENSE-REVIEWS/1",
+  "reviews": [
+    {
+      "name": "cssselect2",
+      "version": "0.10.1",
+      "license_expression": "BSD-3-Clause",
+      "license_file_sha256": ["6fd97229a1d1b0f6a8b41e109f413426dbc0874b1e03746d66cc33282601c2c2"]
+    },
+    {
+      "name": "itsdangerous",
+      "version": "2.2.0",
+      "license_expression": "BSD-3-Clause",
+      "license_file_sha256": ["63af09891b6be8ad1a4252ed43af0f4efba7fc948e228367bed7f3c5ae0b09d7"]
+    },
+    {
+      "name": "Jinja2",
+      "version": "3.1.6",
+      "license_expression": "BSD-3-Clause",
+      "license_file_sha256": ["3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b"]
+    },
+    {
+      "name": "markdown-it-py",
+      "version": "4.2.0",
+      "license_expression": "MIT",
+      "license_file_sha256": [
+        "4a2260d6e2cd0f5a151a1e86dbfe7d3ed552b1e2beabf9941c1ba5c49cbce484",
+        "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+      ]
+    },
+    {
+      "name": "mdurl",
+      "version": "0.1.2",
+      "license_expression": "MIT",
+      "license_file_sha256": ["7c605df6e28667a9603118e98274f64a49ce3eed0d26fccce9534a345e0ef955"]
+    },
+    {
+      "name": "pathspec",
+      "version": "1.1.1",
+      "license_expression": "MPL-2.0",
+      "license_file_sha256": ["fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"]
+    },
+    {
+      "name": "pip-audit",
+      "version": "2.10.1",
+      "license_expression": "Apache-2.0",
+      "license_file_sha256": ["0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"]
+    },
+    {
+      "name": "pydyf",
+      "version": "0.12.1",
+      "license_expression": "BSD-3-Clause",
+      "license_file_sha256": ["75461e438973e1ba0f93a7de9e3fe5b2f49e1ab49251d392878a9cdae8ce7e47"]
+    },
+    {
+      "name": "pyinstaller-hooks-contrib",
+      "version": "2026.7",
+      "license_expression": "GPL-2.0-or-later AND Apache-2.0",
+      "license_file_sha256": ["91d0baaff00773038e72c0a1fc9d5d2d38706b7a2b9c04f34296608f931b9cd0"]
+    },
+    {
+      "name": "pyproject-hooks",
+      "version": "1.2.0",
+      "license_expression": "MIT",
+      "license_file_sha256": ["1b22b049b5267d6dfc23a67bf4a84d8ec04b9fdfb1a51d360e42b4342c8b4154"]
+    },
+    {
+      "name": "pyphen",
+      "version": "0.18.1",
+      "license_expression": "GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1",
+      "license_file_sha256": [
+        "2233a3eecf299bc271f1a9f57f0b3198343ad4ab16571d70320133002c51496b",
+        "5bbcbb737e60fe9deba08ecbd00920cfcc3403ba2e534c64fdeea49d6bb87509",
+        "ad192a67649aa23ac9681939840f4f241643a98da9cd8aec8de28c3b8c6ee854",
+        "4fd1c78fcec632bc872ba7b42ba04be330029cfffa411039b48a4f2262bb8240"
+      ]
+    },
+    {
+      "name": "seaborn",
+      "version": "0.13.2",
+      "license_expression": "BSD-3-Clause",
+      "license_file_sha256": ["357ad276e086fab501163d4e9a0ae13c2fd0647eb08d2305fbc0ca3813892601"]
+    },
+    {
+      "name": "tinycss2",
+      "version": "1.5.1",
+      "license_expression": "BSD-3-Clause",
+      "license_file_sha256": ["6b94acee20ec9f2709333134f3ba70322535fb420af0ce8c1455d9cbe297f1d5"]
+    },
+    {
+      "name": "tinyhtml5",
+      "version": "2.1.0",
+      "license_expression": "MIT",
+      "license_file_sha256": ["16a39991619e92f18680932da2a9199fdf7d95df3ecaedc52ea06218aabafd6f"]
+    },
+    {
+      "name": "tomli-w",
+      "version": "1.2.0",
+      "license_expression": "MIT",
+      "license_file_sha256": ["b80816b0d530b8accb4c2211783790984a6e3b61922c2b5ee92f3372ab2742fe"]
+    },
+    {
+      "name": "weasyprint",
+      "version": "70.0",
+      "license_expression": "BSD-3-Clause",
+      "license_file_sha256": ["bfd14eccfa6100575460e685556b183399d4bd335904e3c9521b0116d21c54da"]
+    },
+    {
+      "name": "webencodings",
+      "version": "0.6.1",
+      "license_expression": "BSD-3-Clause",
+      "license_file_sha256": ["e06ef33485e7498ad592887c41fa79cc8a7fecde576c7210e11bfdddef58040e"]
+    }
+  ]
+}

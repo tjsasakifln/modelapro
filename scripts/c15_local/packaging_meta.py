@@ -17,6 +17,7 @@ _REQ_NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._\-]*)")
 REQUIRED_RUNTIME_IMPORTS = frozenset(
     {
         "streamlit",
+        "httpx",
         "fastapi",
         "uvicorn",
         "pandas",
@@ -34,6 +35,9 @@ REQUIRED_RUNTIME_IMPORTS = frozenset(
         "requests",
         "openpyxl",
         "xlrd",
+        "cryptography",
+        "pyhanko",
+        "pypdf",
     }
 )
 ANNOUNCED_FORMAT_ENGINES = {
@@ -45,17 +49,16 @@ ANNOUNCED_FORMAT_ENGINES = {
 DEV_ONLY = frozenset(
     {
         "pytest",
-        "httpx",
         "black",
         "flake8",
         "mypy",
         "build",
         "wheel",
         "setuptools",
-        "pypdf",
         "playwright",
     }
 )
+COMMERCIAL_BUILD_ONLY = frozenset({"pyinstaller", "pip-audit"})
 
 
 def requirement_name(spec: str) -> str:
@@ -99,6 +102,12 @@ def dev_dependency_specs(root: Path | None = None) -> list[str]:
 def redis_extra_specs(root: Path | None = None) -> list[str]:
     extras = load_pyproject(root)["project"].get("optional-dependencies") or {}
     return list(extras.get("redis") or [])
+
+
+def commercial_build_specs(root: Path | None = None) -> list[str]:
+    """Release-only tools; never include these in the buyer runtime."""
+    extras = load_pyproject(root)["project"].get("optional-dependencies") or {}
+    return list(extras.get("commercial-build") or [])
 
 
 def packaged_packages(root: Path | None = None) -> list[str]:

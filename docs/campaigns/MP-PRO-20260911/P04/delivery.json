@@ -1,0 +1,163 @@
+{
+  "id": "MP-PRO-20260911/P04",
+  "lote": "MP-PRO-20260911",
+  "base_sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+  "branch": "mp-pro-20260911/p04-referencia-consolidacao",
+  "pr_base": "mp-20260911/integracao-final",
+  "pr_number": 20,
+  "status": "COMBINED_INCREMENT_VERIFIED",
+  "local_classification": "IMPLEMENTED_VERIFIED",
+  "head_note": "HEAD recorded in the PR comment after this commit, not inside it.",
+  "implemented": [
+    "Deterministic synthetic corpus covering eight situation families",
+    "Independent QR-OLS / Student-t mean CI and prediction-interval oracle (no product imports)",
+    "Reproducible runner diagnose-base vs accept-candidate",
+    "Before/after measurement protocol with distinct machine / robot / human fields",
+    "Human-pilot protocol template STATUS=NOT_RUN",
+    "C18 workflow triggers for integracao-final and the P04 consolidation branch",
+    "Aggregator inventory that fails missing/unrun required jobs including p04-harness",
+    "Mutation detectors for the seven controlled copy defects",
+    "Current SEALED P01 #19 ec691bd, P02 #18 b8e846c, P03 #21 ec7b8db incorporated --no-ff after invalidating REOPENED 18a2dc0/a0b4b4a/4cb6937"
+  ],
+  "owned_files_changed": [
+    ".github/workflows/c15-ci.yml",
+    "scripts/c15_local/aggregate_required.py",
+    "scripts/pro_workflow/",
+    "tests/pro_workflow/p04/",
+    "tests/fixtures/pro_workflow/",
+    "tests/c15_packaging/test_ci_aggregator.py",
+    "tests/c15_packaging/test_workflow_triggers.py",
+    "tests/c17_integration/helpers.py",
+    "benchmarks/pro_workflow/",
+    "docs/campaigns/MP-PRO-20260911/"
+  ],
+  "contracts_consumed": [
+    "MP/1 RequestSpec and ResultSnapshot",
+    "HTTP /preview /jobs /jobs/{id}/result /jobs/{id}/artifacts /projects/{id}/revisions /projects/{id}/batch",
+    "C18 c15-ci.yml blocking jobs",
+    "statsmodels get_prediction mean_ci / obs_ci conventions",
+    "MP-PRO/1 provenance.workflow_context (P01)",
+    "canonical search_policy.minimum_fundamentacao_grade (P01)"
+  ],
+  "contracts_produced": [
+    "P04 independent OLS conventions (tests/fixtures/pro_workflow/CONVENTIONS.md)",
+    "P04 runner JSON (sha, command, exit, findings)",
+    "composition matrix ID -> PR -> HEAD -> sealed"
+  ],
+  "connection_fixes_after_sealed": [
+    {
+      "producer": "P01",
+      "consumer": "P04",
+      "change": "Test/CI specs no longer send search_policy.target_degree as a ranking knob; P01 aliases it to minimum_fundamentacao_grade.",
+      "example_in": {"search_policy": {"mode": "exact", "y_transformations": ["identity"]}},
+      "example_out": "job proceeds without GRADE_ALIAS_CONFLICT / no_admissible_winner from a leftover target_degree=1",
+      "accept": "pinned identity OLS still matches independent oracle point 735000 on area=73.5"
+    },
+    {
+      "producer": "P01",
+      "consumer": "P04",
+      "change": "Wheel/CI install-eval requires reconstructed point + integrity.ok; interval reconstruction limitation is not treated as a failed evaluation.",
+      "example_in": "reproduce_from_bundle after identity OLS",
+      "example_out": {"point": 735000.0, "integrity": {"ok": true}, "ok": false, "limitations": ["t_crit or std_error missing; intervals not reconstructed"]},
+      "accept": "wheel_eval_ok with modules loaded from site-packages"
+    },
+    {
+      "producer": "P02",
+      "consumer": "P04",
+      "change": "Playwright A01 asserts the visible calculation (735.000) instead of a browser POST /jobs. Streamlit's ApiClient submits from the server process. C16 E2E polls until Baixar report.pdf after save_snapshot sets result_available mid-job.",
+      "example_in": "upload CSV, fill area 73,5, Executar avaliação",
+      "example_out": "Valor da avaliação 735.000,00 then Baixar report.pdf / Transferência de report.pdf",
+      "accept": "tests/acceptance/test_e2e_ui.py and tests/pro_workflow/p02/test_a01_playwright.py pass on real Chromium"
+    },
+    {
+      "producer": "P01",
+      "consumer": "P04",
+      "change": "After REOPENED 18a2dc0, incorporate SEALED ec691bd (subject_x packed before evidence zip).",
+      "example_in": "compose_valuation_job then GET evidence_bundle.zip",
+      "example_out": "residual_state.subject_x present in zip; reproduce_from_bundle point matches",
+      "accept": "tests/pro_workflow/p01/test_a05_dossier.py::test_p01_a05_compose_zip_residual_has_subject_x"
+    },
+    {
+      "producer": "P02",
+      "consumer": "P04",
+      "change": "After REOPENED a0b4b4a, incorporate SEALED b8e846c (GET /revisions 405 handoff; reopen_revision).",
+      "example_in": "GET /projects/{id}/revisions on BASE_SHA",
+      "example_out": "client treats 405 as P01 handoff; Reabrir esta revisão recovers GET /jobs/{id}/result",
+      "accept": "test_get_revisions_405_is_handoff_not_error and test_reopen_selected_revision_recovers_that_jobs_result_not_screen_text"
+    },
+    {
+      "producer": "P03",
+      "consumer": "P04",
+      "change": "After REOPENED 4cb6937, incorporate SEALED ec7b8db (refuse chart series length != n used).",
+      "example_in": "fitted_values length 30, used_row_ids length 210, no series_row_ids",
+      "example_out": "REPORT_CHARTS_LENGTH_MISMATCH, no plot, MP1_POINT kept",
+      "accept": "test_p03_a03_series_length_not_n_used_without_row_ids_is_refused"
+    }
+  ],
+  "tests": {
+    "base_sha_p04": {
+      "sha": "6d54f902b85a5a37bfbf154d39f74cf854ff9b2b",
+      "command": "PYTHONPATH= python3 -m pytest tests/pro_workflow/p04 tests/c15_packaging/test_ci_aggregator.py tests/c15_packaging/test_workflow_triggers.py -q --tb=line",
+      "exit": [0, 0],
+      "passed": [43, 43]
+    },
+    "p01_p02_candidate": {
+      "sha": "ea84d18db27b1ff639e965bd66b7705e1d001385",
+      "command": "PYTHONPATH= python3 -m pytest tests/pro_workflow/p04 tests/pro_workflow/p01 tests/pro_workflow/p02 tests/c15_packaging/test_ci_aggregator.py tests/c15_packaging/test_workflow_triggers.py -q --tb=line",
+      "exit": 0,
+      "passed": 86
+    },
+    "combined_p01_p02_p03": {
+      "sha": "200816f363661b9fcc46f34cb7e5660571a4d441",
+      "command": "PYTHONPATH= python3 -m pytest tests/pro_workflow/p04 tests/pro_workflow/p01 tests/pro_workflow/p02 tests/pro_workflow/p03 tests/c15_packaging/test_ci_aggregator.py tests/c15_packaging/test_workflow_triggers.py -q --tb=line",
+      "exit": [0, 0],
+      "passed": [104, 104],
+      "covers": "HTTP jobs, PDF pypdf, mutations, restore/batch, dossier point, eight corpus families"
+    },
+    "wheel_eval": {
+      "command": "PYTHONPATH= python3 scripts/pro_workflow/wheel_eval.py --output DIR/wheel-eval-combined.log",
+      "exit": 0,
+      "point": 735000.0,
+      "modules": "site-packages/backend and site-packages/modules (no editable, empty PYTHONPATH)"
+    },
+    "gha_32bd871": {
+      "sha": "32bd871f84fc8e0ed4dcb589022ef452bed368e5",
+      "pull_request_run": 34656286986,
+      "push_run": 34656279956,
+      "conclusion": "success",
+      "wide_suite": "696 passed, 1 skipped",
+      "jobs": "lint, c15 linux/windows, sdist, install-eval, c16-harness, p04-harness, wide-suite, aggregator",
+      "note": "Green on invalidated P01/P02/P03 HEADs; not COMBINED for current SEALED composition"
+    },
+    "combined_current_sealed": {
+      "sha": "c0552729533b7ae906715609ee24919619848743",
+      "command": "PYTHONPATH= python3 -m pytest tests/pro_workflow/p04 tests/pro_workflow/p01 tests/pro_workflow/p02 tests/pro_workflow/p03 tests/c15_packaging/test_ci_aggregator.py tests/c15_packaging/test_workflow_triggers.py -q --tb=line",
+      "exit": 0,
+      "passed": 113,
+      "covers": "subject_x-before-zip, GET /revisions 405, reopen_revision, chart length mismatch, corpus, mutations, browser"
+    },
+    "gha_f4842ca": {
+      "sha": "f4842ca2c187608df23666bd66a8f36a22142ad5",
+      "pull_request_run": 34660498699,
+      "push_run": 34660495596,
+      "conclusion": "success",
+      "wide_suite": "704 passed, 1 skipped",
+      "jobs": "lint, c15 linux/windows, sdist, install-eval, c16-harness, p04-harness, wide-suite, aggregator",
+      "contains_current_sealed": ["ec691bd", "b8e846c", "ec7b8db"]
+    }
+  },
+  "producer_dependencies": {
+    "P01": {"pr": 19, "sealed": true, "head": "ec691bd8d1cf05f2da31105f59a94bedfa80757f", "incorporated": true, "invalidated_previous": "18a2dc0a6b5b315d3e3a5707fa186f6cc0820ad1"},
+    "P02": {"pr": 18, "sealed": true, "head": "b8e846c73e8d1ae5d9b3e83f377033e31ab6b618", "incorporated": true, "invalidated_previous": "a0b4b4a8767372ce83d7a42b00d80aa488767194"},
+    "P03": {"pr": 21, "sealed": true, "head": "ec7b8dba2b4a0ff575a1933251f03801ffeea0a5", "incorporated": true, "invalidated_previous": "4cb69374799444b9c06ffff8f72cc59caafe597f"}
+  },
+  "limitations": [
+    "Human pilot STATUS=NOT_RUN; no market or human-hour claims",
+    "No full normative certification, no Windows PDF, no performance sweep",
+    "Delivered winner may retrain on the full sample; inner holdout isolation is what S04 checks",
+    "Dossier may report ok=false for interval reconstruction while integrity and point match (P01 residual)",
+    "Absolute professional readiness is not this lot's conclusion"
+  ],
+  "resume": "docs/campaigns/MP-PRO-20260911/P04/resume.md",
+  "next_human_act": "Review PR #20 (current SEALED P01+P02+P03 composition) and decide use/merge. COMBINED on b0391bd remains invalidated. This status does not authorize merge or laudo."
+}

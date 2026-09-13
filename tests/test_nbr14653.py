@@ -70,7 +70,15 @@ class TestLowR2DoesNotBlock:
         X = pd.DataFrame({'const': 1, 'x': range(20)})
         y = pd.Series(range(20))
 
-        res = NBRValidator.validate_model(model_result, X, y, degree=1)
+        # MP-COM/C05: documentary items must be DECLARED with provenance.
+        # Undeclared items are pending and score 0 - this test is about R2,
+        # so it declares them explicitly instead of relying on a silent default.
+        res = NBRValidator.validate_model(
+            model_result, X, y, degree=1,
+            grau_item1=2, grau_item3=2,
+            item1_provenance={"source": "laudo/vistoria", "ref": "fixture"},
+            item3_provenance={"source": "planilha de dados", "ref": "fixture"},
+        )
         # Finalize with an in-range avaliando so item 4 is fully scored.
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=25.0,
@@ -420,7 +428,14 @@ class TestVIFDoesNotBlock:
         X = pd.DataFrame({'const': 1, 'x1': range(20), 'x2': range(20)})
         y = pd.Series(range(20))
 
-        res = NBRValidator.validate_model(model_result, X, y, degree=1)
+        # MP-COM/C05: items 1/3 declared with provenance; this test is about
+        # VIF, not about undeclared documentary items scoring points.
+        res = NBRValidator.validate_model(
+            model_result, X, y, degree=1,
+            grau_item1=2, grau_item3=2,
+            item1_provenance={"source": "laudo/vistoria", "ref": "fixture"},
+            item3_provenance={"source": "planilha de dados", "ref": "fixture"},
+        )
         res = NBRValidator.finalize_precision_and_extrapolation(
             res, amplitude_pct=25.0,
             extrapolation_details=[
@@ -548,6 +563,31 @@ class TestOptimalCombinationTargetAchieved:
         df = pd.DataFrame({'area': area, 'preco': preco})
         return df
 
+    def test_declared_documentary_grades_survive_final_revalidation(self):
+        """The legacy adapter preserves the caller's documentary declarations."""
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        df = self._make_strong_dataset()
+        finder = OptimalCombinationFinder()
+        result = finder.find_best_model(
+            df, target_col='preco', degree=1,
+            avaliando_raw={'area': 120.0},
+            grau_item1=2, grau_item3=2,
+        )
+
+        assert result.success is True
+        assert result.best_model is not None
+        vr = result.best_model.validation_result
+        grades = {i.item: i.grau_achieved for i in vr.item_scores}
+
+        # The final validation is the same assessment made with the declarations;
+        # it must not overwrite them with absent/default values.
+        assert grades[2] == 3 and grades[4] == 3 and grades[5] == 3 and grades[6] == 3
+        assert grades[1] == 2
+        assert grades[3] == 2
+        assert vr.grau_fundamentacao is not None
+        assert result.best_grau_reached == vr.grau_fundamentacao
+
     def test_target_achieved_true_when_reachable(self):
         from modules.optimal_combination import OptimalCombinationFinder
 
@@ -556,6 +596,7 @@ class TestOptimalCombinationTargetAchieved:
         result = finder.find_best_model(
             df, target_col='preco', degree=1,
             avaliando_raw={'area': 120.0},
+            grau_item1=2, grau_item3=2,
         )
 
         assert result.success is True
@@ -571,9 +612,9 @@ class TestOptimalCombinationTargetAchieved:
 
         df = self._make_strong_dataset()
         finder = OptimalCombinationFinder()
-        # Grau III requires items 1 and 3 (externally informed) to be >= 2,
-        # but find_best_model defaults grau_item1=grau_item3=1, so Grau III
-        # is structurally unreachable regardless of data quality.
+        # Grau III requires items 1 and 3 (documentary) to be >= 2. No
+        # declaration is supplied, so it remains unreachable regardless of
+        # the calculated items.
         result = finder.find_best_model(
             df, target_col='preco', degree=3,
             avaliando_raw={'area': 120.0},
@@ -585,6 +626,48 @@ class TestOptimalCombinationTargetAchieved:
         assert result.best_grau_reached == final_grau
         assert final_grau is None or final_grau < 3
         assert result.target_achieved is False
+
+    def test_explicit_zero_documentary_grades_are_not_defaulted_to_one(self):
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        result = OptimalCombinationFinder().find_best_model(
+            self._make_strong_dataset(),
+            target_col="preco",
+            degree=1,
+            avaliando_raw={"area": 120.0},
+            grau_item1=0,
+            grau_item3=0,
+        )
+
+        assert result.success is True
+        scores = {
+            item.item: item.grau_achieved
+            for item in result.best_model.validation_result.item_scores
+        }
+        assert scores[1] == 0
+        assert scores[3] == 0
+        assert result.best_model.validation_result.grau_fundamentacao is None
+
+    def test_invalid_documentary_grade_remains_distinct_from_absence(self):
+        from modules.optimal_combination import OptimalCombinationFinder
+
+        result = OptimalCombinationFinder().find_best_model(
+            self._make_strong_dataset(),
+            target_col="preco",
+            degree=1,
+            avaliando_raw={"area": 120.0},
+            grau_item1="invalid",
+            grau_item3=None,
+        )
+
+        assert result.success is True
+        details = {
+            item.item: item.detail
+            for item in result.best_model.validation_result.item_scores
+        }
+        assert "inválido" in details[1]
+        assert "não informado" in details[3]
+        assert result.best_model.validation_result.grau_fundamentacao is None
 
     def test_target_achieved_false_and_best_grau_none_without_avaliando(self):
         """Without avaliando_raw, item 4 stays provisionally 0 and no grau

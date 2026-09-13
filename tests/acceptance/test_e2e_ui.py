@@ -1,7 +1,7 @@
 """E2E UI: real Streamlit + API on loopback, download PDF, check analytic point.
 
-Classified as E2E. If the launcher cannot bind the hardcoded API port
-(frontend/app.py uses 127.0.0.1:8000), the failure message starts with
+Classified as E2E. API URL is MODELA_API_URL on a free loopback pair (not
+port 8000). If the launcher cannot start, the failure message starts with
 NOT_RUN so the harness can bucket it as não executado — never a mocked 200.
 """
 from __future__ import annotations
@@ -18,14 +18,25 @@ from _helpers import ROOT
 
 UNIQUE_AREA = 73.5
 EXPECTED_POINT = 735000.0  # 10000 × 73.5; not on the 50,52,… sample grid
+# Avoid 8000: this environment blackholes it, and frontend reads MODELA_API_URL.
+_API_PORT_RANGE = range(18100, 18180, 2)
 
 
-def _port_open(host: str, port: int) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=1):
+def _port_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
             return True
-    except OSError:
-        return False
+        except OSError:
+            return False
+
+
+def _pick_ports():
+    for api_port in _API_PORT_RANGE:
+        ui_port = api_port + 1
+        if _port_free(api_port) and _port_free(ui_port):
+            return api_port, ui_port
+    raise AssertionError("NOT_RUN:no free loopback ports in 18100-18180")
 
 
 def _wait_http(url: str, timeout: float = 30.0) -> bool:
@@ -58,13 +69,7 @@ class TestE2EUiStreamlit:
         except Exception as exc:
             raise AssertionError(f"NOT_RUN:playwright import failed: {exc}") from exc
 
-        api_port = 8000
-        ui_port = 18516
-        if _port_open("127.0.0.1", api_port):
-            raise AssertionError(
-                f"NOT_RUN:ui_launcher port {api_port} already bound; "
-                "frontend/app.py hardcodes API_URL=http://127.0.0.1:8000"
-            )
+        api_port, ui_port = _pick_ports()
 
         from tests.c17_integration.helpers import (
             analytic_linear_csv,
@@ -82,7 +87,8 @@ class TestE2EUiStreamlit:
         pdf_path = tmp_path / "report.pdf"
 
         env = os.environ.copy()
-        env["API_PORT"] = str(api_port)
+        env["MODELA_API_URL"] = f"http://127.0.0.1:{api_port}"
+        env["MODELA_API_TIMEOUT"] = "120"
         env["MODELA_SKIP_DOTENV"] = "1"
         env["MODELA_STORE_ROOT"] = str(tmp_path / "ui-store")
         env.pop("PYTHONPATH", None)
@@ -101,17 +107,21 @@ class TestE2EUiStreamlit:
             [sys.executable, "-m", "streamlit", "run", str(ROOT / "frontend" / "app.py"),
              "--server.port", str(ui_port), "--server.headless", "true",
              "--browser.gatherUsageStats", "false"],
-            cwd=str(ROOT / "frontend"),
+            cwd=str(ROOT),
             env=env,
             stdout=ui_log,
             stderr=subprocess.STDOUT,
         )
         page_errors: list[str] = []
         try:
-            if not _wait_http(f"http://127.0.0.1:{api_port}/health", 25):
-                raise AssertionError("NOT_RUN:ui_launcher API did not become healthy")
+            if not _wait_http(f"http://127.0.0.1:{api_port}/health", 40):
+                api_log.flush()
+                tail = Path(api_log.name).read_text(encoding="utf-8")[-1500:]
+                raise AssertionError("NOT_RUN:ui_launcher API did not become healthy\n" + tail)
             if not _wait_http(f"http://127.0.0.1:{ui_port}", 40):
-                raise AssertionError("NOT_RUN:ui_launcher Streamlit did not become ready")
+                ui_log.flush()
+                tail = Path(ui_log.name).read_text(encoding="utf-8")[-1500:]
+                raise AssertionError("NOT_RUN:ui_launcher Streamlit did not become ready\n" + tail)
 
             try:
                 playwright_cm = sync_playwright()
@@ -124,7 +134,7 @@ class TestE2EUiStreamlit:
                     raise AssertionError(f"NOT_RUN:playwright chromium: {exc}") from exc
                 context = browser.new_context(
                     accept_downloads=True,
-                    record_har_path=str(har_path),
+                    viewport={"width": 1366, "height": 900},
                 )
                 context.tracing.start(screenshots=True, snapshots=True, sources=True)
                 page = context.new_page()
@@ -132,8 +142,8 @@ class TestE2EUiStreamlit:
                 page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_selector("input[type=file]", state="attached", timeout=30000)
                 page.locator("input[type=file]").first.set_input_files(str(csv_path))
-                page.wait_for_selector("text=Variável-alvo", timeout=45000)
-                page.wait_for_selector("text=Informar o avaliando", timeout=15000)
+                page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=45000)
+                page.wait_for_selector("text=1. Preparação da amostra", timeout=15000)
 
                 area = page.get_by_placeholder("ex.: 73,5")
                 assert area.count() >= 1, (
@@ -145,24 +155,31 @@ class TestE2EUiStreamlit:
                 page.keyboard.press("Tab")
                 page.wait_for_timeout(400)
 
-                start = page.locator("button[type='submit']").filter(has_text="Executar")
+                start = page.get_by_role("button", name="Executar avaliação")
                 if start.count() < 1:
-                    start = page.get_by_role("button", name="Executar avaliação")
+                    start = page.locator("button[type='submit']").filter(has_text="Executar")
                 assert start.count() >= 1, "form submit not found; body=" + page.inner_text("body")[:800]
                 start.first.click()
 
                 body = ""
                 retried = False
-                for _ in range(40):
+                for i in range(60):
                     body = page.inner_text("body")
-                    if "Cálculo concluído" in body and ("735.000,00" in body or "735000" in body):
+                    if ("Valor da avaliação" in body or "Cálculo disponível" in body) and (
+                        "735.000,00" in body or "735000" in body or "735.000" in body
+                    ):
                         break
                     if (
                         not retried
-                        and "Estado: Falha" in body
+                        and (
+                            "Estado: Falha" in body
+                            or (i in (8, 20) and "735" not in body)
+                        )
                         and "Característica 'area' ausente" not in body
                     ):
-                        again = page.locator("button[type='submit']").filter(has_text="Executar")
+                        again = page.get_by_role("button", name="Executar avaliação")
+                        if again.count() < 1:
+                            again = page.locator("button[type='submit']").filter(has_text="Executar")
                         if again.count() >= 1 and again.first.is_enabled():
                             again.first.click()
                             retried = True
@@ -174,24 +191,49 @@ class TestE2EUiStreamlit:
                 (tmp_path / "ui_body.txt").write_text(body, encoding="utf-8")
                 _copy_evidence(tmp_path / "ui_body.txt", "ui_body.txt")
                 _copy_evidence(tmp_path / "api.log", "ui_api.log")
-                assert "Cálculo concluído" in body, (
+                assert "Valor da avaliação" in body or "Cálculo disponível" in body, (
                     "UI did not reach a completed calculation; body=" + body[:2000]
                 )
                 assert "735.000,00" in body or "735000" in body, body[:1200]
 
+                # Snapshot is persisted before PDF render finishes; keep
+                # polling until the artifact is ready (or failed).
                 download_btn = page.get_by_role("button", name="Baixar report.pdf")
-                if download_btn.count() < 1:
-                    refresh = page.get_by_role("button", name="Atualizar estado")
-                    if refresh.count() >= 1:
-                        refresh.first.click()
-                        page.wait_for_timeout(2000)
+                pdf_failed = False
+                for _ in range(45):
+                    body = page.inner_text("body")
+                    if (
+                        "Baixar cálculo (o PDF falhou)" in body
+                        or "Documento PDF indisponível" in body
+                    ):
+                        pdf_failed = True
+                        break
                     download_btn = page.get_by_role("button", name="Baixar report.pdf")
-                assert download_btn.count() >= 1, "PDF download control missing; body=" + body[:800]
-                download_btn.first.click()
+                    if download_btn.count() >= 1:
+                        break
+                    refresh = page.get_by_role("button", name="Atualizar estado")
+                    if refresh.count() >= 1 and refresh.first.is_enabled():
+                        refresh.first.click()
+                    page.wait_for_timeout(2000)
+                page.screenshot(path=str(screenshot), full_page=True)
+                (tmp_path / "ui_body.txt").write_text(body, encoding="utf-8")
+                assert not pdf_failed, "PDF generation failed; body=" + body[:2000]
+                assert download_btn.count() >= 1, "PDF download control missing; body=" + body[:2000]
                 transfer = page.get_by_role("button", name="Transferência de report.pdf")
-                transfer.wait_for(state="visible", timeout=30000)
+                for _ in range(12):
+                    if transfer.count() >= 1:
+                        break
+                    baixar = page.get_by_role("button", name="Baixar report.pdf")
+                    if baixar.count() >= 1:
+                        baixar.first.click()
+                    page.wait_for_timeout(1500)
+                if transfer.count() < 1:
+                    transfer = page.get_by_role("link", name="Transferência de report.pdf")
+                assert transfer.count() >= 1, (
+                    "Transferência de report.pdf missing; body=" + page.inner_text("body")[:2000]
+                )
                 with page.expect_download(timeout=30000) as pending:
-                    transfer.click()
+                    transfer.first.click()
                 download = pending.value
                 download.save_as(str(pdf_path))
                 context.tracing.stop(path=str(trace_zip))

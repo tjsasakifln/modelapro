@@ -1177,6 +1177,30 @@ def fit_candidate(
     except Exception:
         pass
 
+    cond = diagnostics.get("condition_number")
+    if cond is not None:
+        try:
+            cond_f = float(cond)
+        except (TypeError, ValueError):
+            cond_f = None
+        if cond_f is None or not np.isfinite(cond_f) or abs(cond_f) > 1e12:
+            issues.append(
+                make_issue(
+                    "ill_conditioned",
+                    "Matriz de desenho numericamente mal-condicionada; o ajuste não é aceito como fitted.",
+                    severity="error",
+                    evidence={"condition_number": cond},
+                )
+            )
+            diagnostics["ill_conditioned"] = True
+            return _fit_shell(
+                spec, status=STATUS_REJECTED, issues=issues, prepared=prepared_dataset,
+                used_row_ids=used_ids, excluded_row_ids=excluded_ids, diagnostics=diagnostics,
+                encoder_state=encoder_state, feature_schema=feature_schema,
+                target_transform_state=target_state, sample_policy=decision.to_dict(),
+                base_frame=_slice_base_frame(prepared_dataset, X_all, used_pos, used_ids),
+            )
+
     base_frame = _slice_base_frame(prepared_dataset, X_all, used_pos, used_ids)
     sha = _sha256_payload(
         {
@@ -1930,8 +1954,10 @@ class ModelBuilder:
         y: pd.Series,
         degree: int = 1,
         remove_outliers: bool = False,
-        grau_item1: int = 1,
-        grau_item3: int = 1,
+        grau_item1: Optional[int] = None,
+        grau_item3: Optional[int] = None,
+        item1_provenance: Any = None,
+        item3_provenance: Any = None,
     ) -> ModelResult:
         """Legacy adapter around fit_candidate.
 
@@ -2000,7 +2026,14 @@ class ModelBuilder:
                 model_object=model,
             )
             result.validation_result = NBRValidator.validate_model(
-                result, X_design, y_used, degree, grau_item1=grau_item1, grau_item3=grau_item3
+                result,
+                X_design,
+                y_used,
+                degree,
+                grau_item1=grau_item1,
+                grau_item3=grau_item3,
+                item1_provenance=item1_provenance,
+                item3_provenance=item3_provenance,
             )
             setattr(result, "_c04_candidate_fit", fit)
             setattr(result, "_c04_used_row_ids", list(fit.used_row_ids))

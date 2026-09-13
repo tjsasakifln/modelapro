@@ -11,7 +11,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Intended Audience :: Financial and Insurance Industry",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
@@ -20,6 +19,7 @@ classifiers = [
 # tests/c15_packaging/test_dependency_sync.py enforces that.
 dependencies = [
     "streamlit>=1.30.0",
+    "httpx>=0.26.0",
     "fastapi>=0.109.0",
     "uvicorn>=0.27.0",
     "pandas>=2.2.0",
@@ -37,6 +37,9 @@ dependencies = [
     "requests>=2.31.0",
     "openpyxl>=3.1.2",
     "xlrd>=2.0.1",
+    "cryptography>=42.0.0",
+    "pyHanko>=0.37.0,<0.38.0",
+    "pypdf>=5.0.0",
 ]
 
 [project.optional-dependencies]
@@ -46,15 +49,19 @@ dependencies = [
 redis = ["redis>=5.0.1"]
 dev = [
     "pytest>=8.0.0",
-    "httpx>=0.26.0",
     "black>=24.1.0",
     "flake8>=7.0.0",
     "mypy>=1.8.0",
     "build>=1.0.0",
     "wheel>=0.42.0",
     "setuptools>=69.0.0",
-    "pypdf>=5.0.0",
     "playwright>=1.40.0",
+]
+# Tools used only by the controlled release build.  They are intentionally not
+# runtime dependencies and are pinned by constraints/commercial-build.txt.
+commercial-build = [
+    "pyinstaller==6.22.2",
+    "pip-audit==2.10.1",
 ]
 
 [project.scripts]
@@ -70,6 +77,18 @@ packages = [
     "frontend",
     "frontend.components",
     "c15_local",
+    "modules.operacao_local",
+    "modules.commercial_license",
+    "modules.cost_valuation",
+    "modules.qualification_profile",
+    "modules.pro_workflow",
+    "modules.report_export",
+    "modules.report_presenter",
+    "modules.digital_signatures",
+    "modules.valuation_policy",
+    "profiles",
+    "profiles.normative",
+    "profiles.institutions",
 ]
 
 [tool.setuptools.package-dir]
@@ -77,7 +96,10 @@ c15_local = "scripts/c15_local"
 
 [tool.setuptools.package-data]
 modules = ["templates/*.html"]
-frontend = ["assets/*.css"]
+frontend = ["assets/*.css", "assets/*.md"]
+"profiles.normative" = ["*.json"]
+"profiles.institutions" = ["*.json"]
+"modules.commercial_license" = ["trusted_vendor_anchor.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

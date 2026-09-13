@@ -308,19 +308,13 @@ class TestF07WarningsStates:
             files={"file": ("bad.txt", b"not-a-spreadsheet", "text/plain")},
             data={"degree": 1, "target_col": "preco"},
         )
-        # Fast ack is allowed; calculation success is a later job state.
+        # C04 now rejects this forbidden extension before scheduling a job.
+        # A synchronous rejection is not an acknowledged successful calculation.
         body = response.json()
-        job_id = body.get("job_id")
-        assert job_id, (
-            f"ack without job_id cannot be distinguished from success: {body}"
-        )
-        status = client.get(f"/jobs/{job_id}")
-        assert status.status_code == 200
-        payload = status.json()
-        assert payload.get("state") in {
-            "queued", "running", "succeeded", "failed", "cancelled", "interrupted",
-        }
-        assert payload.get("state") != "succeeded"
+        assert response.status_code == 400, body
+        assert body["detail"]["error"] == "INVALID_UPLOAD"
+        assert not body.get("job_id")
+        assert body.get("state") != "succeeded"
 
 
 class TestF08SamplesAnnexes:

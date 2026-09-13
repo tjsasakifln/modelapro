@@ -7,10 +7,12 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import httpx
 import pytest
 
 from frontend.components.forms import (
     ApiConnectionError,
+    ApiResponseError,
     DuplicateExecutionError,
     JobClient,
     build_request_spec,
@@ -264,3 +266,102 @@ def test_session_restore_recovers_job_id_after_rerun():
     assert restored.job_id == "job-1"
     assert restored.last_status["state"] == "running"
     assert may_start_execution(restored.last_status) is False
+
+
+def _recovery_client(handler):
+    http = httpx.Client(
+        base_url="http://localhost:8000",
+        transport=httpx.MockTransport(handler),
+    )
+    return JobClient(base_url="http://localhost:8000", timeout=1, client=http)
+
+
+def test_recovering_another_pending_job_clears_state_from_previous_job():
+    def handler(request):
+        assert request.url.path == "/jobs/job-new"
+        return httpx.Response(
+            200,
+            json={"job_id": "job-new", "state": "running", "result_available": False},
+        )
+
+    client = _recovery_client(handler)
+    client.job_id = "job-old"
+    client.access_token = "old-token"
+    client.status_url = "/jobs/job-old"
+    client.last_status = {"job_id": "job-old", "state": "succeeded"}
+    client.last_snapshot = {"job_id": "job-old", "value": {"point": 1}}
+    client.last_request_spec = {"applicant": "OLD SCREEN STATE"}
+    client.last_submit_fingerprint = "old-fingerprint"
+
+    status = client.recover("job-new")
+
+    assert status == {"job_id": "job-new", "state": "running", "result_available": False}
+    assert client.job_id == "job-new"
+    assert client.status_url == "/jobs/job-new"
+    assert client.access_token is None
+    assert client.last_snapshot is None
+    assert client.last_request_spec is None
+    assert client.last_submit_fingerprint is None
+
+
+def test_recover_result_error_is_blocking_and_keeps_new_job_without_old_state():
+    def handler(request):
+        if request.url.path == "/jobs/job-new":
+            return httpx.Response(
+                200,
+                json={"job_id": "job-new", "state": "succeeded", "result_available": True},
+            )
+        if request.url.path == "/jobs/job-new/result":
+            return httpx.Response(503, json={"code": "RESULT_READ_FAILED"})
+        raise AssertionError(request.url.path)
+
+    client = _recovery_client(handler)
+    client.job_id = "job-old"
+    client.last_status = {"job_id": "job-old", "state": "succeeded"}
+    client.last_snapshot = {"job_id": "job-old", "value": {"point": 1}}
+    client.last_request_spec = {"applicant": "OLD SCREEN STATE"}
+
+    with pytest.raises(ApiResponseError, match="Resultado ainda não disponível"):
+        client.recover("job-new")
+
+    assert client.job_id == "job-new"
+    assert client.last_status["job_id"] == "job-new"
+    assert client.last_snapshot is None
+    assert client.last_request_spec is None
+
+
+def test_recover_restores_request_spec_only_from_canonical_frozen_project():
+    canonical_spec = {
+        "schema_version": "MP/1",
+        "applicant": "CANONICAL FROZEN PROJECT",
+        "target_col": "preco",
+    }
+
+    def handler(request):
+        if request.url.path == "/jobs/job-new":
+            return httpx.Response(
+                200,
+                json={
+                    "job_id": "job-new",
+                    "state": "succeeded",
+                    "result_available": True,
+                    "artifact_states": {"frozen_project.json": {"state": "ready"}},
+                },
+            )
+        if request.url.path == "/jobs/job-new/result":
+            return httpx.Response(200, json={"job_id": "job-new", "value": {"point": 2}})
+        if request.url.path == "/jobs/job-new/artifacts/frozen_project.json":
+            return httpx.Response(
+                200,
+                content=json.dumps({"request_spec": canonical_spec}).encode("utf-8"),
+            )
+        raise AssertionError(request.url.path)
+
+    client = _recovery_client(handler)
+    client.job_id = "job-old"
+    client.last_request_spec = {"applicant": "CURRENT FORM MUST NOT WIN"}
+
+    client.recover("job-new")
+
+    assert client.last_snapshot["value"]["point"] == 2
+    assert client.last_request_spec == canonical_spec

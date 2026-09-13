@@ -154,18 +154,37 @@ def search_models(
             cancelled=False,
         )
         audit["coverage"]["exact_optimum_guaranteed"] = False
+        audit["selection_scope"] = (
+            (request_spec.get("search_policy") or {}).get("model_scope")
+            or request_spec.get("model_scope")
+            or "population_model"
+        )
+        audit["selection_conditioned_on_subject"] = audit["selection_scope"] == "subject_specific"
         return _search_result(None, [], audit, issues, t0, rss0)
 
     subject_raw = None
     if subject_design:
         subject_raw = subject_design.get("raw_values") or subject_design.get("subject_raw")
 
+    declared_scope = search_policy.get("model_scope") or request_spec.get("model_scope")
+    if declared_scope not in {"population_model", "subject_specific"}:
+        declared_scope = "population_model"
+    selection_conditioned = declared_scope == "subject_specific"
+    subject_for_units = subject_raw if selection_conditioned else None
+
     units, unit_issues = search_units_from_prepared(
-        prepared_dataset, authorized, subject_raw=subject_raw
+        prepared_dataset, authorized, subject_raw=subject_for_units
     )
     issues.extend(unit_issues)
 
-    if subject_raw is not None:
+    dropped_transforms_due_to_subject: Dict[str, Any] = {}
+    for issue in unit_issues:
+        if issue.get("code") == "domain_exclusion":
+            dropped_transforms_due_to_subject = dict(
+                (issue.get("evidence") or {}).get("dropped_transforms") or {}
+            )
+
+    if selection_conditioned and subject_raw is not None:
         missing_bases = [
             u.base_variable
             for u in units
@@ -196,6 +215,9 @@ def search_models(
             cache_components=cache_components,
             cancelled=False,
         )
+        audit["selection_scope"] = declared_scope
+        audit["selection_conditioned_on_subject"] = bool(selection_conditioned)
+        audit["dropped_transforms_due_to_subject"] = dropped_transforms_due_to_subject
         return _search_result(None, [], audit, issues, t0, rss0)
 
     n_rows = _n_rows(prepared_dataset)
@@ -385,23 +407,23 @@ def search_models(
     winner_rec = None
     alternatives: List[Dict[str, Any]] = []
     for rec in ordered:
-        label = rec["admissibility"].get("label")
-        if winner_rec is None and label == "admissible":
+        numeric = bool((rec.get("admissibility") or {}).get("numeric_technical"))
+        if winner_rec is None and numeric:
+            # Grade/framing is not a numeric winner gate. A fitted model with
+            # unmet fundamentação remains an analysis, not NO_WINNER.
             winner_rec = rec
             continue
-        if winner_rec is None and label != "admissible":
-            # Keep looking for an admissible winner; exploratories go to alternatives.
+        if winner_rec is None and not numeric:
             if len(alternatives) < n_alternatives:
                 rec = dict(rec)
                 rec["discard_reason"] = rec.get("discard_reason") or "exploratory_not_admissible"
                 alternatives.append(rec)
             continue
         if len(alternatives) < n_alternatives:
-            if rec["admissibility"].get("label") != "admissible":
-                rec = dict(rec)
+            rec = dict(rec)
+            if not numeric:
                 rec["discard_reason"] = rec.get("discard_reason") or "exploratory_not_admissible"
             else:
-                rec = dict(rec)
                 rec["discard_reason"] = rec.get("discard_reason") or "dominated_by_winner"
             alternatives.append(rec)
 
@@ -410,10 +432,22 @@ def search_models(
             _issue(
                 "no_admissible_winner",
                 "warning",
-                "No candidate met numeric/technical admissibility and required framing. "
+                "No candidate met numeric/technical admissibility. "
                 "Exploratory models may be listed in alternatives; none is implicitly admissible.",
             )
         )
+    elif winner_rec is not None:
+        adm = winner_rec.get("admissibility") or {}
+        if adm.get("numeric_technical") and not adm.get("framing"):
+            issues.append(
+                _issue(
+                    "grade_or_framing_not_met_analysis",
+                    "warning",
+                    "A numerically fitted model is returned as analysis; requested framing/grade "
+                    "was not met and this is not a qualified emission.",
+                    evidence={"reasons": list(adm.get("reasons") or []), "label": adm.get("label")},
+                )
+            )
 
     if len(compact_history) > HISTORY_SAMPLE_LIMIT:
         step = len(compact_history) / HISTORY_SAMPLE_LIMIT
@@ -479,6 +513,9 @@ def search_models(
         "seed": seed,
         "code_version": CODE_VERSION,
         "hooks": hooks.get("labeled"),
+        "selection_scope": declared_scope,
+        "selection_conditioned_on_subject": bool(selection_conditioned),
+        "dropped_transforms_due_to_subject": dropped_transforms_due_to_subject,
     }
     if not exact_optimum:
         audit["coverage"]["optimum_disclaimer"] = (
@@ -520,11 +557,19 @@ def ranking_tuple(
     numeric = 1 if adm.get("numeric_technical") else 0
     framing = 1 if adm.get("framing") else 0
     required = list(objective.get("required_criteria") or ["original_rmse"])
-    rmse = metrics.get("original_rmse")
-    if "original_rmse" in required:
-        rmse_key = -float(rmse) if _finite_number(rmse) else float("-inf")
+    metric = objective.get("metric") or "original_rmse"
+    if metric == "original_rmse":
+        rmse = metrics.get("original_rmse")
+        if "original_rmse" in required:
+            rmse_key = -float(rmse) if _finite_number(rmse) else float("-inf")
+        else:
+            rmse_key = -float(rmse) if _finite_number(rmse) else 0.0
     else:
-        rmse_key = -float(rmse) if _finite_number(rmse) else 0.0
+        from modules.valuation_policy.selection import ranking_primary_score
+
+        rmse_key = ranking_primary_score(metrics, metric)
+        if metric in required and not _finite_number(metrics.get(metric)):
+            rmse_key = float("-inf")
     amp_key = 0.0
     if "precision_amplitude_pct" in required:
         amp = metrics.get("precision_amplitude_pct")
@@ -583,7 +628,11 @@ def classify_admissibility(
         reasons.append("original_scale_error_unavailable")
 
     framing_ok = numeric
-    min_grade = evaluation_policy.get("min_fundamentacao_grade")
+    min_grade = evaluation_policy.get("minimum_fundamentacao_grade")
+    if min_grade is None:
+        min_grade = evaluation_policy.get("min_fundamentacao_grade")
+    if min_grade is None:
+        min_grade = evaluation_policy.get("target_degree")
     grau = metrics.get("grau_fundamentacao")
     if min_grade is not None:
         try:
@@ -619,6 +668,46 @@ def classify_admissibility(
     }
 
 
+def _documentary_inputs(evaluation_policy: Mapping[str, Any]) -> Dict[str, Any]:
+    """Read documentary grades and provenance without truthy defaults.
+
+    ``0``, ``None`` and an invalid value have different meanings in the C05
+    classifier, so this adapter must preserve the value exactly.  Both the
+    legacy flat keys and C02's nested ``documentary.itemN`` shape are accepted.
+    """
+    policy = dict(evaluation_policy or {})
+    documentary = policy.get("documentary")
+    documentary = dict(documentary) if isinstance(documentary, Mapping) else {}
+
+    def value(item: int, kind: str) -> Any:
+        nested = documentary.get(f"item{item}")
+        nested = dict(nested) if isinstance(nested, Mapping) else {}
+        if kind == "grade":
+            for candidate in (
+                nested.get("grade"),
+                documentary.get(f"item{item}_grade"),
+                policy.get(f"grau_item{item}"),
+            ):
+                if candidate is not None:
+                    return candidate
+            return None
+        for candidate in (
+            nested.get("provenance"),
+            documentary.get(f"item{item}_provenance"),
+            policy.get(f"item{item}_provenance"),
+        ):
+            if candidate is not None:
+                return candidate
+        return None
+
+    return {
+        "grau_item1": value(1, "grade"),
+        "grau_item3": value(3, "grade"),
+        "item1_provenance": value(1, "provenance"),
+        "item3_provenance": value(3, "provenance"),
+    }
+
+
 def build_search_cache_key(
     prepared_dataset: Mapping[str, Any],
     subject_design: Optional[Mapping[str, Any]],
@@ -630,6 +719,8 @@ def build_search_cache_key(
     search_policy.pop("peer_hooks", None)
     evaluation_policy.pop("extra_objective", None)
     search_policy.pop("progress_callback", None)
+    scope = search_policy.get("model_scope") or request_spec.get("model_scope") or "population_model"
+    profile = request_spec.get("qualification_profile") or {}
     components = {
         "dataset_sha256": prepared_dataset.get("dataset_sha256"),
         "sample_fingerprint": _sample_fingerprint(prepared_dataset),
@@ -646,8 +737,14 @@ def build_search_cache_key(
         "schema_version": SCHEMA_VERSION,
         "y_transformations": y_transformations_from_policy(search_policy),
         "subject": None,
+        "model_scope": scope,
+        "qualification_profile": {
+            "id": profile.get("id") if isinstance(profile, Mapping) else None,
+            "version": profile.get("version") if isinstance(profile, Mapping) else None,
+            "value_basis": profile.get("value_basis") if isinstance(profile, Mapping) else None,
+        },
     }
-    if subject_design is not None:
+    if scope == "subject_specific" and subject_design is not None:
         components["subject"] = subject_design.get("raw_values") or subject_design.get("subject_raw")
     blob = json.dumps(components, sort_keys=True, default=str)
     digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -794,8 +891,10 @@ class OptimalCombinationFinder:
         target_col: str,
         degree: int = 1,
         avaliando_raw: Optional[Dict[str, float]] = None,
-        grau_item1: int = 1,
-        grau_item3: int = 1,
+        grau_item1: Optional[int] = None,
+        grau_item3: Optional[int] = None,
+        item1_provenance: Any = None,
+        item3_provenance: Any = None,
         candidate_cols: Optional[List[str]] = None,
     ) -> OptimalCombinationResult:
         """Adapter: map the legacy DataFrame call onto ``search_models`` and back."""
@@ -807,10 +906,14 @@ class OptimalCombinationFinder:
                 avaliando_raw=avaliando_raw,
                 grau_item1=grau_item1,
                 grau_item3=grau_item3,
+                item1_provenance=item1_provenance,
+                item3_provenance=item3_provenance,
                 candidate_cols=candidate_cols,
             )
             result = search_models(prepared, subject, request_spec)
-            legacy = self._to_legacy_result(result, degree=degree)
+            legacy = self._to_legacy_result(
+                result, degree=degree, evaluation_policy=request_spec["evaluation_policy"]
+            )
             if avaliando_raw and legacy.best_model is not None:
                 builder = ModelBuilder()
                 original_df = prepared.get("base_frame")
@@ -839,8 +942,10 @@ class OptimalCombinationFinder:
         target_col: str,
         degree: int,
         avaliando_raw: Optional[Dict[str, float]],
-        grau_item1: int,
-        grau_item3: int,
+        grau_item1: Optional[int],
+        grau_item3: Optional[int],
+        item1_provenance: Any,
+        item3_provenance: Any,
         candidate_cols: Optional[List[str]],
     ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]:
         if target_col not in df.columns:
@@ -898,6 +1003,8 @@ class OptimalCombinationFinder:
                 "outlier_action": "report_only",
                 "grau_item1": grau_item1,
                 "grau_item3": grau_item3,
+                "item1_provenance": item1_provenance,
+                "item3_provenance": item3_provenance,
                 "seed": 0,
             },
             "missing_policy": {"target": "never_impute", "predictors": "complete_case"},
@@ -918,7 +1025,10 @@ class OptimalCombinationFinder:
         return prepared, request_spec, subject
 
     def _to_legacy_result(
-        self, search: Mapping[str, Any], degree: int = 1
+        self,
+        search: Mapping[str, Any],
+        degree: int = 1,
+        evaluation_policy: Optional[Mapping[str, Any]] = None,
     ) -> OptimalCombinationResult:
         issues = list(search.get("issues") or [])
         error_issues = [i for i in issues if i.get("severity") == "error"]
@@ -987,14 +1097,19 @@ class OptimalCombinationFinder:
                     except Exception:
                         pass
                 if X_design is not None and y_design is not None and best_model.model_object is not None:
-                    try:
-                        from modules.nbr14653_validation import NBRValidator
+                    from modules.nbr14653_validation import NBRValidator
 
-                        best_model.validation_result = NBRValidator.validate_model(
-                            best_model, X_design, y_design, degree
-                        )
-                    except Exception:
-                        pass
+                    doc = _documentary_inputs(evaluation_policy or {})
+                    best_model.validation_result = NBRValidator.validate_model(
+                        best_model,
+                        X_design,
+                        y_design,
+                        degree,
+                        grau_item1=doc["grau_item1"],
+                        grau_item3=doc["grau_item3"],
+                        item1_provenance=doc["item1_provenance"],
+                        item3_provenance=doc["item3_provenance"],
+                    )
         # Item 4/precision for the legacy DataFrame API is completed in
         # find_best_model via add_precision_and_extrapolation when avaliando exists.
         grau = None
@@ -1305,21 +1420,9 @@ def _resolve_mode(
 def _objective_descriptor(
     search_policy: Mapping[str, Any], evaluation_policy: Mapping[str, Any]
 ) -> Dict[str, Any]:
-    name = search_policy.get("objective") or "original_scale_error"
-    required = list(search_policy.get("required_criteria") or ["original_rmse"])
-    if evaluation_policy.get("require_precision") and "precision_amplitude_pct" not in required:
-        required.append("precision_amplitude_pct")
-    return {
-        "name": name,
-        "scale": "original",
-        "required_criteria": required,
-        "optional_criteria": ["precision_amplitude_pct", "stability", "complexity"],
-        "tie_break": "candidate_id_lexicographic_asc",
-        "does_not_use": [
-            "r2_across_transformed_vs_original_scales",
-            "automatic_sample_row_removal",
-        ],
-    }
+    from modules.valuation_policy.selection import objective_descriptor
+
+    return objective_descriptor(search_policy, evaluation_policy)
 
 
 def _resolve_hooks(request_spec: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1709,6 +1812,10 @@ def _fit_and_score(
         diagnostics = candidate_fit.get("diagnostics") if isinstance(candidate_fit, dict) else getattr(candidate_fit, "diagnostics", {}) or {}
         record["diagnostics"] = diagnostics or {}
         record["candidate_fit"] = candidate_fit
+        if _finite_number((diagnostics or {}).get("aic")):
+            record.setdefault("_fit_info", {})["aic"] = float(diagnostics["aic"])
+        if _finite_number((diagnostics or {}).get("bic")):
+            record.setdefault("_fit_info", {})["bic"] = float(diagnostics["bic"])
         if callable(evaluate_fitted) and subject_design is not None:
             try:
                 assessment = evaluate_fitted(candidate_fit, subject_design, request_spec)
@@ -1728,7 +1835,15 @@ def _fit_and_score(
         )
     else:
         builder = ModelBuilder()
-        degree = int(evaluation_policy.get("min_fundamentacao_grade") or evaluation_policy.get("target_degree") or 1)
+        documentary = _documentary_inputs(evaluation_policy)
+        raw_degree = (
+            evaluation_policy.get("minimum_fundamentacao_grade")
+            if evaluation_policy.get("minimum_fundamentacao_grade") is not None
+            else evaluation_policy.get("min_fundamentacao_grade")
+            if evaluation_policy.get("min_fundamentacao_grade") is not None
+            else evaluation_policy.get("target_degree")
+        )
+        degree = int(raw_degree) if raw_degree is not None else 1
         remove_outliers = bool(evaluation_policy.get("remove_outliers", False))
         y_series = y_fit if isinstance(y_fit, pd.Series) else pd.Series(np.asarray(y_fit), index=X_design.index)
         if len(y_series) != len(X_design):
@@ -1738,8 +1853,10 @@ def _fit_and_score(
             y_series,
             degree=degree,
             remove_outliers=remove_outliers,
-            grau_item1=int(evaluation_policy.get("grau_item1") or 1),
-            grau_item3=int(evaluation_policy.get("grau_item3") or 1),
+            grau_item1=documentary["grau_item1"],
+            grau_item3=documentary["grau_item3"],
+            item1_provenance=documentary["item1_provenance"],
+            item3_provenance=documentary["item3_provenance"],
         )
         if not model_result.success or model_result.model_metrics is None:
             record["status"] = "rejected"
@@ -1815,6 +1932,15 @@ def _fit_and_score(
         "n_outliers_removed": len(outliers_removed),
         "y_transformation": y_name,
     }
+    fit_info = record.get("_fit_info") or {}
+    diagnostics = record.get("diagnostics") or {}
+    for key in ("aic", "bic"):
+        raw = fit_info.get(key)
+        if raw is None:
+            raw = diagnostics.get(key)
+        if _finite_number(raw):
+            metrics[key] = float(raw)
+            criteria_used.append(key)
     if _finite_number(rmse):
         metrics["original_rmse"] = float(rmse)
         criteria_used.append("original_rmse")

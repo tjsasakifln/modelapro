@@ -77,6 +77,11 @@ section[data-testid="stSidebar"] {
   box-shadow: 4px 4px 0 #0b0a08;
 }
 
+.mp-not-homologated {
+  color: var(--mp-warn);
+  font-weight: 600;
+}
+
 .mp-value-kicker {
   font-family: "Source Sans 3", "Segoe UI", sans-serif;
   font-size: 0.82rem;
@@ -104,6 +109,18 @@ section[data-testid="stSidebar"] {
   font-size: 1.6rem;
 }
 
+.mp-state-text {
+  font-family: "Source Sans 3", "Segoe UI", sans-serif;
+  font-size: 0.9rem;
+  color: var(--mp-paper-edge);
+}
+
+@media (min-width: 1200px) {
+  .mp-value-hero {
+    max-width: 72rem;
+  }
+}
+
 @media (max-width: 768px) {
   .mp-value-hero {
     padding: 1rem;
@@ -111,6 +128,9 @@ section[data-testid="stSidebar"] {
   }
   .mp-value-figure {
     font-size: 1.55rem;
+  }
+  .mp-value-meta {
+    font-size: 0.85rem;
   }
   div[data-testid="stHorizontalBlock"] {
     flex-direction: column;

@@ -18,11 +18,13 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from .websocket import router as websocket_router
+from .document_routes import router as document_router
+from .recipient_routes import router as recipient_router
 from .worker import (
     Worker,
     compose_preview,
@@ -169,7 +171,9 @@ def get_job_store():
     if RuntimeBindings.job_store is not None:
         return RuntimeBindings.job_store
     stores, _ = _import_c11()
-    instance = _instantiate(stores["JobStore"])
+    from modules.operacao_local.runtime import active_store_root
+    root = active_store_root()
+    instance = _instantiate(stores["JobStore"], root) if root else _instantiate(stores["JobStore"])
     if instance is None:
         return None
     RuntimeBindings.job_store = instance
@@ -180,7 +184,9 @@ def get_project_store():
     if RuntimeBindings.project_store is not None:
         return RuntimeBindings.project_store
     stores, _ = _import_c11()
-    instance = _instantiate(stores["ProjectStore"])
+    from modules.operacao_local.runtime import active_store_root
+    root = active_store_root()
+    instance = _instantiate(stores["ProjectStore"], root) if root else _instantiate(stores["ProjectStore"])
     if instance is None:
         return None
     RuntimeBindings.project_store = instance
@@ -327,6 +333,11 @@ async def read_upload_limited(upload: UploadFile, max_bytes: int) -> bytes:
                 "issues": [make_issue("EMPTY_FILE", "Uploaded file is empty", origin="c10.api")],
             },
         )
+    from modules.operacao_local.security import UploadPolicy, validate_upload
+    try:
+        validate_upload(upload.filename or "", data, UploadPolicy(max_bytes=max_bytes))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_UPLOAD", "message": str(exc)}) from exc
     return data
 
 
@@ -408,6 +419,15 @@ def submission_key(file_bytes: bytes, request_spec: Mapping[str, Any], subject: 
     h.update(dumps_strict(request_spec_for_peers(request_spec)).encode("utf-8"))
     h.update(b"\0")
     h.update(dumps_strict(subject if subject is not None else {}).encode("utf-8"))
+    h.update(b"\0")
+    h.update(str(current_code_sha() or "").encode("utf-8"))
+    try:
+        from modules.pro_workflow.residual_state import CALCULATION_VERSION
+
+        h.update(b"\0")
+        h.update(str(CALCULATION_VERSION).encode("utf-8"))
+    except Exception:
+        pass
     return h.hexdigest()
 
 
@@ -418,8 +438,8 @@ def request_spec_from_upload_form(
     candidate_cols: Any,
     solicitante: str,
     finalidade: str,
-    grau_item1: int,
-    grau_item3: int,
+    grau_item1: Optional[int],
+    grau_item3: Optional[int],
 ) -> dict:
     """Compatibility adapter from the legacy /upload form into RequestSpec."""
     if not isinstance(degree, int) or isinstance(degree, bool) or degree < DEGREE_MIN or degree > DEGREE_MAX:
@@ -439,7 +459,7 @@ def request_spec_from_upload_form(
             },
         )
     for label, value in (("grau_item1", grau_item1), ("grau_item3", grau_item3)):
-        if not isinstance(value, int) or isinstance(value, bool) or value < DEGREE_MIN or value > DEGREE_MAX:
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0 or value > DEGREE_MAX):
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -469,6 +489,7 @@ def request_spec_from_upload_form(
             "objective": "target_degree",
             "seed": None,
             "target_degree": degree,
+            "minimum_fundamentacao_grade": degree,
         },
         "evaluation_policy": {
             "method": "none",
@@ -523,7 +544,9 @@ def _create_job_record(store, *, idempotency_key: str, project_id: Optional[str]
     if not isinstance(created, Mapping) or "job_id" not in created:
         raise HTTPException(status_code=500, detail="JobStore.create did not return job_id")
     job_id = created["job_id"]
-    if created.get("created") is False:
+    if created.get("created") is True:
+        is_new = True
+    elif created.get("created") is False:
         is_new = False
     elif job_id in RuntimeBindings.submission_index.values():
         is_new = False
@@ -533,8 +556,24 @@ def _create_job_record(store, *, idempotency_key: str, project_id: Optional[str]
         is_new = False
     else:
         is_new = True
+    access_token = created.get("access_token") if is_new else None
+    if is_new and (
+        not isinstance(access_token, str) or not access_token.strip()
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="JobStore.create did not return access_token for a new job",
+        )
     RuntimeBindings.submission_index[idempotency_key] = job_id
-    return {"job_id": job_id, "state": created.get("state") or "queued", "created": is_new}
+    return {
+        "job_id": job_id,
+        "state": created.get("state") or "queued",
+        "created": is_new,
+        # Return the capability supplied by the store once for a newly created
+        # job.  Replays deliberately use the guarded token recovery endpoint
+        # instead of returning the stored secret again.
+        "access_token": access_token,
+    }
 
 
 def _cancel_flag(job_store, runner, job_id: str) -> Callable[[], bool]:
@@ -629,6 +668,11 @@ app.add_middleware(
 )
 
 app.include_router(websocket_router)
+app.include_router(document_router)
+app.include_router(recipient_router)
+
+from .local_guard import LocalRequestGuard
+app.add_middleware(LocalRequestGuard)
 
 worker = Worker()
 
@@ -642,6 +686,89 @@ async def _on_startup():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/operations/license")
+async def current_license():
+    from modules.operacao_local.runtime import license_decision
+    from modules.commercial_license import trust_anchor_metadata
+    decision = license_decision()
+    return {"signature_valid": decision.valid_signature, "expired": decision.expired,
+            "calculate": decision.permits("calculate"), "reason": decision.reason,
+            "artifact_trust": trust_anchor_metadata()}
+
+
+@app.post("/operations/license")
+async def import_buyer_license(request: Request):
+    from modules.commercial_license import install_license, trusted_vendor_public_key
+    from modules.operacao_local.runtime import runtime_root
+    body = await request.body()
+    if len(body) > 65536:
+        raise HTTPException(413, "license envelope exceeds limit")
+    try:
+        install_license(json.loads(body), trusted_vendor_public_key(),
+                        os.environ.get("MODELA_LICENSE_PATH") or runtime_root() / "entitlement.json")
+    except (ValueError, TypeError, OSError) as exc:
+        raise HTTPException(400, "invalid buyer entitlement") from exc
+    return await current_license()
+
+
+@app.get("/operations/backup")
+async def export_workspace_backup():
+    import io
+    from pathlib import Path
+    import tempfile
+    import zipfile
+    store = get_job_store()
+    if store is None:
+        raise HTTPException(503, "store unavailable")
+    def export():
+        with tempfile.TemporaryDirectory(prefix="modelapro-backup-") as temporary:
+            backup = store.export_backup(Path(temporary) / "backup")
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+                for path in sorted(backup.rglob("*")):
+                    if path.is_file():
+                        archive.write(path, path.relative_to(backup).as_posix())
+            return output.getvalue()
+    payload = await asyncio.to_thread(export)
+    return Response(payload, media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="modelapro-backup.zip"'})
+
+
+@app.post("/operations/restore")
+async def restore_workspace_backup(file: UploadFile = File(...)):
+    import io
+    from pathlib import Path
+    import secrets
+    import tempfile
+    import zipfile
+    from modules.job_store import JobStore, atomic_write_json
+    from modules.project_store import ProjectStore
+    from modules.operacao_local.runtime import runtime_root
+    from modules.operacao_local.security import UploadPolicy, validate_upload
+    store = get_job_store()
+    if store is None or store.list_jobs():
+        raise HTTPException(409, "restore requires an empty workspace; existing evidence is preserved")
+    content = await file.read(100 * 1024 * 1024 + 1)
+    try:
+        validate_upload(file.filename or "", content, UploadPolicy(
+            allowed_extensions=frozenset({".zip"}), max_bytes=100 * 1024 * 1024,
+            max_zip_members=10000, max_uncompressed_bytes=500 * 1024 * 1024,
+            max_compression_ratio=1000))
+        relative = "restored-stores/" + secrets.token_hex(16)
+        destination = runtime_root() / relative
+        with tempfile.TemporaryDirectory(prefix="modelapro-restore-") as temporary:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                archive.extractall(temporary)  # Every member was checked above, before extraction.
+            restored = JobStore.restore_backup(Path(temporary), destination)
+        atomic_write_json(runtime_root() / "restored-store.json", {"relative_path": relative})
+        JobStore.configure_default(destination, recover_abandoned=False)
+        bind_runtime(job_store=restored, project_store=ProjectStore(destination))
+        RuntimeBindings.task_runner = None
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, "backup integrity verification failed") from exc
+    return {"status": "restored", "job_count": len(restored.list_jobs())}
 
 
 @app.post("/preview")
@@ -702,7 +829,7 @@ async def preview(
 
 @app.post("/jobs")
 async def create_job(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
     request_json: str = Form(...),
     subject_json: Optional[str] = Form(None),
     project_id: Optional[str] = Form(None),
@@ -713,8 +840,16 @@ async def create_job(
     ok, issues = subject_numeric_values_finite(subject)
     if not ok:
         return _issues_response(400, "subject contains non-finite numbers", issues)
-    file_bytes = await read_upload_limited(file, _max_upload_bytes())
-    filename = file.filename or "upload.bin"
+    is_cost = (spec.get("qualification_profile") or {}).get("id") == "abnt-14653-2-custo-reedicao"
+    if file is None:
+        if not is_cost or not isinstance(spec.get("cost_bom"), Mapping):
+            raise HTTPException(400, "market sample is required outside the cost workflow")
+        file_bytes, filename = b"", "cost-bom.json"
+    else:
+        if is_cost:
+            raise HTTPException(400, "cost inputs belong in cost_bom, not a regression sample")
+        file_bytes = await read_upload_limited(file, _max_upload_bytes())
+        filename = file.filename or "upload.bin"
     job_store, runner = _require_c11()
     key = submission_key(file_bytes, spec, subject)
     payload = {
@@ -748,7 +883,9 @@ async def create_job(
             "result_url": f"/jobs/{job_id}/result",
             "state": record.get("state") or "queued",
             "idempotent_replay": not record.get("created"),
+            "access_token": record.get("access_token"),
         },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -766,7 +903,11 @@ async def get_job(job_id: str):
 
 
 @app.get("/jobs/{job_id}/result")
-async def get_job_result(job_id: str):
+async def get_job_result(
+    job_id: str,
+    access_token: Optional[str] = Header(None, alias="X-Job-Token"),
+    expected_fingerprint: Optional[str] = None,
+):
     job_store, _runner = _require_c11()
     job = job_store.get(job_id)
     if job is None:
@@ -775,6 +916,19 @@ async def get_job_result(job_id: str):
             "job not found",
             [make_issue("JOB_NOT_FOUND", f"job {job_id} not found", origin="c10.api")],
         )
+    if access_token:
+        verify = getattr(job_store, "verify_access", None)
+        if callable(verify) and not verify(job_id, access_token):
+            return _issues_response(
+                403,
+                "invalid access token",
+                [make_issue(
+                    "INVALID_ACCESS_TOKEN",
+                    "access_token does not match the job",
+                    origin="c10.api",
+                    evidence={"job_id": job_id},
+                )],
+            )
     snapshot = job_store.get_snapshot(job_id)
     if snapshot is None:
         return _issues_response(
@@ -795,6 +949,25 @@ async def get_job_result(job_id: str):
                 "result_available": False,
             },
         )
+    if expected_fingerprint:
+        qc = ((snapshot.get("provenance") or {}).get("qualification_context") or {})
+        fp = qc.get("result_fingerprint")
+        if not fp or fp != expected_fingerprint:
+            return _issues_response(
+                409,
+                "fingerprint mismatch",
+                [make_issue(
+                    "FINGERPRINT_MISMATCH",
+                    "expected_fingerprint does not match the frozen result",
+                    origin="c10.api",
+                    evidence={
+                        "job_id": job_id,
+                        "expected": expected_fingerprint,
+                        "observed": fp,
+                    },
+                )],
+                extra={"job_id": job_id, "result_fingerprint": fp},
+            )
     return JSONResponse(status_code=200, content=snapshot)
 
 
@@ -828,6 +1001,18 @@ async def cancel_job(job_id: str):
     )
 
 
+@app.post("/jobs/{job_id}/access-token")
+async def recover_job_access_token(job_id: str):
+    # LocalGuard authenticates the workspace bearer + Origin + CSRF before this
+    # endpoint. Recovery never places a credential in an URL or access log.
+    store, _runner = _require_c11()
+    job = store.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    return JSONResponse({"access_token": job["access_token"]},
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.get("/jobs/{job_id}/artifacts/{name}")
 async def get_job_artifact(job_id: str, name: str):
     try:
@@ -859,8 +1044,16 @@ async def get_job_artifact(job_id: str, name: str):
             "artifact not found",
             [make_issue("ARTIFACT_NOT_FOUND", f"{safe} is not available", origin="c10.api")],
         )
-    media = "application/pdf" if safe.endswith(".pdf") else "application/json"
-    return Response(content=data, media_type=media)
+    if safe.endswith(".pdf"):
+        media = "application/pdf"
+    elif safe.endswith(".zip"):
+        media = "application/zip"
+    elif safe.endswith(".docx"):
+        media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        media = "application/json"
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{safe}"', "Cache-Control": "no-store"})
 
 
 @app.get("/projects")
@@ -938,6 +1131,39 @@ async def save_project_revision(project_id: str, request: Request):
             "revision payload must be a mapping",
             [make_issue("TYPE_ERROR", "revision payload must be a mapping", origin="c10.api")],
         )
+    payload = dict(payload)
+    snapshot_ref = payload.get("snapshot_ref") or {}
+    if not isinstance(snapshot_ref, Mapping):
+        raise HTTPException(400, "snapshot_ref must be an object")
+    linked_job = payload.get("job_id") or snapshot_ref.get("job_id")
+    if payload.get("job_id") and snapshot_ref.get("job_id") not in (None, payload["job_id"]):
+        raise HTTPException(409, "revision refers to different jobs")
+    if linked_job:
+        jobs = get_job_store()
+        record = jobs.get(linked_job) if jobs is not None else None
+        frozen_bytes = jobs.get_artifact(linked_job, "frozen_project.json") if record else None
+        snapshot = jobs.get_snapshot(linked_job) if record else None
+        if frozen_bytes is None or snapshot is None:
+            raise HTTPException(409, "linked job needs a persisted snapshot and frozen project")
+        frozen = json.loads(frozen_bytes)
+        canonical = dict(frozen)
+        canonical["job_id"] = linked_job
+        canonical["snapshot_ref"] = {"job_id": linked_job}
+        canonical["frozen_project_sha256"] = sha256_bytes(frozen_bytes)
+        canonical["snapshot_sha256"] = sha256_bytes(dumps_strict(snapshot).encode("utf-8"))
+        canonical["document_snapshot"] = snapshot
+        canonical["document_artifact_inventory"] = {
+            name: {"sha256": sha256_bytes(raw), "size": len(raw)}
+            for name in ("report.pdf", "report.docx", "evidence_bundle.zip", "signed_report.pdf", "submission.zip")
+            if (raw := jobs.get_artifact(linked_job, name)) is not None
+        }
+        for key in ("request_spec", "model_state", "encoder_state", "feature_schema", "provenance", "value"):
+            if key in payload and payload[key] != canonical.get(key):
+                raise HTTPException(409, f"revision {key} differs from the linked calculation")
+        for key in ("note", "revision_id", "project_id"):
+            if key in payload:
+                canonical[key] = payload[key]
+        payload = canonical
     saver = getattr(store, "save_revision", None)
     if not callable(saver):
         return _issues_response(
@@ -1127,8 +1353,10 @@ async def upload_file(
     degree: int = Form(...),
     target_col: str = Form(...),
     avaliando_json: Optional[str] = Form(None),
-    grau_item1: int = Form(1),
-    grau_item3: int = Form(1),
+    grau_item1: Optional[int] = Form(None),
+    grau_item3: Optional[int] = Form(None),
+    item1_provenance: Optional[str] = Form(None),
+    item3_provenance: Optional[str] = Form(None),
     candidate_cols_json: Optional[str] = Form(None),
     solicitante: str = Form(""),
     finalidade: str = Form(""),
@@ -1165,6 +1393,9 @@ async def upload_file(
         grau_item1=grau_item1,
         grau_item3=grau_item3,
     )
+    for name, raw in (("item1_provenance", item1_provenance), ("item3_provenance", item3_provenance)):
+        if raw is not None:
+            spec_payload["declared_documentary"][name] = _parse_json_field(raw, field=name)
     spec = _validate_spec_or_400(spec_payload)
     file_bytes = await read_upload_limited(file, _max_upload_bytes())
     filename = file.filename or "upload.bin"

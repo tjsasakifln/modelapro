@@ -75,10 +75,11 @@ def test_pytest_is_dev_extra_not_runtime():
     dev = normalize_names(extras["dev"])
     assert "pytest" not in runtime
     assert "pytest" in dev
-    assert "httpx" in dev
-    assert "pypdf" in dev
+    assert "httpx" in runtime
+    assert "httpx" not in dev
+    assert "pypdf" in runtime
+    assert "pypdf" not in dev
     assert "playwright" in dev
-    assert "pypdf" not in runtime
     assert "playwright" not in runtime
 
 
@@ -102,3 +103,14 @@ def test_constraints_pin_every_direct_runtime_dep():
 
 def test_source_root_helper_matches_checkout():
     assert source_root(Path(__file__)) == REPO_ROOT
+
+
+def test_explicit_package_list_covers_every_source_package() -> None:
+    configured = set(load_pyproject(REPO_ROOT)["tool"]["setuptools"]["packages"])
+    expected = {"c15_local"}
+    for top_level in ("backend", "modules", "frontend", "profiles"):
+        root = REPO_ROOT / top_level
+        for marker in root.rglob("__init__.py"):
+            expected.add(".".join(marker.parent.relative_to(REPO_ROOT).parts))
+    missing = expected - configured
+    assert not missing, f"source packages omitted from installed wheel: {sorted(missing)}"

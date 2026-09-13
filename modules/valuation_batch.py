@@ -30,6 +30,20 @@ from collections import deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from modules.pro_workflow.residual_state import (
+    CALCULATION_VERSION,
+    LIMITATION_INCOMPLETE,
+    LIMITATION_MALFORMED,
+    LIMITATION_NO_INTERVALS,
+    STATUS_INCOMPLETE,
+    STATUS_MALFORMED,
+    apply_mean_prediction_intervals,
+    declared_residual_status,
+    extract_residual_state,
+    json_safe_residual_state,
+    residual_state_is_complete,
+)
+
 SCHEMA_VERSION = "MP/1"
 MODEL_SCOPE_SUBJECT_SPECIFIC = "subject_specific"
 MODEL_SCOPE_POPULATION = "population_model"
@@ -59,6 +73,8 @@ REASON_POLICY_MISMATCH = "request_spec_mismatch"
 
 DEFAULT_MAX_WORKERS = 1
 MAX_WORKERS_CAP = 8
+# Historical constant kept as a named leftover so tests can prove we do NOT
+# apply it as a statistical interval. C05 supplies arbitration when present.
 ARBITRATION_FRACTION = 0.15
 MEAN_CI_LEVEL = 0.80
 
@@ -194,6 +210,121 @@ def empty_value() -> Dict[str, Any]:
     }
 
 
+def _same_arbitration_rule(declared: Any, canonical: Mapping[str, Any]) -> bool:
+    if not isinstance(declared, Mapping):
+        return False
+    nested = declared.get("arbitration")
+    rule = nested if isinstance(nested, Mapping) else declared
+    expected = _as_mapping(canonical.get("arbitration"), "canonical arbitration")
+    if str(rule.get("method") or "").lower() != "percent_around_point":
+        return False
+    observed = _finite_or_none(rule.get("percent"))
+    target = _finite_or_none(expected.get("percent"))
+    return observed is not None and target is not None and observed == target
+
+
+def _resolved_value_policy(
+    spec: Mapping[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any], List[str]]:
+    """Separate a catalog-derived rule from human-selected adopted-value policy."""
+    from modules.qualification_profile.interval_policy import resolve_arbitration_policy
+
+    declared_policy = _as_mapping(spec.get("value_policy"), "value_policy")
+    used_policy = copy.deepcopy(declared_policy)
+    declared_rules = []
+    if isinstance(declared_policy.get("arbitration"), Mapping):
+        declared_rules.append(
+            ("request_spec.value_policy.arbitration", declared_policy["arbitration"])
+        )
+    direct = spec.get("c05_interval_rule")
+    if isinstance(direct, Mapping):
+        declared_rules.append(("request_spec.c05_interval_rule", direct))
+    profile_ref = _as_mapping(spec.get("qualification_profile"), "qualification_profile")
+    inline = profile_ref.get("interval_rule")
+    if isinstance(inline, Mapping):
+        declared_rules.append(("request_spec.qualification_profile.interval_rule", inline))
+
+    used_policy.pop("arbitration", None)
+    used_policy.pop("arbitration_interval", None)
+    used_policy.pop("arbitration_source", None)
+    canonical = resolve_arbitration_policy(profile_ref)
+    if canonical is None:
+        if declared_rules:
+            used_policy["arbitration_resolution"] = {
+                "status": "rejected_unverified_or_inapplicable_profile",
+                "declarations": [name for name, _rule in declared_rules],
+            }
+        return None, used_policy, ["arbitration_rule_unverified"]
+
+    conflicts = [
+        name for name, rule in declared_rules
+        if not _same_arbitration_rule(rule, canonical)
+    ]
+    if conflicts:
+        used_policy["arbitration_resolution"] = {
+            "status": "conflict_fail_closed",
+            "conflicts": conflicts,
+            "canonical_source": canonical.get("source"),
+        }
+        return None, used_policy, ["arbitration_policy_conflict"]
+
+    used_policy["schema_version"] = canonical.get("schema_version")
+    used_policy["applicability"] = canonical.get("applicability")
+    used_policy["arbitration"] = copy.deepcopy(canonical.get("arbitration"))
+    used_policy["arbitration_source"] = copy.deepcopy(canonical.get("source"))
+    used_policy.setdefault("source", copy.deepcopy(canonical.get("source")))
+    used_policy["arbitration_resolution"] = {"status": "applied_verified_profile_rule"}
+    return canonical, used_policy, []
+
+
+def _compose_profile_intervals(
+    assessment: Mapping[str, Any],
+    spec: Mapping[str, Any],
+) -> Dict[str, Any]:
+    from modules.valuation_policy.intervals import compose_value_intervals
+
+    out = dict(assessment)
+    value = dict(empty_value())
+    value.update(_as_mapping(out.get("value"), "assessment.value"))
+    statistical = _as_mapping(out.get("statistical"), "assessment.statistical")
+    limitations = list(statistical.get("limitations") or [])
+    rule, used_policy, policy_notes = _resolved_value_policy(spec)
+    residual_complete = not any(
+        note in limitations
+        for note in (LIMITATION_NO_INTERVALS, LIMITATION_INCOMPLETE, LIMITATION_MALFORMED)
+    )
+    unified, interval_notes = compose_value_intervals(
+        point=value.get("point"),
+        mean_ci80=value.get("mean_ci80"),
+        prediction_interval=value.get("prediction_interval"),
+        c05_interval_rule=rule,
+        residual_complete=residual_complete,
+        limitations=limitations,
+    )
+    value.update(unified)
+    for note in [*policy_notes, *interval_notes]:
+        if note not in limitations:
+            limitations.append(note)
+    statistical["limitations"] = limitations
+    out["value"] = value
+    out["statistical"] = statistical
+    out["value_policy"] = used_policy
+    if "arbitration_policy_conflict" in policy_notes:
+        issues = list(out.get("issues") or [])
+        issues.append(
+            _issue(
+                "arbitration_policy_conflict",
+                "error",
+                "c14.evaluate_fitted",
+                "Regra de campo de arbítrio declarada conflita com a autoridade "
+                "verificada; intervalo mantido nulo.",
+                evidence=used_policy.get("arbitration_resolution") or {},
+            )
+        )
+        out["issues"] = issues
+    return out
+
+
 def _interval(lower: Optional[float], upper: Optional[float], extra: Optional[Mapping[str, Any]] = None) -> Optional[Dict[str, Any]]:
     lo = _finite_or_none(lower)
     hi = _finite_or_none(upper)
@@ -319,6 +450,13 @@ def compute_reuse_key(frozen_project: Any, request_spec: Any = None) -> str:
         "normative_version": frozen.get("normative_version"),
         "model_scope": scope,
         "subject_constraints": constraints,
+        "calculation_version": frozen.get("calculation_version")
+        or model_state.get("calculation_version")
+        or CALCULATION_VERSION,
+        "residual_state_status": (_as_mapping(model_state.get("residual_state")).get("status")
+                                  or ("complete" if model_state.get("xtx_inv") else "incomplete")),
+        "feature_order": model_state.get("feature_order"),
+        "xtx_inv_kind": model_state.get("xtx_inv_kind"),
     }
     return _sha256_text(_canonical_dumps(material))
 
@@ -764,6 +902,17 @@ def builtin_inverse_target_prediction(
                 "Intervalos invertidos pela transformação do alvo; IC normativo "
                 "só é atribuído quando C06 publica método validado."
             )
+            # Retransformed log endpoints are not a monetary mean CI.
+            retransformed = out.get("mean_ci80")
+            out["mean_ci80"] = None
+            out["prediction_interval"] = None
+            return {
+                "value": out,
+                "estimand": st.get("estimand") or "exp(E[log Y|X])",
+                "limitations": limitations,
+                "interval_interpretation": None,
+                "retransformed_interval": retransformed,
+            }
         return {
             "value": out,
             "estimand": st.get("estimand") or "original_unit",
@@ -930,24 +1079,34 @@ def builtin_evaluate_fitted(
     n = int(model_state.get("n") or fit.get("n") or 0)
     k = int(model_state.get("k") or max(0, len(coefficients) - (1 if "const" in coefficients else 0)))
     df = n - k - (1 if "const" in coefficients else 0)
-    residual_std = _finite_or_none(model_state.get("residual_std"))
-    xtx_inv = model_state.get("xtx_inv")
-    mean_ci = None
-    pred_int = None
-    se_mean = None
-    tcrit = _t_critical(df, MEAN_CI_LEVEL) if df > 0 else None
-    if residual_std is not None and tcrit is not None and isinstance(xtx_inv, list) and feature_order:
-        x_vec = [float(row_values.get(name, 1.0 if name == "const" else 0.0)) for name in feature_order]
-        try:
-            if len(xtx_inv) == len(x_vec) and all(len(r) == len(x_vec) for r in xtx_inv):
-                quad = _dot(x_vec, _matvec(xtx_inv, x_vec))
-                if quad >= 0:
-                    se_mean = residual_std * math.sqrt(quad)
-                    mean_ci = _interval(point_t - tcrit * se_mean, point_t + tcrit * se_mean, {"level": MEAN_CI_LEVEL})
-                    se_pred = residual_std * math.sqrt(max(0.0, 1.0 + quad))
-                    pred_int = _interval(point_t - tcrit * se_pred, point_t + tcrit * se_pred, {"level": MEAN_CI_LEVEL})
-        except Exception:
-            se_mean = None
+    residual_state = model_state.get("residual_state") or fit.get("residual_state")
+    declared = declared_residual_status(residual_state)
+    if declared in {STATUS_INCOMPLETE, STATUS_MALFORMED}:
+        residual_state = json_safe_residual_state(residual_state)
+    elif residual_state_is_complete(residual_state):
+        residual_state = json_safe_residual_state(residual_state)
+    elif fit.get("model_object") is not None and _is_inprocess_model(fit.get("model_object")):
+        residual_state = json_safe_residual_state(extract_residual_state(fit))
+    else:
+        residual_state = json_safe_residual_state(
+            residual_state
+            if isinstance(residual_state, Mapping)
+            else {"schema_version": "MP-PRO/1", "status": STATUS_INCOMPLETE}
+        )
+    interval_block = apply_mean_prediction_intervals(
+        row_values, residual_state, point_transformed=point_t
+    )
+    mean_ci = interval_block.get("mean_ci80")
+    pred_int = interval_block.get("prediction_interval")
+    se_mean = interval_block.get("se_mean")
+    residual_std = _finite_or_none(
+        (_as_mapping(residual_state).get("residual_std") if isinstance(residual_state, Mapping) else None)
+        or model_state.get("residual_std")
+    )
+    df_resid = _finite_or_none((_as_mapping(residual_state).get("df_resid") if isinstance(residual_state, Mapping) else None))
+    if df_resid is not None:
+        df = int(df_resid) if df_resid == int(df_resid) else df_resid
+    interval_limitations = list(interval_block.get("limitations") or [])
 
     transformed_value = {
         "point": point_t,
@@ -964,9 +1123,30 @@ def builtin_evaluate_fitted(
         value = dict(empty_value())
         value.update(_as_mapping(inverted.get("value")))
         limitations = list(inverted.get("limitations") or [])
+        estimand = inverted.get("estimand")
     else:
         value = _as_mapping(inverted) if isinstance(inverted, Mapping) else empty_value()
         limitations = []
+        estimand = None
+    for item in interval_limitations:
+        if item not in limitations:
+            limitations.append(item)
+
+    y_name = ""
+    if isinstance(y_state, Mapping):
+        y_name = str(y_state.get("name") or "")
+    elif isinstance(y_state, str):
+        y_name = y_state
+    y_name = y_name.lower()
+    log_target = y_name in {"ln", "log", "logarithm"}
+    if log_target:
+        # exp(E[log Y|X]) is not a monetary mean CI. Do not invent one.
+        if inverted.get("interval_interpretation") not in {None, "mean_ci80"}:
+            value["mean_ci80"] = None
+        if estimand and estimand not in {"E[Y|X]"}:
+            value["mean_ci80"] = None
+            if "interval_not_mean_ci80" not in limitations:
+                limitations.append("interval_not_mean_ci80")
 
     point = _finite_or_none(value.get("point"))
     if point is None:
@@ -980,15 +1160,18 @@ def builtin_evaluate_fitted(
         )
         return _failed_assessment(candidate_id, subject_id, raw_values, used_row_ids, issues)
 
-    arb = _interval(point * (1.0 - ARBITRATION_FRACTION), point * (1.0 + ARBITRATION_FRACTION), {"fraction": ARBITRATION_FRACTION})
-    value["arbitration_interval"] = arb
+    value["arbitration_interval"] = None
+    value["admissible_interval"] = None
     mean_ci80 = value.get("mean_ci80") if isinstance(value.get("mean_ci80"), Mapping) else None
-    if mean_ci80 and arb:
-        lo = max(float(mean_ci80["lower"]), float(arb["lower"]))
-        hi = min(float(mean_ci80["upper"]), float(arb["upper"]))
-        value["admissible_interval"] = _interval(lo, hi) if lo <= hi else None
-    elif arb:
-        value["admissible_interval"] = arb
+    if mean_ci80 is None and (LIMITATION_NO_INTERVALS in limitations or LIMITATION_INCOMPLETE in limitations or LIMITATION_MALFORMED in limitations):
+        issues.append(
+            _issue(
+                LIMITATION_NO_INTERVALS,
+                "warning",
+                "c14.evaluate_fitted",
+                "Intervalos estatísticos indisponíveis: estado residual incompleto ou malformado; faixa percentual não é IC.",
+            )
+        )
 
     statistical = {
         "n": n or None,
@@ -998,8 +1181,10 @@ def builtin_evaluate_fitted(
         "se_mean": se_mean,
         "limitations": limitations,
         "target_unit": spec.get("target_unit"),
+        "estimand": estimand,
+        "residual_state_status": (_as_mapping(residual_state).get("status") if isinstance(residual_state, Mapping) else None),
     }
-    return {
+    return _compose_profile_intervals({
         "candidate_id": candidate_id,
         "subject_id": subject_id,
         "subject_raw": raw_values,
@@ -1015,7 +1200,7 @@ def builtin_evaluate_fitted(
         "model_eligibility": _empty_eligibility(ELIGIBLE, []),
         "used_row_ids": used_row_ids,
         "issues": issues,
-    }
+    }, spec)
 
 
 def _failed_assessment(
@@ -1263,7 +1448,7 @@ def _assessment_to_mapping(assessment: Any) -> Dict[str, Any]:
     }
 
 
-def _peer_evaluate_fitted(candidate_fit: Any, subject_design: Any, request_spec: Any) -> Dict[str, Any]:
+def evaluate_fitted(candidate_fit: Any, subject_design: Any, request_spec: Any) -> Dict[str, Any]:
     """Use C04 when a live CandidateFit with model_object is in memory; else apply frozen state.
 
     C04 refuses mappings and fits without model_object (it will not unpickle). A FrozenProject
@@ -1284,7 +1469,10 @@ def _peer_evaluate_fitted(candidate_fit: Any, subject_design: Any, request_spec:
             and getattr(candidate_fit, "status", None) in {None, "fitted"}
         )
         if live:
-            return _assessment_to_mapping(peer(candidate_fit, subject_design, request_spec))
+            raw = _assessment_to_mapping(peer(candidate_fit, subject_design, request_spec))
+            return _compose_profile_intervals(
+                raw, _as_mapping(request_spec, "request_spec")
+            )
     return builtin_evaluate_fitted(candidate_fit, subject_design, request_spec)
 
 
@@ -1325,7 +1513,7 @@ def resolve_adapters(overrides: Optional[Mapping[str, Callable[..., Any]]] = Non
     """Prefer published MP/1 callables; otherwise the frozen-application builtins."""
     adapters = {
         "transform_subject": _peer_transform_subject,
-        "evaluate_fitted": _peer_evaluate_fitted,
+        "evaluate_fitted": evaluate_fitted,
         "assess_normative": _try_import("modules.nbr14653_validation", "assess_normative") or builtin_assess_normative,
         "inverse_target_prediction": _invert_target,
     }
@@ -1609,6 +1797,7 @@ def restore_candidate_fit(frozen: Mapping[str, Any]) -> Dict[str, Any]:
         "n": state.get("n"),
         "k": state.get("k"),
         "feature_order": list(_as_list(state.get("feature_order"))),
+        "residual_state": state.get("residual_state") or frozen.get("residual_state"),
         "issues": [],
     }
 
@@ -1970,6 +2159,29 @@ def _evaluate_one(
             "unit": request_spec.get("target_unit"),
             "validation": assessment.get("normative"),
             "pendencias": issues,
+            "version_link": _version_link(frozen, reuse_key),
+            "assessment": assessment,
+        }
+
+    policy_conflicts = [
+        issue for issue in assessment.get("issues") or []
+        if issue.get("code") == "arbitration_policy_conflict"
+        and issue.get("severity") == "error"
+    ]
+    if policy_conflicts:
+        merged_issues = policy_conflicts + issues
+        assessment["value"] = empty_value()
+        assessment["issues"] = merged_issues
+        assessment["model_eligibility"] = _empty_eligibility(
+            ERROR, ["arbitration_policy_conflict"]
+        )
+        return {
+            "subject_id": sid,
+            "status": STATUS_FAILED,
+            "value": empty_value(),
+            "unit": request_spec.get("target_unit"),
+            "validation": assessment.get("normative"),
+            "pendencias": merged_issues,
             "version_link": _version_link(frozen, reuse_key),
             "assessment": assessment,
         }

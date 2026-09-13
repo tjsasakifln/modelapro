@@ -1,9 +1,9 @@
+import asyncio
 import json
 from typing import Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from modules.job_store import JobStore
 from modules.logging_manager import logger
 from modules.websocket_notifier import WebSocketNotifier
 
@@ -24,10 +24,33 @@ async def websocket_endpoint(
     multi-tenant cloud login.
     """
     await websocket.accept()
+    from modules.operacao_local.runtime import get_security_policy
+    from modules.operacao_local.security import AccessDenied
+    policy = get_security_policy()
+    authorization = websocket.headers.get("authorization")
+    if not authorization:
+        try:
+            raw = await asyncio.wait_for(websocket.receive_text(), timeout=5)
+            if len(raw) > 16384:
+                raise ValueError("credential frame exceeds limit")
+            credentials = json.loads(raw)
+            if not isinstance(credentials, dict):
+                raise ValueError("credential frame must be an object")
+            authorization = "Bearer " + str(credentials.get("local_auth_token", ""))
+            job_id, token = credentials.get("job_id"), credentials.get("token")
+        except (ValueError, TimeoutError, WebSocketDisconnect):
+            await websocket.close(code=1008)
+            return
+    try:
+        policy.authorize(method="GET", authorization=authorization)
+    except AccessDenied:
+        await websocket.close(code=1008)
+        return
     # Reuse the process JobStore. A new JobStore() here used to run
     # recover_abandoned(live_job_ids=()) and flip a live running job to
     # interrupted on the first /ws connection.
-    store = JobStore.default()
+    from backend.api import get_job_store
+    store = get_job_store()
     if not job_id or not token:
         job_id, token = await _credentials_from_first_message(websocket, job_id, token)
     attached = await notifier.attach(
@@ -48,7 +71,9 @@ async def websocket_endpoint(
 
 async def _credentials_from_first_message(websocket: WebSocket, job_id, token):
     try:
-        raw = await websocket.receive_text()
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=5)
+        if len(raw) > 16384:
+            return None, None
     except WebSocketDisconnect:
         return job_id, token
     except Exception as exc:

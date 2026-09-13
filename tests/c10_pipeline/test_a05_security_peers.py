@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from urllib.parse import quote
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.api import app, reset_runtime
@@ -136,11 +137,92 @@ def test_frozen_peer_import_paths_match_contract():
     assert MP1_PEERS["fit_dataset"] == ("modules.preprocessing", "fit_dataset")
     assert MP1_PEERS["search_models"] == ("modules.optimal_combination", "search_models")
     assert MP1_PEERS["assess_normative"] == ("modules.nbr14653_validation", "assess_normative")
-    assert MP1_PEERS["evaluate_fitted"] == ("modules.model_builder", "evaluate_fitted")
+    # The worker binds the policy adapter. The delegation test below locks the
+    # C04 numerical origin while allowing live and frozen paths to share the
+    # verified value-interval policy.
+    assert MP1_PEERS["evaluate_fitted"] == ("modules.valuation_batch", "evaluate_fitted")
     assert MP1_PEERS["recommend_next_actions"] == ("modules.decision_support", "recommend_next_actions")
     assert MP1_PEERS["render_report"] == ("modules.results_generator", "render_report")
     assert MP1_PEERS["build_evidence_bundle"] == ("modules.evidence_bundle", "build_evidence_bundle")
     assert MP1_PEERS["evaluate_batch"] == ("modules.valuation_batch", "evaluate_batch")
+
+
+def test_evaluate_fitted_policy_adapter_delegates_live_fit_to_c04(monkeypatch):
+    import pandas as pd
+
+    from modules import model_builder
+    from modules.qualification_profile import resolve_profile
+    from tests.c04_fitting.conftest import (
+        linear_market,
+        make_prepared_dataset,
+        make_request,
+        make_spec,
+    )
+
+    request = make_request()
+    resolved_profile = resolve_profile({
+        "id": "bb-meci-avaliacao-imovel-pf",
+        "version": "0.3.0",
+    })
+    request["qualification_profile"] = {
+        key: resolved_profile[key]
+        for key in (
+            "id",
+            "version",
+            "source_set_sha256",
+            "purpose",
+            "value_basis",
+            "method",
+            "asset_scope",
+            "recipient_id",
+        )
+    }
+    request["value_policy"] = {
+        "adopted": {"method": "point"},
+        "source": "TESTE: contrato do adaptador C10",
+    }
+
+    X, y, row_ids = linear_market(n=24)
+    fit = model_builder.fit_candidate(
+        make_prepared_dataset(X, y, row_ids),
+        make_spec("c10-adapter", ["area", "quartos"]),
+        request,
+    )
+    subject = {
+        "subject_id": "C10-ADAPTER-TEST",
+        "raw_values": {"area": 33.0, "quartos": 2.5},
+        "X": pd.DataFrame([{"area": 33.0, "quartos": 2.5}]),
+        "supported": True,
+        "issues": [],
+    }
+
+    core_evaluate = model_builder.evaluate_fitted
+    delegated = []
+
+    def observed_core(candidate_fit, subject_design, request_spec):
+        delegated.append((
+            candidate_fit is fit,
+            subject_design is subject,
+            request_spec is request,
+        ))
+        return core_evaluate(candidate_fit, subject_design, request_spec)
+
+    monkeypatch.setattr(model_builder, "evaluate_fitted", observed_core)
+    assessment = resolve_peers()["evaluate_fitted"](fit, subject, request)
+    core_assessment = core_evaluate(fit, subject, request)
+
+    assert delegated == [(True, True, True)]
+    assert assessment["value"]["point"] == core_assessment.value["point"]
+    assert assessment["value"]["mean_ci80"] == core_assessment.value["mean_ci80"]
+    assert (
+        assessment["value"]["prediction_interval"]
+        == core_assessment.value["prediction_interval"]
+    )
+    arbitration = assessment["value"]["arbitration_interval"]
+    assert arbitration["lower"] == pytest.approx(core_assessment.value["point"] * 0.85)
+    assert arbitration["upper"] == pytest.approx(core_assessment.value["point"] * 1.15)
+    assert arbitration["not_statistical"] is True
+    assert assessment["value_policy"]["arbitration_source"]["verification_status"] == "verified"
 
 
 def test_missing_c11_fails_closed_not_unlabeled_fake(monkeypatch):

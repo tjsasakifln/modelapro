@@ -11,13 +11,14 @@ Renderer failures on the MP/1 path raise `ReportRenderError` (never `None`).
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import math
 import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
 
@@ -29,7 +30,22 @@ import seaborn as sns
 
 from .config_manager import config
 from .logging_manager import logger
+from .provenance import canonical_json
+from .qualification_profile.assessment import normalize_institution_receipt
+from .report_presenter.formula import compose_model_equation
+from .report_presenter.qualification import assess_document_state
+from .report_presenter.search_coverage import interpret_search
+from .report_presenter.series import assess_chart_series
 from .results import ModelResult
+
+DISPLAY_ROUNDING_DECIMALS = 2
+
+ISSUANCE_REASON_LABELS = {
+    "no_automatic_report_approval": "Este documento não constitui aprovação automática de laudo.",
+    "grau_is_not_issuance_readiness": "O grau calculado não equivale a prontidão de emissão.",
+    "documentary_declared_is_not_verified_proof": "Documento apenas declarado não é comprovação.",
+    "draft": "Minuta em rascunho, sujeita a revisão profissional.",
+}
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -45,6 +61,7 @@ ISSUANCE_LABELS = {
 
 PRECISION_STATUS_LABELS = {
     "not_computed": "Precisão não calculada",
+    "not_applicable_cost_quantification": "Não aplicável à quantificação de custo",
     "classified": "Precisão classificada",
     "unclassified": "Precisão calculada mas não classificável",
     "error": "Erro ao calcular a precisão",
@@ -191,6 +208,15 @@ def _fmt(value: Optional[float], decimals: int = 2, prefix: str = "") -> str:
         return str(value)
 
 
+def _fmt_pvalue(value: Any) -> str:
+    number = _as_finite_number(value)
+    if number is None or number < 0 or number > 1:
+        return "—"
+    if 0 < number < 0.0001:
+        return f"{number:.3e}"
+    return f"{number:.4f}"
+
+
 def _fmt_pt_br(value: Any, decimals: int = 2) -> str:
     number = _as_finite_number(value)
     if number is None:
@@ -318,6 +344,408 @@ def _redact_mapping(value: Any, *, depth: int = 0) -> Any:
     return _safe_text(value)
 
 
+def _issuance_reason_text(reason: Any) -> str:
+    text = _safe_text(reason)
+    if not text:
+        return ""
+    return ISSUANCE_REASON_LABELS.get(text, ISSUANCE_REASON_LABELS.get(text.lower(), text))
+
+
+def _group_issues(issues: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: List[Dict[str, Any]] = []
+    index: Dict[Tuple[str, str, str], int] = {}
+    for issue in issues:
+        key = (
+            str(issue.get("origin_bucket") or ""),
+            str(issue.get("code") or ""),
+            str(issue.get("message") or ""),
+        )
+        if key not in index:
+            index[key] = len(grouped)
+            grouped.append(dict(issue))
+            continue
+        current = grouped[index[key]]
+        seen = set(current.get("affected_ids") or [])
+        for rid in issue.get("affected_ids") or []:
+            if rid not in seen:
+                current.setdefault("affected_ids", []).append(rid)
+                seen.add(rid)
+    return grouped
+
+
+def _metrics_block(model: Mapping[str, Any], statistical: Mapping[str, Any]) -> Dict[str, Any]:
+    metrics_src = model.get("metrics") if isinstance(model.get("metrics"), Mapping) else {}
+    if not metrics_src:
+        metrics_src = {
+            k: statistical.get(k)
+            for k in ("r", "r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson")
+            if statistical.get(k) is not None
+        }
+        if statistical.get("f_pvalue") is not None and "f_pvalue" not in metrics_src:
+            metrics_src["f_pvalue"] = statistical.get("f_pvalue")
+    present = bool(metrics_src)
+    definitions = _as_mapping(model.get("metric_definitions"))
+    r_definition = _as_mapping(definitions.get("r"))
+    r2_definition = _as_mapping(definitions.get("r2"))
+    dw_definition = _as_mapping(definitions.get("durbin_watson"))
+    candidate_spec = _as_mapping(model.get("candidate_spec"))
+    transform_state = _as_mapping(model.get("target_transform_state"))
+    target_transform = _safe_text(
+        model.get("y_transformation")
+        or candidate_spec.get("y_transformation")
+        or transform_state.get("name")
+        or transform_state.get("transformation")
+        or "não informada"
+    )
+    r2_relation_src = _as_mapping(metrics_src.get("r2_relation"))
+    r2_relation = {
+        "present": bool(r2_relation_src),
+        "r_squared": format_snapshot_number(r2_relation_src.get("r_squared")),
+        "r2": format_snapshot_number(r2_relation_src.get("r2")),
+        "difference": format_snapshot_number(r2_relation_src.get("difference")),
+        "text": (
+            "No ajuste OLS com intercepto sobre a mesma amostra efetiva e escala "
+            "centrada, o quadrado de R coincide com R² dentro da precisão numérica."
+            if r2_relation_src else ""
+        ),
+    }
+    view = {
+        "present": present,
+        "source": "model.metrics" if isinstance(model.get("metrics"), Mapping) and model.get("metrics") else (
+            "validation.statistical" if present else ""
+        ),
+        "external": False,
+        "r": _fmt(_as_finite_number(metrics_src.get("r")), 4) if present else "—",
+        "r2": _fmt(_as_finite_number(metrics_src.get("r2")), 4) if present else "—",
+        "r2_adjusted": _fmt(_as_finite_number(metrics_src.get("r2_adjusted")), 4) if present else "—",
+        "f_statistic": _fmt(_as_finite_number(metrics_src.get("f_statistic")), 3) if present else "—",
+        "f_pvalue": _fmt_pvalue(metrics_src.get("f_pvalue")) if present else "—",
+        "durbin_watson": _fmt(
+            _as_finite_number(
+                metrics_src.get("durbin_watson") or metrics_src.get("autocorrelation_durbin_watson")
+            ),
+            3,
+        )
+        if present
+        else "—",
+        "r2_relation": r2_relation,
+        "target_transform": target_transform,
+        "r_scale": _safe_text(r_definition.get("scale") or "não informada"),
+        "r2_scale": _safe_text(r2_definition.get("scale") or "não informada"),
+        "durbin_watson_scale": _safe_text(dw_definition.get("scale") or "não informada"),
+        "note": (
+            "Indicadores de ajuste dentro da amostra efetiva do modelo, calculados sobre "
+            f"o alvo na escala modelada (transformação: {target_transform}; "
+            f"escala declarada para R: {r_definition.get('scale') or 'não informada'}; "
+            f"para R²: {r2_definition.get('scale') or 'não informada'}). "
+            "Não são desempenho de validação externa."
+            if present
+            else "Indicadores de ajustamento não foram fornecidos neste snapshot."
+        ),
+    }
+    view["tokens"] = {
+        field: report_field_token("metrics", field)
+        for field in (
+            "r", "r2", "r2_adjusted", "f_statistic", "f_pvalue", "durbin_watson"
+        )
+    }
+    return view
+
+
+def _statistical_diagnostics(statistical: Mapping[str, Any]) -> Dict[str, Any]:
+    diagnostics = _as_mapping(statistical.get("diagnostics"))
+    standardized = _as_mapping(diagnostics.get("standardized_residuals"))
+    standardized_values = [
+        number for value in _as_list(standardized.get("values"))
+        if (number := _as_finite_number(value)) is not None
+    ]
+    frequency = _as_mapping(diagnostics.get("normal_frequency_comparison"))
+    frequency_rows = []
+    for row in _as_list(frequency.get("intervals")):
+        if not isinstance(row, Mapping):
+            continue
+        observed_probability = _as_finite_number(row.get("observed_probability"))
+        row_index = len(frequency_rows)
+        frequency_rows.append({
+            "z": _fmt(_as_finite_number(row.get("z")), 2),
+            "nominal_percent": _fmt(_as_finite_number(row.get("nominal_percent")), 2),
+            "observed_count": row.get("observed_count"),
+            "observed_percent": _fmt(
+                observed_probability * 100.0 if observed_probability is not None else None, 2
+            ),
+            "tokens": {
+                field: report_field_token("normal_frequency", row_index, field)
+                for field in ("z", "nominal_percent", "observed_count", "observed_percent")
+            },
+        })
+    correlation = _as_mapping(diagnostics.get("correlation_matrix"))
+
+    def technical_label(value: Any, labels: Mapping[str, str]) -> str:
+        raw = _safe_text(value or "")
+        return labels.get(raw, raw)
+
+    def matrix_block(
+        raw: Any, *, section: str, inherited_available: bool = False
+    ) -> Dict[str, Any]:
+        block = _as_mapping(raw)
+        variables = [str(item) for item in _as_list(block.get("variables"))]
+        values = []
+        for row in _as_list(block.get("values")):
+            values.append([
+                _fmt(number, 4) if (number := _as_finite_number(value)) is not None else "—"
+                for value in _as_list(row)
+            ])
+        valid = bool(variables and len(values) == len(variables)) and all(
+            len(row) == len(variables) for row in values
+        )
+        complete = (
+            block.get("status") in (None, "complete")
+            and block.get("missing_cells") in (None, 0, [])
+            and not block.get("missing_variables")
+        )
+        panels = []
+        if valid:
+            for start in range(0, len(variables), 6):
+                stop = min(start + 6, len(variables))
+                panels.append({
+                    "number": len(panels) + 1,
+                    "variables": variables[start:stop],
+                    "rows": [
+                        {
+                            "variable": variables[index],
+                            "values": row[start:stop],
+                            "cell_tokens": [
+                                report_field_token(
+                                    section, variables[index], variables[column],
+                                    len(panels) + 1,
+                                )
+                                for column in range(start, stop)
+                            ],
+                        }
+                        for index, row in enumerate(values)
+                    ],
+                })
+        return {
+            "present": valid and complete
+            and (block.get("available") is True or inherited_available)
+            and not block.get("reason"),
+            "variables": variables,
+            "values": values if valid else [],
+            "panels": panels,
+            "n": block.get("n"),
+            "sample": _safe_text(block.get("sample") or ""),
+            "sample_label": technical_label(block.get("sample"), {
+                "effective_model_sample": "amostra efetiva do modelo",
+            }),
+            "scale": _safe_text(block.get("scale") or ""),
+            "scale_label": technical_label(block.get("scale"), {
+                "original": "escala original",
+                "design": "escala da matriz de projeto",
+            }),
+            "reason": _safe_text(block.get("reason") or ""),
+        }
+
+    elasticities = _as_mapping(diagnostics.get("elasticities"))
+    elasticity_rows = []
+    for row in _as_list(elasticities.get("items")):
+        if not isinstance(row, Mapping):
+            continue
+        row_index = len(elasticity_rows)
+        elasticity_rows.append({
+            "variable": _safe_text(row.get("variable") or ""),
+            "elasticity": format_snapshot_number(row.get("elasticity")),
+            "base_value": format_snapshot_number(row.get("base_value")),
+            "base_prediction": format_snapshot_number(row.get("base_prediction")),
+            "step": format_snapshot_number(row.get("step")),
+            "derivative": format_snapshot_number(row.get("derivative")),
+            "tokens": {
+                field: report_field_token("elasticity", row_index, field)
+                for field in (
+                    "variable", "elasticity", "base_value", "base_prediction", "step",
+                    "derivative",
+                )
+            },
+        })
+    outliers = _as_mapping(diagnostics.get("outlier_count"))
+    definition_rows = []
+    definition_labels = {
+        "detected": "Critério para dados discrepantes detectados",
+        "excluded": "Critério para dados excluídos",
+        "influential": "Critério para pontos influentes",
+    }
+    for key, raw_text in _as_mapping(outliers.get("definition")).items():
+        text = _safe_text(raw_text)
+        if text.startswith("used observations with abs(internally studentized residual) > "):
+            limit = text.rsplit(" > ", 1)[-1]
+            text = (
+                "observações usadas cujo resíduo internamente studentizado, em "
+                f"módulo, é maior que {limit}"
+            )
+        elif text == (
+            "observations absent from the effective fit under declared/pre-fit sample policy; "
+            "they are not inferred to be outliers"
+        ):
+            text = (
+                "observações ausentes do ajuste efetivo conforme a política amostral "
+                "declarada antes do ajuste; exclusão não implica classificação como outlier"
+            )
+        elif text == (
+            "used observations flagged by the fit influence union (Cook distance, "
+            "internally studentized residual, or leverage)"
+        ):
+            text = (
+                "observações usadas sinalizadas pela união dos critérios de influência: "
+                "distância de Cook, resíduo internamente studentizado ou alavancagem"
+            )
+        elif text.startswith("|standardized_residual| > "):
+            text = "resíduo padronizado, em módulo, maior que " + text.split(" > ", 1)[1]
+        definition_rows.append({
+            "key": _safe_text(key),
+            "label": definition_labels.get(str(key), f"Critério técnico ({key})"),
+            "text": text,
+        })
+    return {
+        "standardized_residuals": {
+            "definition": _safe_text(standardized.get("definition") or ""),
+            "values": standardized_values,
+            "n": standardized.get("n"),
+            "present": bool(standardized_values) and standardized.get("available") is True
+            and not standardized.get("reason"),
+            "reason": _safe_text(standardized.get("reason") or ""),
+        },
+        "normal_frequency": {
+            "rows": frequency_rows,
+            "n": frequency.get("n"),
+            "present": bool(frequency_rows) and frequency.get("available") is True
+            and not frequency.get("reason"),
+            "reason": _safe_text(frequency.get("reason") or ""),
+        },
+        "correlation": matrix_block(correlation, section="correlation_original"),
+        "correlation_design": matrix_block(
+            correlation.get("design"),
+            section="correlation_design",
+            inherited_available=correlation.get("available") is True
+            and not correlation.get("reason"),
+        ),
+        "elasticities": {
+            "method": _safe_text(elasticities.get("method") or ""),
+            "method_label": technical_label(elasticities.get("method"), {
+                "central_finite_difference_predict_original": (
+                    "diferença finita central na predição em unidade original"
+                ),
+            }),
+            "point": _safe_text(elasticities.get("point") or ""),
+            "point_label": technical_label(elasticities.get("point"), {
+                "subject": "imóvel avaliando",
+            }),
+            "relative_step": format_snapshot_number(elasticities.get("relative_step")),
+            "items": elasticity_rows,
+            "warnings": [_safe_text(item) for item in _as_list(elasticities.get("warnings"))],
+            "present": bool(elasticity_rows) and elasticities.get("available") is True
+            and not elasticities.get("reason")
+            and _as_mapping(elasticities.get("coverage")).get("complete") is True
+            and not _as_mapping(elasticities.get("coverage")).get("missing_variables"),
+            "reason": _safe_text(elasticities.get("reason") or ""),
+        },
+        "outliers": {
+            "detected": outliers.get("detected"),
+            "excluded": outliers.get("excluded"),
+            "influential": outliers.get("influential"),
+            "definition": _redact_mapping(outliers.get("definition") or {}),
+            "definition_rows": definition_rows,
+            "tokens": {
+                field: report_field_token("outliers", field)
+                for field in ("detected", "excluded", "influential")
+            },
+            "present": outliers.get("available") is True and not outliers.get("reason")
+            and _as_mapping(outliers.get("coverage")).get("complete") is True
+            and all(outliers.get(key) is not None for key in ("detected", "excluded", "influential")),
+            "reason": _safe_text(outliers.get("reason") or ""),
+        },
+    }
+
+
+def sample_cell_token(
+    kind: str, row_id: Any, field: Any, *, panel: Optional[int] = None
+) -> str:
+    """Return a short stable marker binding a rendered cell to row and panel."""
+    row_key = hashlib.sha256(str(row_id).encode("utf-8")).hexdigest()[:10]
+    field_key = hashlib.sha256(str(field).encode("utf-8")).hexdigest()[:10]
+    panel_key = f":P{panel}" if panel is not None else ""
+    return f"[MPS:{kind[:1].upper()}:{row_key}:{field_key}{panel_key}]"
+
+
+def report_field_token(section: str, *parts: Any) -> str:
+    """Bind a displayed statistical value to its semantic section and field."""
+    material = canonical_json([str(section), *[str(part) for part in parts]])
+    key = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+    return f"[MPSTAT:{key}]"
+
+
+def _ledger_value_panels(
+    rows: Sequence[Mapping[str, Any]], columns: Sequence[str], *, kind: str,
+    width: int = 5
+) -> List[Dict[str, Any]]:
+    """Lay out every sample value in readable panels with repeated row IDs."""
+    panels: List[Dict[str, Any]] = []
+    names = [str(column) for column in columns]
+    for offset in range(0, len(names), width):
+        panel_columns = names[offset : offset + width]
+        panel_rows = []
+        panel_number = len(panels) + 1
+        for row in rows:
+            values = list(row.get("value_cells") or [])
+            panel_rows.append({
+                "seq": row.get("seq"),
+                "row_id": row.get("row_id"),
+                "row_id_token": sample_cell_token(
+                    kind, row.get("row_id"), "row_id", panel=panel_number
+                ),
+                "cells": values[offset : offset + len(panel_columns)],
+                "cell_tokens": [
+                    sample_cell_token(
+                        kind, row.get("row_id"), column, panel=panel_number
+                    )
+                    for column in panel_columns
+                ],
+            })
+        panels.append({
+            "number": panel_number,
+            "columns": panel_columns,
+            "header_tokens": [
+                sample_cell_token(kind, "__header__", column, panel=panel_number)
+                for column in panel_columns
+            ],
+            "rows": panel_rows,
+        })
+    return panels
+
+
+def _context_sources(ctx: Mapping[str, Any], provenance: Mapping[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Split human sources from technical hashes. Do not invent market URLs."""
+    human: List[Dict[str, Any]] = []
+    technical: List[Dict[str, Any]] = []
+    raw = ctx.get("sources")
+    if isinstance(raw, Mapping) and not any(k in raw for k in ("id", "label", "citation", "name")):
+        for key, value in raw.items():
+            technical.append({"id": str(key), "label": str(key), "citation": _safe_text(value)})
+        return human, technical
+    for src in _as_list(raw):
+        if isinstance(src, Mapping):
+            entry = {
+                "id": _safe_text(src.get("id") or ""),
+                "label": _safe_text(src.get("label") or src.get("name") or ""),
+                "citation": _safe_text(src.get("citation") or src.get("description") or ""),
+            }
+            if str(entry["id"]).lower() in {"input_sha256", "dataset_sha256", "code_sha"}:
+                technical.append(entry)
+            else:
+                human.append(entry)
+        else:
+            human.append({"id": "", "label": _safe_text(src), "citation": ""})
+    return human, technical
+
+
 def _origin_bucket(origin: Any) -> str:
     text = str(origin or "other").strip().lower()
     if text in ORIGIN_BUCKETS:
@@ -399,6 +827,40 @@ def _document_items(raw: Any) -> List[Dict[str, Any]]:
                         )
             for item in _as_list(raw.get("items")):
                 items.extend(_document_items([item]))
+            for key, nested in raw.items():
+                if key in {
+                    "declared",
+                    "present",
+                    "verified",
+                    "pending",
+                    "items",
+                    "status",
+                    "note",
+                    "provenance",
+                }:
+                    continue
+                if isinstance(nested, Mapping) and (
+                    nested.get("evidence_status") or nested.get("status") or nested.get("grade") is not None
+                ):
+                    extra = dict(nested)
+                    extra.setdefault("name", key)
+                    extra.setdefault("id", key)
+                    items.extend(_document_items(extra))
+            return items
+        nested_docs = [
+            (key, nested)
+            for key, nested in raw.items()
+            if isinstance(nested, Mapping)
+            and key
+            not in {"status", "note", "provenance", "evidence", "calculation", "source"}
+            and (nested.get("evidence_status") or nested.get("status") or "grade" in nested)
+        ]
+        if nested_docs and not raw.get("name") and not raw.get("id"):
+            for key, nested in nested_docs:
+                extra = dict(nested)
+                extra.setdefault("name", key)
+                extra.setdefault("id", key)
+                items.extend(_document_items(extra))
             return items
         status = str(raw.get("status") or raw.get("evidence_status") or "declared")
         status_norm = {
@@ -431,15 +893,57 @@ def _document_items(raw: Any) -> List[Dict[str, Any]]:
     return items
 
 
+def _documentary_attachments(raw: Any) -> List[Dict[str, Any]]:
+    """Prepare only explicitly authorized attachment bytes for the report."""
+    attachments = []
+    for index, item in enumerate(_as_list(raw)):
+        if not isinstance(item, Mapping):
+            continue
+        content = item.get("bytes") or item.get("content")
+        media_type = _safe_text(item.get("type") or item.get("media_type") or "application/octet-stream")
+        authorized = item.get("authorized_for_report") is True
+        row = {
+            "name": _safe_text(item.get("filename") or item.get("name") or f"anexo-{index + 1}"),
+            "media_type": media_type,
+            "authorized": authorized,
+            "sha256": hashlib.sha256(bytes(content)).hexdigest()
+            if isinstance(content, (bytes, bytearray))
+            else _safe_text(item.get("sha256") or ""),
+            "image_data_uri": None,
+            "status": "mapped",
+        }
+        if authorized and isinstance(content, (bytes, bytearray)) and media_type in {
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+        }:
+            row["image_data_uri"] = f"data:{media_type};base64," + base64.b64encode(bytes(content)).decode("ascii")
+            row["status"] = "embedded"
+        elif not authorized:
+            row["status"] = "not_authorized_for_report"
+        elif not isinstance(content, (bytes, bytearray)):
+            row["status"] = "bytes_missing"
+        attachments.append(row)
+    return attachments
+
+
 def _next_action_dict(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, Mapping):
+        limitations_raw = raw.get("limitations")
+        if isinstance(limitations_raw, list):
+            limitations_items = [_safe_text(x) for x in limitations_raw if str(x).strip()]
+        elif limitations_raw:
+            limitations_items = [_safe_text(limitations_raw)]
+        else:
+            limitations_items = []
         return {
             "code": _safe_text(raw.get("code") or ""),
             "priority": _safe_text(raw.get("priority") or ""),
             "reason": _safe_text(raw.get("reason") or ""),
             "next_step": _safe_text(raw.get("next_step") or ""),
             "evidence_refs": [str(x) for x in _as_list(raw.get("evidence_refs"))],
-            "limitations": _safe_text(raw.get("limitations") or ""),
+            "limitations": "; ".join(limitations_items),
+            "limitations_items": limitations_items,
         }
     return {
         "code": "",
@@ -448,6 +952,7 @@ def _next_action_dict(raw: Any) -> Dict[str, Any]:
         "next_step": "",
         "evidence_refs": [],
         "limitations": "",
+        "limitations_items": [],
     }
 
 
@@ -464,7 +969,8 @@ def _coef_rows(model: Mapping[str, Any]) -> List[Dict[str, Any]]:
                     "variable": str(name),
                     "coefficient_full": format_snapshot_number(number),
                     "coefficient": _fmt(number, 6) if number is not None else "—",
-                    "pvalue": _fmt(_as_finite_number(pvalues.get(name)), 4) if name in pvalues else "—",
+                    "pvalue": _fmt_pvalue(pvalues.get(name)) if name in pvalues else "—",
+                    "pvalue_token": report_field_token("coefficient_pvalue", name),
                     "vif": _fmt(_as_finite_number(vif.get(name)), 3)
                     if name in vif and str(name) != "const"
                     else "—",
@@ -481,7 +987,8 @@ def _coef_rows(model: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 "variable": str(name),
                 "coefficient_full": format_snapshot_number(number),
                 "coefficient": _fmt(number, 6) if number is not None else "—",
-                "pvalue": _fmt(_as_finite_number(item.get("pvalue")), 4),
+                "pvalue": _fmt_pvalue(item.get("pvalue")),
+                "pvalue_token": report_field_token("coefficient_pvalue", name),
                 "vif": _fmt(_as_finite_number(item.get("vif")), 3)
                 if str(name) != "const"
                 else "—",
@@ -490,8 +997,11 @@ def _coef_rows(model: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _index_rows(rows: Sequence[Any]) -> Dict[str, Dict[str, Any]]:
+def _index_rows(
+    rows: Sequence[Any], *, metadata_columns: Sequence[str] = ()
+) -> Dict[str, Dict[str, Any]]:
     indexed: Dict[str, Dict[str, Any]] = {}
+    documentary_columns = {str(column) for column in metadata_columns if str(column)}
     for raw in rows:
         if isinstance(raw, Mapping):
             rid = _row_id(raw)
@@ -499,15 +1009,26 @@ def _index_rows(rows: Sequence[Any]) -> Dict[str, Dict[str, Any]]:
             extra = {
                 k: v
                 for k, v in raw.items()
-                if k not in {"row_id", "id", "identificador", "source", "justification", "values", "label", "name"}
+                if k not in {
+                    "row_id", "id", "identificador", "source", "source_is_documentary",
+                    "justification", "values", "label", "name", "address", "endereco",
+                    "latitude", "longitude", "geolocation",
+                }
             }
-            merged_values = dict(values)
+            merged_values = {
+                key: value for key, value in values.items()
+                if str(key) not in documentary_columns
+            }
             merged_values.update(extra)
             indexed[rid] = {
                 "row_id": rid,
                 "source": _safe_text(raw.get("source") or raw.get("fonte") or ""),
                 "justification": _safe_text(raw.get("justification") or raw.get("justificativa") or ""),
                 "label": _safe_text(raw.get("label") or raw.get("name") or ""),
+                "address": _safe_text(raw.get("address") or raw.get("endereco") or ""),
+                "latitude": _as_finite_number(raw.get("latitude")),
+                "longitude": _as_finite_number(raw.get("longitude")),
+                "geolocation": _as_mapping(raw.get("geolocation")),
                 "values": {str(k): v for k, v in merged_values.items()},
             }
         else:
@@ -536,14 +1057,24 @@ def _ledger_rows(
         justification = info.get("justification") or ""
         label = info.get("label") or ""
         values = info.get("values") or {}
+        geolocation = _as_mapping(info.get("geolocation"))
+        storage_values = {
+            str(k): format_snapshot_number(v) if _as_finite_number(v) is not None else _safe_text(v)
+            for k, v in values.items()
+        }
         rows.append(
             {
                 "row_id": rid,
-                "source": source if source else "Pendência: fonte não informada",
+                "source": source if source else "Fonte não informada no contexto do relatório",
                 "justification": justification if justification else default_justification,
                 "label": label,
+                "address": info.get("address") or geolocation.get("address") or "",
+                "latitude": info.get("latitude") if info.get("latitude") is not None else geolocation.get("latitude"),
+                "longitude": info.get("longitude") if info.get("longitude") is not None else geolocation.get("longitude"),
+                "geolocation_complete": geolocation.get("complete") is True,
                 "values": values,
-                "value_cells": [values.get(k, "") for k in sorted(values.keys())],
+                "storage_values": storage_values,
+                "value_cells": [storage_values.get(k, values.get(k, "")) for k in sorted(values.keys())],
             }
         )
     return rows
@@ -584,11 +1115,53 @@ def build_report_view(
     model = _as_mapping(snapshot.get("model"))
     search = _as_mapping(snapshot.get("search"))
     provenance = _as_mapping(snapshot.get("provenance"))
+    cost_result = _as_mapping(provenance.get("cost_result"))
+    cost_memory = _as_mapping(cost_result.get("memory")) or _as_mapping(ctx.get("cost_memory"))
+    cost_labels = (
+        ("direct_subtotal", "Custo direto"),
+        ("bdi_rate", "Taxa de BDI"),
+        ("bdi_amount", "BDI"),
+        ("reproduction_building", "Custo de reprodução da benfeitoria"),
+        ("depreciation_rate", "Taxa de depreciação física"),
+        ("depreciation_amount", "Depreciação física"),
+        ("depreciated_building", "Benfeitoria depreciada"),
+        ("land_subtotal", "Terreno explicitamente incluído"),
+        ("total", "Total"),
+    )
     issuance = _as_mapping(validation.get("issuance"))
     precisao = _as_mapping(validation.get("precisao"))
     fundamentacao = _as_mapping(validation.get("fundamentacao"))
     statistical = _as_mapping(validation.get("statistical"))
     documentary = validation.get("documentary")
+    document_state = assess_document_state(snapshot, ctx)
+    qualification_profile = _as_mapping(document_state.get("profile"))
+    qualification_rules = []
+    status_labels = {
+        "passed": "Atendido",
+        "failed": "Não atendido",
+        "pending_manual": "Pendente de insumo profissional",
+        "unsupported": "Sem suporte",
+        "not_applicable": "Não aplicável",
+        "unverified": "Não verificado",
+    }
+    for raw_rule in _as_list(document_state.get("rule_results")):
+        if not isinstance(raw_rule, Mapping):
+            continue
+        rule = _redact_mapping(raw_rule)
+        rule["status_label"] = status_labels.get(
+            str(rule.get("status") or ""), _safe_text(rule.get("status") or "PENDENTE")
+        )
+        rule["source_display"] = " / ".join(
+            part for part in (
+                _safe_text(rule.get("source_id") or ""),
+                _safe_text(rule.get("edition_or_version") or ""),
+            ) if part
+        ) or "PENDENTE"
+        rule["evidence_display"] = "; ".join(
+            _safe_text(item) for item in _as_list(rule.get("evidence_refs"))
+        ) or "Sem evidência registrada"
+        rule["observed_display"] = _safe_text(rule.get("observed") or "—")
+        qualification_rules.append(rule)
 
     unit = _normalize_unit(target.get("unit") if target.get("unit") is not None else ctx.get("target_unit"))
     unit_pending = unit is None
@@ -606,6 +1179,13 @@ def build_report_view(
     prediction_interval = _interval_bounds(value.get("prediction_interval"))
     arbitration_interval = _interval_bounds(value.get("arbitration_interval"))
     admissible_interval = _interval_bounds(value.get("admissible_interval"))
+    adopted_raw = value.get("adopted_value", value.get("adopted"))
+    if isinstance(adopted_raw, Mapping):
+        adopted_point = _as_finite_number(adopted_raw.get("point") or adopted_raw.get("value"))
+        adopted_reason = _safe_text(adopted_raw.get("reason") or adopted_raw.get("policy_ref") or "")
+    else:
+        adopted_point = _as_finite_number(adopted_raw)
+        adopted_reason = _safe_text(value.get("adoption_policy_ref") or "")
 
     used_ids = [str(i) for i in _as_list(sample.get("used_row_ids"))]
     excluded_ids = [str(i) for i in _as_list(sample.get("excluded_row_ids"))]
@@ -619,8 +1199,14 @@ def build_report_view(
     if n_excluded is None:
         n_excluded = len(excluded_ids)
 
-    used_details = _index_rows(_as_list(ctx.get("used_rows")))
-    excluded_details = _index_rows(_as_list(ctx.get("excluded_rows")))
+    evidence_columns = _as_mapping(ctx.get("sample_evidence_columns"))
+    metadata_columns = [str(value) for value in evidence_columns.values() if value]
+    used_details = _index_rows(
+        _as_list(ctx.get("used_rows")), metadata_columns=metadata_columns
+    )
+    excluded_details = _index_rows(
+        _as_list(ctx.get("excluded_rows")), metadata_columns=metadata_columns
+    )
     used_rows = _ledger_rows(
         used_ids,
         used_details,
@@ -631,30 +1217,61 @@ def build_report_view(
         excluded_details,
         default_justification="Pendência: justificativa de exclusão não informada",
     )
-    used_value_columns = [
-        c for c in _value_columns(used_rows) if c.lower() not in {"nome", "name", "label", "rotulo", "rótulo"}
-    ]
-    excluded_value_columns = [
-        c for c in _value_columns(excluded_rows) if c.lower() not in {"nome", "name", "label", "rotulo", "rótulo"}
-    ]
-    for row in used_rows:
-        row["value_cells"] = [row["values"].get(k, "") for k in used_value_columns]
-    for row in excluded_rows:
-        row["value_cells"] = [row["values"].get(k, "") for k in excluded_value_columns]
+    used_value_columns = _value_columns(used_rows)
+    excluded_value_columns = _value_columns(excluded_rows)
+    for n, row in enumerate(used_rows, start=1):
+        row["seq"] = n
+        storage = row.get("storage_values") or {}
+        row["value_cells"] = [storage.get(k, row["values"].get(k, "")) for k in used_value_columns]
+    for n, row in enumerate(excluded_rows, start=1):
+        row["seq"] = n
+        storage = row.get("storage_values") or {}
+        row["value_cells"] = [storage.get(k, row["values"].get(k, "")) for k in excluded_value_columns]
+    for kind, rows in (("used", used_rows), ("excluded", excluded_rows)):
+        for row in rows:
+            row["cell_tokens"] = {
+                field: sample_cell_token(kind, row.get("row_id"), field)
+                for field in (
+                    "row_id", "source", "justification", "label", "address",
+                    "latitude", "longitude",
+                )
+            }
+    used_value_panels = _ledger_value_panels(
+        used_rows, used_value_columns, kind="used"
+    )
+    excluded_value_panels = _ledger_value_panels(
+        excluded_rows, excluded_value_columns, kind="excluded"
+    )
 
-    issues = [_issue_dict(i) for i in _as_list(snapshot.get("issues"))]
+    issues = _group_issues([_issue_dict(i) for i in _as_list(snapshot.get("issues"))])
     issues_by_origin: Dict[str, List[Dict[str, Any]]] = {
         key: [] for key in ("normative", "statistical", "documentary", "search", "inference", "other")
     }
     for issue in issues:
         issues_by_origin.setdefault(issue["origin_bucket"], []).append(issue)
+    priority_limitations = [
+        issue for issue in issues if str(issue.get("severity") or "").lower() in {"error", "warning"}
+    ]
 
     precisao_status = str(precisao.get("status") or "not_computed")
+    precision_not_applicable_to_cost = (
+        precisao_status == "not_applicable_cost_quantification"
+        or precisao.get("reason") == "not_applicable_to_cost_quantification"
+        or (
+            statistical.get("route") == "cost_quantification"
+            and statistical.get("precision_grade_applicable") is False
+        )
+    )
+    if precision_not_applicable_to_cost:
+        precisao_status = "not_applicable_cost_quantification"
     precisao_grade = precisao.get("grade")
     amplitude_pct = _as_finite_number(precisao.get("amplitude_pct"))
 
     documents = _document_items(documentary)
     documents.extend(_document_items(ctx.get("documents")))
+    documentary_attachments = _documentary_attachments(
+        ctx.get("documentary_files") or ctx.get("photos") or ctx.get("attachments")
+    )
     # de-duplicate by (name, status)
     seen_docs = set()
     unique_docs = []
@@ -665,27 +1282,13 @@ def build_report_view(
         seen_docs.add(key)
         unique_docs.append(doc)
 
-    sources = []
-    for src in _as_list(ctx.get("sources")):
-        if isinstance(src, Mapping):
-            sources.append(
-                {
-                    "id": _safe_text(src.get("id") or ""),
-                    "label": _safe_text(src.get("label") or src.get("name") or ""),
-                    "citation": _safe_text(src.get("citation") or src.get("description") or ""),
-                }
-            )
-        else:
-            sources.append({"id": "", "label": _safe_text(src), "citation": ""})
-
-    search_exhaustive = search.get("exhaustive")
-    search_mode = search.get("mode") or search.get("kind")
-    approximate = search_exhaustive is False or (
-        isinstance(search_mode, str)
-        and search_mode.lower() in {"approximate", "heuristic", "top_n", "fallback", "non_exhaustive"}
-    )
-    search_limitations = []
-    for item in _as_list(search.get("limitations") or search.get("limitation") or ctx.get("search_limitations")):
+    sources, technical_sources = _context_sources(ctx, provenance)
+    search_info = interpret_search(search)
+    search_exhaustive = search_info["exhaustive"]
+    search_mode = search_info["mode"]
+    approximate = search_info["approximate"]
+    search_limitations = list(search_info["limitations"])
+    for item in _as_list(ctx.get("search_limitations")):
         text_item = _safe_text(item)
         if text_item and text_item not in search_limitations:
             search_limitations.append(text_item)
@@ -694,29 +1297,40 @@ def build_report_view(
     ]
     if statistical.get("limitations"):
         inference_limitations.extend(_safe_text(x) for x in _as_list(statistical.get("limitations")))
+    if search_info["summary"] and search_info["approximate"]:
+        inference_limitations.append(search_info["summary"])
 
     next_actions = [_next_action_dict(a) for a in _as_list(snapshot.get("next_actions"))]
 
     issuance_status = str(issuance.get("status") or "draft")
     if issuance_status not in ISSUANCE_LABELS:
         issuance_status = "draft"
-    issuance_reasons = [_safe_text(r) for r in _as_list(issuance.get("reasons"))]
+    issuance_reasons = [
+        _issuance_reason_text(r) for r in _as_list(issuance.get("reasons")) if _issuance_reason_text(r)
+    ]
 
-    metrics_src = model.get("metrics") if isinstance(model.get("metrics"), Mapping) else {}
-    metrics = {
-        "r2": _fmt(_as_finite_number(metrics_src.get("r2")), 4) if metrics_src else "—",
-        "r2_adjusted": _fmt(_as_finite_number(metrics_src.get("r2_adjusted")), 4) if metrics_src else "—",
-        "f_statistic": _fmt(_as_finite_number(metrics_src.get("f_statistic")), 3) if metrics_src else "—",
-        "f_pvalue": _fmt(_as_finite_number(metrics_src.get("f_pvalue")), 4) if metrics_src else "—",
-        "durbin_watson": _fmt(
-            _as_finite_number(
-                metrics_src.get("durbin_watson") or metrics_src.get("autocorrelation_durbin_watson")
-            ),
-            3,
-        )
-        if metrics_src
-        else "—",
-    }
+    metrics = _metrics_block(model, statistical)
+    diagnostics = _statistical_diagnostics(statistical)
+    equation = compose_model_equation(model, target_col=str(target.get("column") or ""))
+    chart_series = assess_chart_series(ctx, used_row_ids=used_ids)
+    external_validation = None
+    procedure = validation.get("procedure") or validation.get("evaluation") or snapshot.get("evaluation")
+    if isinstance(procedure, Mapping) and procedure:
+        method = str(procedure.get("method") or procedure.get("kind") or "").strip().lower()
+        if method and method not in {"none", "not_requested", "skipped"}:
+            external_validation = {
+                "present": True,
+                "method": _safe_text(procedure.get("method") or procedure.get("kind") or ""),
+                "summary": _safe_text(procedure.get("summary") or procedure.get("detail") or ""),
+                "metrics": procedure.get("metrics") if isinstance(procedure.get("metrics"), Mapping) else {},
+            }
+        elif method in {"none", "not_requested", "skipped"}:
+            external_validation = {
+                "present": False,
+                "method": method,
+                "summary": "Validação externa não foi solicitada neste pedido. Isso não é defeito da minuta exploratória.",
+                "metrics": {},
+            }
 
     market = ctx.get("market_descriptive") or ctx.get("market_summary")
     market_rows = []
@@ -751,8 +1365,27 @@ def build_report_view(
 
     subject = ctx.get("subject") if isinstance(ctx.get("subject"), Mapping) else {}
     subject_items = [(str(k), subject[k]) for k in subject]
+    subject_geolocation = _as_mapping(subject.get("geolocation"))
+    variable_classification = []
+    for raw in _as_list(ctx.get("variable_classification")):
+        if not isinstance(raw, Mapping):
+            continue
+        variable_classification.append({
+            "variable": _safe_text(raw.get("variable") or raw.get("name") or ""),
+            "criterion": _safe_text(raw.get("criterion") or ""),
+            "coding": _safe_text(raw.get("coding") or ""),
+            "categories": _safe_text(raw.get("categories") or ""),
+            "scale_values": _safe_text(raw.get("scale_values") or ""),
+            "complete": raw.get("complete") is True,
+        })
 
-    model_id = model.get("model_id") or model.get("id") or model.get("number") or provenance.get("model_id")
+    model_id = (
+        model.get("model_id")
+        or model.get("id")
+        or model.get("number")
+        or model.get("candidate_id")
+        or provenance.get("model_id")
+    )
     model_revision = model.get("revision") or provenance.get("model_revision") or provenance.get("revision")
     model_sha = model.get("model_sha256") or provenance.get("model_sha256")
     code_sha = snapshot.get("code_sha") or provenance.get("code_sha")
@@ -763,6 +1396,7 @@ def build_report_view(
 
     frozen = {
         "MP1_POINT": format_snapshot_number(point),
+        "MP1_ADOPTED_VALUE": format_snapshot_number(adopted_point),
         "MP1_MEAN_CI80_LOWER": format_snapshot_number(mean_ci80["lower"] if mean_ci80 else None),
         "MP1_MEAN_CI80_UPPER": format_snapshot_number(mean_ci80["upper"] if mean_ci80 else None),
         "MP1_PRED_LOWER": format_snapshot_number(
@@ -793,11 +1427,52 @@ def build_report_view(
         "MP1_N_EXCLUDED": format_snapshot_number(n_excluded),
         "MP1_ISSUANCE": issuance_status,
         "MP1_PRECISAO_STATUS": precisao_status,
+        "MP1_FUNDAMENTACAO_GRADE": (
+            str(int(fundamentacao["grade"]))
+            if isinstance(fundamentacao.get("grade"), int)
+            else "PENDENTE"
+        ),
+        "MP1_PRECISAO_GRADE": (
+            str(int(precisao_grade)) if isinstance(precisao_grade, int) else "PENDENTE"
+        ),
+        "MPQUAL_PROFILE_ID": qualification_profile.get("id") or "PENDENTE",
+        "MPQUAL_PROFILE_VERSION": qualification_profile.get("version") or "PENDENTE",
+        "MPQUAL_VALUE_BASIS": qualification_profile.get("value_basis") or "PENDENTE",
+        "MPQUAL_RELEASE_STATUS": document_state.get("case_release_status") or "analysis_only",
+        "MPQUAL_GRADE_REQUIREMENT": document_state.get("grade_requirement_status") or "pending",
+        "MPQUAL_RESULT_FINGERPRINT": document_state.get("result_fingerprint") or "PENDENTE",
+        "MPQUAL_REPORT_CONTENT_FINGERPRINT": document_state.get("report_content_fingerprint")
+        or "PENDENTE",
+        "MPQUAL_REVIEW_EVENTS": str(len(document_state.get("review_events") or [])),
+        "MPQUAL_RULES_SHA256": hashlib.sha256(
+            canonical_json(document_state.get("rule_results") or []).encode("utf-8")
+        ).hexdigest(),
+        "MPQUAL_REVIEW_SHA256": hashlib.sha256(
+            canonical_json(document_state.get("review_events") or []).encode("utf-8")
+        ).hexdigest(),
+        "MPSAMPLE_ROWS_SHA256": hashlib.sha256(
+            canonical_json(
+                {
+                    "used_rows": _as_list(ctx.get("used_rows")),
+                    "excluded_rows": _as_list(ctx.get("excluded_rows")),
+                }
+            ).encode("utf-8")
+        ).hexdigest(),
     }
     frozen_lines = [f"{key}={value}" for key, value in frozen.items()]
 
+    provenance_for_report = _redact_mapping(provenance)
+    for verbose_key in ("qualification_context", "workflow_context"):
+        verbose_value = provenance_for_report.pop(verbose_key, None)
+        if verbose_value:
+            provenance_for_report[f"{verbose_key}_sha256"] = hashlib.sha256(
+                canonical_json(verbose_value).encode("utf-8")
+            ).hexdigest()
+
     grau_fundamentacao_label = GRAU_LABELS.get(fundamentacao.get("grade"), "Não classificado")
-    if precisao_status == "unclassified":
+    if precisao_status == "not_applicable_cost_quantification":
+        grau_precisao_label = "Não aplicável à quantificação de custo"
+    elif precisao_status == "unclassified":
         grau_precisao_label = "Calculada, não classificável"
     elif precisao_status == "not_computed":
         grau_precisao_label = "Não calculado"
@@ -834,6 +1509,7 @@ def build_report_view(
                 else _safe_text(item.get("grade") or item.get("status") or "Pendente"),
                 "detail": _safe_text(item.get("detail") or item.get("evidence_status") or ""),
                 "evidence_status": _safe_text(item.get("evidence_status") or item.get("status") or ""),
+                "points": item.get("points"),
             }
         )
 
@@ -849,18 +1525,124 @@ def build_report_view(
         else:
             alternatives.append({"id": "", "summary": _safe_text(alt)})
 
-    applicant = ctx.get("applicant") or snapshot.get("applicant") or provenance.get("applicant") or ""
-    purpose = ctx.get("purpose") or snapshot.get("purpose") or provenance.get("purpose") or ""
+    applicant = (
+        ctx.get("applicant")
+        or snapshot.get("applicant")
+        or provenance.get("applicant")
+        or qualification_profile.get("applicant")
+        or ""
+    )
+    purpose = (
+        ctx.get("purpose")
+        or qualification_profile.get("purpose")
+        or snapshot.get("purpose")
+        or provenance.get("purpose")
+        or ""
+    )
+    objective = ctx.get("objective") or snapshot.get("objective") or ""
+    rights = ctx.get("rights") or ctx.get("property_rights") or ""
+    asset_identification = ctx.get("asset_identification") or ctx.get("asset") or subject
+    if isinstance(asset_identification, Mapping):
+        asset_identification_display = "; ".join(
+            f"{_safe_text(key)}: {_safe_text(val)}" for key, val in asset_identification.items()
+        )
+    else:
+        asset_identification_display = _safe_text(asset_identification)
+    if rights:
+        asset_identification_display = (
+            f"{asset_identification_display}; direitos: {_safe_text(rights)}"
+            if asset_identification_display
+            else f"Direitos: {_safe_text(rights)}"
+        )
+    methodology = (
+        ctx.get("methodology_justification")
+        or qualification_profile.get("method")
+        or validation.get("method")
+        or ""
+    )
+    approved_reviews = document_state.get("approved_review_events") or []
+    professional_identity = _as_mapping(ctx.get("professional_identity"))
+    professional_identity_display = " — ".join(
+        part
+        for part in (
+            _safe_text(professional_identity.get("name") or ""),
+            _safe_text(professional_identity.get("council") or ""),
+            _safe_text(professional_identity.get("registration") or ""),
+            (
+                "ART/RRT "
+                + _safe_text(
+                    professional_identity.get("art_rrt")
+                    or professional_identity.get("responsibility_document")
+                )
+                if professional_identity.get("art_rrt")
+                or professional_identity.get("responsibility_document")
+                else ""
+            ),
+            _safe_text(professional_identity.get("documentary_reference") or ""),
+        )
+        if part
+    )
+    if approved_reviews:
+        review = approved_reviews[-1]
+        professional = _as_mapping(review.get("professional") or review.get("reviewer"))
+        professional_review_display = " — ".join(
+            part
+            for part in (
+                _safe_text(professional.get("name") or review.get("professional_name") or "Profissional identificado"),
+                _safe_text(professional.get("registration") or review.get("professional_id") or ""),
+                _safe_text(review.get("reason") or review.get("motive") or review.get("motivation") or ""),
+                _safe_text(review.get("revision_id") or review.get("version") or ""),
+            )
+            if part
+        )
+    else:
+        professional_review_display = "PENDENTE — evento aprovador identificável ausente"
+    acceptance = normalize_institution_receipt(
+        document_state.get("institution_acceptance"), qualification_profile
+    )
+    receipt = _as_mapping(acceptance.get("record"))
+    if acceptance.get("recorded"):
+        institution_acceptance_display = " — ".join(
+            part
+            for part in (
+                "Comprovante registrado — NÃO VERIFICADO",
+                _safe_text(
+                    receipt.get("recipient_id")
+                    or qualification_profile.get("recipient_id")
+                    or ""
+                ),
+                _safe_text(receipt.get("protocol") or ""),
+                "SHA-256 " + _safe_text(receipt.get("proof_sha256") or ""),
+                "associação à versão efetivamente enviada NÃO VERIFICADA",
+            )
+            if part
+        )
+    else:
+        institution_acceptance_display = "Não registrada; emissão do laudo não implica aceitação do destinatário."
 
     view = {
         "app_name": config.APP_NAME,
-        "document_kind": "Minuta técnica para revisão profissional",
-        "not_approved_label": "Este documento não é laudo aprovado automaticamente",
+        "document_kind": document_state["document_kind"],
+        "document_is_final": document_state["is_final"],
+        "not_approved_label": (
+            "Laudo final emitido após os critérios e a revisão vinculados a esta versão"
+            if document_state["is_final"]
+            else "Este documento não é laudo aprovado automaticamente e permanece análise/minuta"
+        ),
         "issuance_status": issuance_status,
-        "issuance_label": ISSUANCE_LABELS[issuance_status],
+        "issuance_label": document_state["document_kind"],
         "issuance_reasons": issuance_reasons,
+        "document_state": document_state,
+        "document_state_blockers": document_state["blockers"],
+        "case_release_status": document_state["case_release_status"],
         "applicant": _safe_text(applicant) or "Não informado",
         "purpose": _safe_text(purpose) or "Não informado",
+        "objective": _safe_text(objective) or _pending("objetivo da avaliação não informado"),
+        "market_diagnosis": _safe_text(ctx.get("market_diagnosis") or "")
+        or _pending("diagnóstico do mercado não informado"),
+        "grade_i_justification": _safe_text(ctx.get("grade_i_justification") or "")
+        or _pending("justificativa para Grau I não informada"),
+        "observations": [_safe_text(item) for item in _as_list(ctx.get("observations"))],
         "target_col": _safe_text(target.get("column") or ""),
         "target_estimand": _safe_text(target.get("estimand") or ""),
         "unit": unit,
@@ -871,14 +1653,42 @@ def build_report_view(
         "inspection_date": inspection_date,
         "inspection_date_display": inspection_date or _pending("data de vistoria não informada"),
         "generated_at": generated_at or _pending("data de emissão da minuta não informada"),
+        "generated_at_raw": generated_at,
         "sources": sources,
+        "technical_sources": technical_sources,
         "job_id": _safe_text(job_id),
         "project_id": _safe_text(project_id),
+        "priority_limitations": priority_limitations,
         "point": point,
         "point_display": format_value_with_unit(point, unit) if not unit_pending else (
             format_snapshot_number(point) if point is not None else "—"
         ),
         "point_raw": format_snapshot_number(point),
+        "cost_route": bool(cost_result),
+        "cost_memory": cost_memory,
+        "cost_memory_rows": [
+            {
+                "key": key,
+                "label": label,
+                "raw": format_snapshot_number(cost_memory.get(key)),
+                "display": (
+                    f"{_fmt_pt_br(cost_memory.get(key) * 100, 4)}%"
+                    if key.endswith("_rate") and _as_finite_number(cost_memory.get(key)) is not None
+                    else format_value_with_unit(cost_memory.get(key), unit)
+                ),
+            }
+            for key, label in cost_labels
+            if cost_memory.get(key) is not None
+        ],
+        "cost_items": [_redact_mapping(item) for item in _as_list(cost_result.get("items")) if isinstance(item, Mapping)],
+        "cost_fundamentacao": _redact_mapping(cost_result.get("fundamentacao")),
+        "adopted_value": adopted_point,
+        "adopted_value_display": (
+            format_value_with_unit(adopted_point, unit) if adopted_point is not None and not unit_pending else (
+                format_snapshot_number(adopted_point) if adopted_point is not None else "Não adotado"
+            )
+        ),
+        "adopted_value_reason": adopted_reason or "Política de adoção não declarada",
         "mean_ci80": mean_ci80,
         "mean_ci80_display": _interval_display(mean_ci80, unit if not unit_pending else None),
         "prediction_interval": prediction_interval,
@@ -906,6 +1716,8 @@ def build_report_view(
         "excluded_rows": excluded_rows,
         "used_value_columns": used_value_columns,
         "excluded_value_columns": excluded_value_columns,
+        "used_value_panels": used_value_panels,
+        "excluded_value_panels": excluded_value_panels,
         "used_count_mismatch": (
             n_used is not None and used_ids and int(n_used) != len(used_ids)
         ),
@@ -925,32 +1737,100 @@ def build_report_view(
         "grau_precisao_label": grau_precisao_label,
         "item_scores": item_scores,
         "documents": unique_docs,
+        "documentary_attachments": documentary_attachments,
         "next_actions": next_actions,
         "search_exhaustive": search_exhaustive,
         "search_mode": _safe_text(search_mode) if search_mode else "",
         "search_approximate": approximate,
-        "search_budget": _safe_text(search.get("budget")) if search.get("budget") is not None else "",
-        "search_coverage": _safe_text(search.get("coverage")) if search.get("coverage") is not None else "",
-        "search_objective": _safe_text(search.get("objective") or ""),
-        "combinations_tested": search.get("combinations_tested") or search.get("evaluated"),
-        "search_message": _safe_text(search.get("message") or ""),
+        "search_coverage_known": search_info["coverage_known"],
+        "search_budget": (
+            _safe_text(search_info["budget"]) if search_info["budget"] is not None else (
+                _safe_text(search.get("budget")) if search.get("budget") is not None else ""
+            )
+        ),
+        "search_coverage": (
+            _safe_text(search_info["enumeration"])
+            if search_info["enumeration"]
+            else (_safe_text(search.get("coverage")) if search.get("coverage") is not None else "")
+        ),
+        "search_objective": _safe_text(search_info["objective"] or search.get("objective") or ""),
+        "combinations_tested": search_info["evaluated"] or search.get("combinations_tested") or search.get("evaluated"),
+        "search_possible": search_info["possible"],
+        "search_summary": search_info["summary"],
+        "search_message": _safe_text(search_info["message"] or search.get("message") or ""),
         "search_limitations": search_limitations,
         "inference_limitations": inference_limitations,
-        "formula": _safe_text(model.get("formula") or ""),
+        "formula": _safe_text(equation["formula"]),
+        "formula_display": _safe_text(equation["formula_display"]),
+        "formula_storage": _safe_text(equation["formula_storage"]),
+        "original_scale_formula": _safe_text(equation["original_scale_formula"]),
+        "original_scale_formula_storage": _safe_text(
+            equation["original_scale_formula_storage"]
+        ),
+        "original_scale_formula_present": equation["original_scale_present"],
+        "retransformation_method": _safe_text(equation.get("retransformation_method") or ""),
+        "retransformation_estimand": _safe_text(
+            equation.get("retransformation_estimand") or ""
+        ),
+        "formula_source": equation["source"],
+        "formula_present": equation["present"],
+        "fitting_scale": equation["fitting_scale"],
+        "formula_log_scale": equation["log_scale"],
+        "formula_notes": equation["notes"],
+        "transform_rows": equation["transform_rows"],
+        "variable_meanings": equation["variable_meanings"],
         "coef_rows": _coef_rows(model),
         "metrics": metrics,
+        "metrics_present": metrics["present"],
+        "statistical_diagnostics": diagnostics,
+        "chart_series": chart_series,
+        "chart_available": chart_series["plot"],
+        "chart_absence_reason": chart_series["reason"],
+        "chart_warning": chart_series.get("warning"),
+        "external_validation": external_validation,
         "market_summary_rows": market_rows,
         "market_summary_n": market_n,
         "annexes": annexes,
         "subject_items": subject_items,
         "has_subject": bool(subject_items),
+        "subject_geolocation": subject_geolocation,
+        "variable_classification": variable_classification,
+        "asset_identification_display": asset_identification_display or _pending("identificação do bem não informada"),
+        "rights_display": _safe_text(rights) or _pending("direitos avaliados não informados"),
+        "region_characterization": _safe_text(ctx.get("region_characterization") or ""),
+        "property_characterization": _safe_text(ctx.get("property_characterization") or ""),
+        "methodology_display": _safe_text(methodology) or _pending("justificativa metodológica não informada"),
+        "assumptions": [_safe_text(x) for x in _as_list(ctx.get("assumptions"))],
+        "professional_review_display": professional_review_display,
+        "professional_identity": _redact_mapping(professional_identity),
+        "professional_identity_display": professional_identity_display
+        or "PENDENTE — qualificação legal do responsável não informada",
+        "qualification_profile": qualification_profile,
+        "qualification_profile_display": (
+            " / ".join(
+                part
+                for part in (
+                    _safe_text(qualification_profile.get("id")),
+                    _safe_text(qualification_profile.get("version")),
+                    _safe_text(qualification_profile.get("recipient_id")),
+                )
+                if part
+            )
+            or "PENDENTE"
+        ),
+        "value_basis_display": _safe_text(qualification_profile.get("value_basis")) or "PENDENTE",
+        "qualification_rules": qualification_rules,
+        "result_fingerprint": document_state.get("result_fingerprint"),
+        "institution_acceptance_display": institution_acceptance_display,
+        "digital_signature": document_state.get("signature") or {},
         "alternatives": alternatives,
-        "model_id": _safe_text(model_id) if model_id else "Pendência: número do modelo não informado",
-        "model_revision": _safe_text(model_revision) if model_revision else "Pendência: revisão do modelo não informada",
+        "model_id": _safe_text(model_id) if model_id else "",
+        "model_revision": _safe_text(model_revision) if model_revision else "",
+        "display_rounding_decimals": DISPLAY_ROUNDING_DECIMALS,
         "model_sha": _safe_text(model_sha) if model_sha else "",
         "code_sha": _safe_text(code_sha) if code_sha else "",
         "input_sha256": _safe_text(input_sha) if input_sha else "",
-        "provenance_safe": _redact_mapping(provenance),
+        "provenance_safe": provenance_for_report,
         "frozen": frozen,
         "frozen_lines": frozen_lines,
         "charts": {},
@@ -977,6 +1857,11 @@ def _charts_from_series(
     fitted: Any,
     residuals: Any,
     observed: Any = None,
+    *,
+    axis_fitted: str = "Valores ajustados",
+    axis_resid: str = "Resíduos",
+    axis_observed: str = "Valores observados",
+    standardized_residuals: Any = None,
 ) -> Dict[str, str]:
     charts: Dict[str, str] = {}
     fitted_arr = np.asarray(fitted, dtype=float) if fitted is not None else np.array([])
@@ -991,17 +1876,25 @@ def _charts_from_series(
     plt.figure(figsize=_CHART_FIGSIZE)
     sns.scatterplot(x=fitted_arr, y=resid_arr)
     plt.axhline(y=0, color="r", linestyle="--")
-    plt.xlabel("Valores ajustados")
-    plt.ylabel("Resíduos")
+    plt.xlabel(axis_fitted)
+    plt.ylabel(axis_resid)
     plt.title("Resíduos versus valores ajustados")
     plt.tight_layout()
     charts["residuals_vs_fitted"] = _figure_to_base64()
 
+    standardized_arr = np.asarray(
+        standardized_residuals, dtype=float
+    ) if standardized_residuals is not None else np.array([])
+    hist_arr = standardized_arr if standardized_arr.size == resid_arr.size else resid_arr
+    hist_standardized = standardized_arr.size == resid_arr.size
     plt.figure(figsize=_CHART_FIGSIZE)
-    sns.histplot(resid_arr, kde=True)
-    plt.xlabel("Resíduos")
+    sns.histplot(hist_arr, kde=True)
+    plt.xlabel("Resíduos padronizados" if hist_standardized else axis_resid)
     plt.ylabel("Frequência")
-    plt.title("Histograma dos resíduos")
+    plt.title(
+        "Histograma dos resíduos padronizados"
+        if hist_standardized else "Histograma dos resíduos"
+    )
     plt.tight_layout()
     charts["residuals_hist"] = _figure_to_base64()
 
@@ -1010,8 +1903,8 @@ def _charts_from_series(
     min_val = float(min(observed_arr.min(), fitted_arr.min()))
     max_val = float(max(observed_arr.max(), fitted_arr.max()))
     plt.plot([min_val, max_val], [min_val, max_val], color="r", linestyle="--", label="Bissetriz (y = x)")
-    plt.xlabel("Preços observados")
-    plt.ylabel("Valores estimados pelo modelo")
+    plt.xlabel(axis_observed)
+    plt.ylabel(axis_fitted)
     plt.title("Observado versus estimado")
     plt.legend()
     plt.tight_layout()
@@ -1031,20 +1924,52 @@ def _attach_charts(
     ctx = _as_mapping(report_context)
     if ctx.get("charts") and isinstance(ctx.get("charts"), Mapping):
         charts.update({k: v for k, v in ctx["charts"].items() if v})
-    if not charts.get("observed_vs_estimated") or not charts.get("residuals_vs_fitted"):
+    series = view.get("chart_series") or assess_chart_series(
+        ctx, used_row_ids=view.get("used_ids") or []
+    )
+    view["chart_series"] = series
+    view["chart_available"] = bool(series.get("plot"))
+    view["chart_absence_reason"] = series.get("reason") or ""
+    view["chart_warning"] = series.get("warning")
+    if series.get("warning"):
+        warning_issue = _issue_dict(
+            {
+                "code": series["warning"].get("code") or "REPORT_CHARTS_MISALIGNED",
+                "severity": "warning",
+                "origin": "report",
+                "message": (
+                    f"{series['warning'].get('message')}. Os gráficos não foram plotados. "
+                    "O cálculo do snapshot permanece inalterado."
+                ),
+                "affected_ids": [],
+                "evidence": {"chart": True},
+            }
+        )
+        existing_codes = {i.get("code") for i in view.get("issues") or []}
+        if warning_issue["code"] not in existing_codes:
+            view.setdefault("issues", []).append(warning_issue)
+            bucket = warning_issue["origin_bucket"]
+            view.setdefault("issues_by_origin", {}).setdefault(bucket, []).append(warning_issue)
+            view["has_issues"] = True
+    if series.get("plot") and (
+        not charts.get("observed_vs_estimated") or not charts.get("residuals_vs_fitted")
+    ):
         try:
-            if ctx.get("fitted_values") is not None and ctx.get("residuals") is not None:
-                generated = _charts_from_series(
-                    ctx.get("fitted_values"),
-                    ctx.get("residuals"),
-                    ctx.get("observed_values"),
-                )
-                for key, val in generated.items():
-                    charts.setdefault(key, val)
-            elif model_result is not None:
-                generated = ResultsGenerator.generate_charts(model_result)
-                for key, val in generated.items():
-                    charts.setdefault(key, val)
+            generated = _charts_from_series(
+                series.get("fitted"),
+                series.get("residuals"),
+                series.get("observed"),
+                axis_fitted=series.get("axis_fitted") or "Valores ajustados",
+                axis_resid=series.get("axis_resid") or "Resíduos",
+                axis_observed=series.get("axis_observed") or "Valores observados",
+                standardized_residuals=(
+                    ((view.get("statistical_diagnostics") or {}).get(
+                        "standardized_residuals"
+                    ) or {}).get("values")
+                ),
+            )
+            for key, val in generated.items():
+                charts.setdefault(key, val)
         except Exception as exc:  # charts must not abort a valid snapshot PDF
             logger.error("Error generating report charts: %s", exc)
             view.setdefault("issues", []).append(
@@ -1059,6 +1984,13 @@ def _attach_charts(
                     }
                 )
             )
+    elif (not series.get("plot")) and model_result is not None and not charts:
+        try:
+            generated = ResultsGenerator.generate_charts(model_result)
+            for key, val in generated.items():
+                charts.setdefault(key, val)
+        except Exception as exc:
+            logger.error("Error generating report charts: %s", exc)
     view["charts"] = charts
     view["chart_b64"] = charts.get("observed_vs_estimated")
     return view
@@ -1136,6 +2068,16 @@ def render_report(
     Does not fit or recalculate a regression.
     """
     view = build_report_view(snapshot, report_context)
+    if (
+        view.get("case_release_status") == "signed_integrity_verified"
+        and view.get("document_is_final")
+    ):
+        raise ReportRenderError(
+            "A revisão assinada não pode ser renderizada novamente; entregue os bytes assinados já vinculados.",
+            code="C03_SIGNED_REVISION_IMMUTABLE",
+            origin="C03",
+            evidence={"result_fingerprint": view.get("result_fingerprint")},
+        )
     view = _attach_charts(view, report_context)
     html_content = compose_report_html(snapshot, report_context, view=view)
     return _write_pdf(html_content)

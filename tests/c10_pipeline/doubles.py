@@ -53,6 +53,7 @@ class LabeledJobStore:
             job = self.jobs[job_id]
             return {"job_id": job_id, "state": job["state"], "created": False}
         job_id = str(uuid.uuid4())
+        access_token = f"C10_TEST_TOKEN_{uuid.uuid4()}"
         self.jobs[job_id] = {
             "schema_version": SCHEMA_VERSION,
             "job_id": job_id,
@@ -64,11 +65,17 @@ class LabeledJobStore:
             "artifact_states": {},
             "issues": [],
             "calculation_state": None,
+            "access_token": access_token,
             "payload": payload or {},
         }
         if idempotency_key:
             self.idempotency[idempotency_key] = job_id
-        return {"job_id": job_id, "state": "queued", "created": True}
+        return {
+            "job_id": job_id,
+            "state": "queued",
+            "created": True,
+            "access_token": access_token,
+        }
 
     def get(self, job_id):
         job = self.jobs.get(job_id)
@@ -77,6 +84,10 @@ class LabeledJobStore:
     def get_by_idempotency_key(self, key):
         job_id = self.idempotency.get(key)
         return self.get(job_id) if job_id else None
+
+    def verify_access(self, job_id, access_token):
+        job = self.jobs.get(job_id)
+        return bool(job and job.get("access_token") == access_token)
 
     def update_transition(self, job_id, expected_state, new_state, patch=None):
         job = self.jobs[job_id]

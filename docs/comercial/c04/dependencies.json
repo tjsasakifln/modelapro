@@ -1,0 +1,56 @@
+{
+  "schema_version": "MP-COM-DEPENDENCIES/1",
+  "base_sha": "8d66c7973c659174e06d7223c9a9a8181e8eeabf",
+  "producer": "C04",
+  "reused_from_prior_campaign": [
+    {
+      "component": "C11 local persistence",
+      "origin_commit": "16778f2382a2fc5b1e2cecbd6f15ade9ebf5f5b3",
+      "base_fix": "b4d2f2b68361bbf94a00939d18fb4762ba9190f8",
+      "adaptation": "backup/restore integrity and operational bounds",
+      "owner_files": ["modules/job_store.py", "modules/local_task_runner.py"]
+    },
+    {
+      "component": "C15 local packaging/configuration",
+      "origin_commit": "f4655bf38cc74b745d189a0a01ee52159e27bdde",
+      "base_fix": "9e864419591ab48de1fcb04975f35d51c3d145f4",
+      "adaptation": "per-user paths, commercial build, SBOM/audit tooling",
+      "owner_files": ["modules/config_manager.py", "scripts/c15_local", "packaging/comercial"]
+    }
+  ],
+  "new_external_dependency_proposals": [
+    {
+      "name": "cryptography",
+      "purpose": "Ed25519 verification of offline buyer entitlement",
+      "runtime": true,
+      "decision": "dependency rather than custom public-key cryptography"
+    },
+    {
+      "name": "PyInstaller",
+      "purpose": "platform-native bundled Python runtime",
+      "runtime": false,
+      "decision": "release build tool; exact release licence/notices required"
+    },
+    {
+      "name": "pip-audit",
+      "purpose": "release vulnerability inventory",
+      "runtime": false,
+      "decision": "release build tool; nonzero result blocks unattended release"
+    },
+    {
+      "name": "pyHanko",
+      "purpose": "verification of embedded PDF signatures emitted/imported by the C03 document flow",
+      "runtime": true,
+      "decision": "C06 accepted the C03 dependency proposal at >=0.37.0,<0.38.0; exact platform pins and licence/native-file evidence are generated per artifact"
+    }
+  ],
+  "other_fronts": {
+    "status": "WAITING_FOR_COMPONENTS",
+    "manifest": "handoff.json"
+  },
+  "legacy_mp_hom": {
+    "searched": true,
+    "published_branches_or_prs_found": false,
+    "checked_at": "2026-09-11"
+  }
+}

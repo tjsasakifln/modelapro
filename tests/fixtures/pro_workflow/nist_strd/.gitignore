@@ -1,0 +1,7 @@
+# The repository root ignores `data/` (.gitignore:40), which silently swallowed
+# this directory: the vendored NIST .dat files stayed untracked, every hash test
+# passed locally off the working tree, and all eleven failed in CI where the
+# checkout had no files at all. Re-include them here rather than editing the
+# root rule, which belongs to another owner.
+!data/
+!data/*.dat

@@ -29,7 +29,7 @@ def _post_job(client, tag="A", spec=None, subject=None):
     return client.post("/jobs", files=files, data=data)
 
 
-def test_post_jobs_202_and_get_recovers_result_twice():
+def test_post_jobs_202_and_get_recovers_result_twice(monkeypatch):
     for run in (1, 2):
         reset_runtime()
         store, _projects, runner, log, _peers = install_labeled_runtime(point=150000.0 + run)
@@ -38,8 +38,17 @@ def test_post_jobs_202_and_get_recovers_result_twice():
         assert resp.status_code == 202, resp.text
         body = resp.json()
         assert body["job_id"]
+        assert isinstance(body["access_token"], str) and body["access_token"]
         assert body["status_url"] == f"/jobs/{body['job_id']}"
         job_id = body["job_id"]
+
+        assert client.get(
+            f"/jobs/{job_id}/result", headers={"X-Job-Token": "wrong"}
+        ).status_code == 403
+        assert client.get(
+            f"/jobs/{job_id}/result",
+            headers={"X-Job-Token": body["access_token"]},
+        ).status_code == 200
 
         status = client.get(f"/jobs/{job_id}")
         assert status.status_code == 200
@@ -56,6 +65,22 @@ def test_post_jobs_202_and_get_recovers_result_twice():
         assert snap["job_id"] == job_id
         assert runner.submitted == [job_id]
         assert "search_models" in log.names()
+
+    original_create = store.create
+
+    def create_without_capability(idempotency_key=None, project_id=None, payload=None):
+        created = original_create(
+            idempotency_key=idempotency_key,
+            project_id=project_id,
+            payload=payload,
+        )
+        created.pop("access_token", None)
+        return created
+
+    monkeypatch.setattr(store, "create", create_without_capability)
+    missing_token = _post_job(client, tag="MISSING-TOKEN", subject=subject_raw())
+    assert missing_token.status_code == 500
+    assert "did not return access_token" in missing_token.json()["detail"]
 
 
 def test_preview_does_not_invoke_search_or_write_revision():
@@ -128,6 +153,7 @@ def test_idempotent_resubmit_does_not_duplicate_work():
     assert second.status_code == 202
     assert first.json()["job_id"] == second.json()["job_id"]
     assert second.json().get("idempotent_replay") is True
+    assert second.json().get("access_token") is None
     assert runner.submitted == [first.json()["job_id"]]
     assert log.names().count("search_models") == 1
 
