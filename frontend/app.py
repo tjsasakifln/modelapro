@@ -1,259 +1,343 @@
-import streamlit as st
-import asyncio
-import base64
-import requests
+"""Entrada Streamlit da avaliação (campanha C09).
+
+Fluxo: importar e revisar interpretação → papéis/unidades/alvo → avaliando
+→ executar → revisar valor/faixas/pendências → salvar/reabrir/evidências.
+
+O resultado é recuperado por GET /jobs/{id}; o WebSocket é notificação
+opcional e nunca a única via. Importável em testes sem disparar a UI.
+"""
+
+from __future__ import annotations
+
 import json
-import websockets
-from components.layout import load_css, header, sidebar
-from components.forms import upload_form
-from components.charts import render_charts
+import os
+from typing import Any, Optional
 
-# Configuration
-API_URL = "http://127.0.0.1:8000"
-WS_URL = "ws://127.0.0.1:8000/ws"
+def _import_components():
+    try:
+        from components.charts import render_charts, render_snapshot_charts
+        from components.forms import (
+            DEFAULT_API_URL,
+            DEFAULT_TIMEOUT,
+            PREVIEW_CONNECTION_ERROR,
+            ApiConnectionError,
+            ApiResponseError,
+            DuplicateExecutionError,
+            JobClient,
+            persist_client_to_session,
+            restore_client_from_session,
+            upload_form,
+            validate_dispatch,
+        )
+        from components.layout import (
+            FIXTURE_SCREEN_NOTICE,
+            WORK_FLOW_HEADINGS,
+            header,
+            load_css,
+            load_visual_fixture,
+            present_artifacts,
+            present_job_status,
+            present_snapshot,
+            render_artifact_panel,
+            render_job_panel,
+            render_snapshot_panel,
+            sidebar,
+        )
+        return locals()
+    except ImportError:
+        from frontend.components.charts import render_charts, render_snapshot_charts
+        from frontend.components.forms import (
+            DEFAULT_API_URL,
+            DEFAULT_TIMEOUT,
+            PREVIEW_CONNECTION_ERROR,
+            ApiConnectionError,
+            ApiResponseError,
+            DuplicateExecutionError,
+            JobClient,
+            persist_client_to_session,
+            restore_client_from_session,
+            upload_form,
+            validate_dispatch,
+        )
+        from frontend.components.layout import (
+            FIXTURE_SCREEN_NOTICE,
+            WORK_FLOW_HEADINGS,
+            header,
+            load_css,
+            load_visual_fixture,
+            present_artifacts,
+            present_job_status,
+            present_snapshot,
+            render_artifact_panel,
+            render_job_panel,
+            render_snapshot_panel,
+            sidebar,
+        )
+        return locals()
 
-st.set_page_config(
-    page_title="CONFENGE MODELA PRO",
-    page_icon="🏢",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
-load_css()
-header()
-sidebar()
+_COMP = _import_components()
+DEFAULT_API_URL = _COMP["DEFAULT_API_URL"]
+DEFAULT_TIMEOUT = _COMP["DEFAULT_TIMEOUT"]
+PREVIEW_CONNECTION_ERROR = _COMP["PREVIEW_CONNECTION_ERROR"]
+ApiConnectionError = _COMP["ApiConnectionError"]
+ApiResponseError = _COMP["ApiResponseError"]
+DuplicateExecutionError = _COMP["DuplicateExecutionError"]
+JobClient = _COMP["JobClient"]
+persist_client_to_session = _COMP["persist_client_to_session"]
+restore_client_from_session = _COMP["restore_client_from_session"]
+upload_form = _COMP["upload_form"]
+validate_dispatch = _COMP["validate_dispatch"]
+FIXTURE_SCREEN_NOTICE = _COMP["FIXTURE_SCREEN_NOTICE"]
+WORK_FLOW_HEADINGS = _COMP["WORK_FLOW_HEADINGS"]
+header = _COMP["header"]
+load_css = _COMP["load_css"]
+load_visual_fixture = _COMP["load_visual_fixture"]
+present_artifacts = _COMP["present_artifacts"]
+present_job_status = _COMP["present_job_status"]
+present_snapshot = _COMP["present_snapshot"]
+render_artifact_panel = _COMP["render_artifact_panel"]
+render_job_panel = _COMP["render_job_panel"]
+render_snapshot_panel = _COMP["render_snapshot_panel"]
+sidebar = _COMP["sidebar"]
+render_charts = _COMP["render_charts"]
+render_snapshot_charts = _COMP["render_snapshot_charts"]
 
-# Session State
-if 'processing' not in st.session_state:
-    st.session_state.processing = False
-if 'results' not in st.session_state:
-    st.session_state.results = None
-if 'progress' not in st.session_state:
-    st.session_state.progress = 0.0
-if 'status_message' not in st.session_state:
-    st.session_state.status_message = ""
 
-async def listen_websocket():
-    # max_size raised above the websockets library default (1 MiB): the
-    # completed-analysis payload now carries several base64-encoded chart
-    # PNGs plus the base64 PDF report (report_pdf_base64) and can exceed 1 MiB
-    # for larger datasets/models. Without this, the connection closes
-    # silently mid-analysis (swallowed by ConnectionClosed below).
-    async with websockets.connect(WS_URL, max_size=10 * 1024 * 1024) as websocket:
-        while st.session_state.processing:
-            try:
-                msg = await websocket.recv()
-                data = json.loads(msg)
-                
-                if 'progress' in data:
-                    st.session_state.progress = data['progress']
-                
-                if 'status' in data:
-                    st.session_state.status_message = data.get('message', data['status'])
-                    
-                if data.get('status') == 'completed':
-                    st.session_state.results = data
-                    st.session_state.processing = False
-                    st.rerun()
-                    
-                if data.get('status') == 'error':
-                    st.error(data.get('message'))
-                    st.session_state.processing = False
-                    st.rerun()
-                    
-            except websockets.exceptions.ConnectionClosed:
-                break
+def _should_run_ui() -> bool:
+    if __name__ == "__main__":
+        return True
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx() is not None
+    except Exception:
+        return False
 
-def main():
-    (
-        uploaded_file, degree, target_col, avaliando_dict, grau_item1, grau_item3,
-        candidate_cols, solicitante, finalidade,
-    ) = upload_form()
 
-    if uploaded_file and target_col:
-        if st.button("Iniciar Análise", disabled=st.session_state.processing):
-            st.session_state.processing = True
-            st.session_state.progress = 0.0
-            st.session_state.results = None
+def _preview_provider_for(client: JobClient):
+    def _preview(file_bytes, filename, request_spec, subject=None):
+        return client.preview(file_bytes, filename, request_spec, subject=subject)
+    return _preview
 
-            # Send to API
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-            data = {
-                "degree": degree,
-                "target_col": target_col,
-                "grau_item1": grau_item1,
-                "grau_item3": grau_item3,
-                "solicitante": solicitante or "",
-                "finalidade": finalidade or "",
-            }
-            if avaliando_dict:
-                data["avaliando_json"] = json.dumps(avaliando_dict)
-            if candidate_cols is not None:
-                # Sent even when the user deselected every candidate, so the
-                # backend receives the user's actual (possibly empty)
-                # choice rather than silently falling back to "all columns"
-                # without the user having explicitly seen that outcome (see
-                # the warning shown in the form for the empty case).
-                data["candidate_cols_json"] = json.dumps(candidate_cols)
 
-            try:
-                response = requests.post(f"{API_URL}/upload", files=files, data=data)
-            except Exception as e:
-                st.error(f"Erro de conexão: {e}")
-                st.session_state.processing = False
-                response = None
+def _maybe_listen_websocket(job_id: str, ws_url: str) -> None:
+    """Notificação opcional. Falha aqui NÃO descarta job_id nem substitui o GET."""
+    if os.environ.get("MODELA_DISABLE_WS", "").lower() in {"1", "true", "yes"}:
+        return
+    try:
+        import asyncio
+        import websockets
+    except ImportError:
+        return
 
-            if response is not None:
-                if response.status_code == 200:
-                    # listen_websocket() blocks until the backend sends
-                    # 'completed'/'error' (or the socket closes), then calls
-                    # st.rerun() itself. It is intentionally NOT inside the
-                    # try/except above: st.rerun() raises a control-flow
-                    # exception that Streamlit's own script runner must
-                    # catch at the top level - wrapping it in `except
-                    # Exception` here would swallow it and silently break
-                    # the rerun (this is a single local user per the
-                    # project's scope, so a blocking wait is an acceptable
-                    # trade-off for correctness over a live progress bar).
-                    with st.spinner(
-                        "Processando análise (busca de variáveis, validação NBR 14653-2, "
-                        "geração do laudo)... pode levar de segundos a poucos minutos, "
-                        "dependendo do tamanho da busca."
-                    ):
-                        asyncio.run(listen_websocket())
-                else:
-                    st.error(f"Erro no envio: {response.text}")
-                    st.session_state.processing = False
+    async def _once():
+        try:
+            async with websockets.connect(ws_url, max_size=10 * 1024 * 1024, open_timeout=2) as websocket:
+                await websocket.send(json.dumps({"job_id": job_id}))
+                try:
+                    await asyncio.wait_for(websocket.recv(), timeout=1.0)
+                except Exception:
+                    return
+        except Exception:
+            return
 
-    # Progress Area
-    if st.session_state.processing:
-        st.progress(st.session_state.progress)
-        st.info(f"Status: {st.session_state.status_message}")
-        
-        # NOTE: Real-time WS in Streamlit usually requires st.empty() loops or custom components
-        # For this implementation plan, we acknowledge this limitation. 
-        # We would need to run the async loop.
-        
-    # Results Area
-    if st.session_state.results:
-        st.success("Análise Concluída!")
-        
-        res = st.session_state.results
-        metrics = res.get('model_metrics', {})
-        
-        # Metrics Row
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("R²", f"{metrics.get('r2', 0):.4f}")
-        c2.metric("R² Ajustado", f"{metrics.get('r2_adjusted', 0):.4f}")
-        c3.metric("Estatística F", f"{metrics.get('f_statistic', 0):.2f}")
-        c4.metric("Durbin-Watson", f"{metrics.get('autocorrelation_durbin_watson', 0):.2f}")
-        
-        st.markdown("### Fórmula do Modelo")
-        st.code(res.get('formula', 'N/A'))
+    try:
+        asyncio.run(_once())
+    except Exception:
+        return
 
-        # Classificação NBR 14653-2
-        val = res.get('validation', {}) or {}
-        grau_labels = {3: "Grau III", 2: "Grau II", 1: "Grau I"}
 
-        st.markdown("### Classificação NBR 14653-2")
+def main() -> None:
+    import streamlit as st
 
-        grau_fund = val.get('grau_fundamentacao')
-        grau_fund_label = grau_labels.get(grau_fund, "Não classificado")
+    st.set_page_config(
+        page_title="MODELA PRO — avaliação para revisão profissional",
+        page_icon="🏢",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    load_css()
+    header()
+    side = sidebar()
 
-        target_achieved = res.get('target_achieved')
-        best_grau_reached = res.get('best_grau_reached')
-        target_degree = val.get('target_degree')
+    api_url = side.get("api_url") or DEFAULT_API_URL
+    timeout = DEFAULT_TIMEOUT
+    client: JobClient = restore_client_from_session(
+        st.session_state,
+        base_url=api_url,
+        timeout=timeout,
+    )
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.metric("Grau de Fundamentação Atingido", grau_fund_label)
-        with col_b:
-            grau_prec = val.get('grau_precisao')
-            if grau_prec is not None:
-                st.metric("Grau de Precisão", grau_labels.get(grau_prec, "Não classificado"))
-            else:
-                st.metric("Grau de Precisão", "Não calculado")
-                st.caption("Não calculado — informe o imóvel avaliando para obter o grau de precisão.")
+    if "c09_status_message" not in st.session_state:
+        st.session_state.c09_status_message = ""
 
-        if target_achieved:
-            st.success(
-                f"O grau mínimo solicitado ({grau_labels.get(target_degree, target_degree)}) foi atingido."
-            )
+    if side.get("reopen_job") and side["reopen_job"] != client.job_id:
+        try:
+            client.recover(side["reopen_job"])
+            persist_client_to_session(st.session_state, client)
+            st.success(f"Trabalho {client.job_id} retomado pelo identificador.")
+        except ApiConnectionError as exc:
+            st.error(str(exc))
+            st.session_state["c09_job_id"] = side["reopen_job"]
+            client.job_id = side["reopen_job"]
+        except ApiResponseError as exc:
+            st.error(str(exc))
+            st.session_state["c09_job_id"] = side["reopen_job"]
+            client.job_id = side["reopen_job"]
+
+    fixture_mode = bool(side.get("visual_fixture"))
+    if fixture_mode:
+        st.warning(FIXTURE_SCREEN_NOTICE)
+        fixture = load_visual_fixture()
+        view = present_snapshot(fixture, viewport_width=720)
+        render_snapshot_panel(view, fixture=True)
+        render_snapshot_charts(fixture)
+        st.caption(FIXTURE_SCREEN_NOTICE)
+        persist_client_to_session(st.session_state, client)
+        return
+
+    form = upload_form(preview_provider=_preview_provider_for(client))
+    persist_client_to_session(st.session_state, client)
+
+    job_view = present_job_status(client.last_status if client.last_status else {
+        "job_id": client.job_id,
+        "state": None,
+        "result_available": client.last_snapshot is not None,
+    })
+    if client.job_id and not job_view.get("job_id"):
+        job_view["job_id"] = client.job_id
+
+    actions = render_job_panel(job_view)
+
+    if actions.get("refresh") and client.job_id:
+        try:
+            client.recover(client.job_id)
+            persist_client_to_session(st.session_state, client)
+        except ApiConnectionError as exc:
+            st.error(str(exc))
+            st.info(f"Identificador preservado: {client.job_id}")
+        except ApiResponseError as exc:
+            st.error(str(exc))
+            st.info(f"Identificador preservado: {client.job_id}")
+
+    if actions.get("cancel") and client.job_id:
+        try:
+            client.cancel(client.job_id)
+            client.recover(client.job_id)
+            persist_client_to_session(st.session_state, client)
+            st.warning("Cancelamento solicitado.")
+        except (ApiConnectionError, ApiResponseError) as exc:
+            st.error(str(exc))
+            st.info(f"Identificador preservado: {client.job_id}")
+
+    if actions.get("execute"):
+        dispatch = form.get("dispatch") or {"ok": False, "blocking": [{"message": "Formulário incompleto."}]}
+        uploaded = form.get("uploaded_file")
+        spec = form.get("request_spec")
+        subject = form.get("subject")
+        if form.get("connection_error"):
+            st.error(form["connection_error"])
+        elif not dispatch.get("ok"):
+            for item in dispatch.get("blocking") or []:
+                st.error(item.get("message") or "Disparo recusado.")
+        elif uploaded is None or spec is None:
+            st.error("Arquivo e especificação são necessários para executar.")
         else:
-            best_label = grau_labels.get(best_grau_reached, "Não classificado")
-            st.warning(
-                f"O grau mínimo solicitado ({grau_labels.get(target_degree, target_degree)}) NÃO foi "
-                f"alcançado. Melhor grau de fundamentação alcançado pelo sistema: {best_label}."
-            )
+            try:
+                response = client.submit_job(
+                    uploaded.getvalue(),
+                    uploaded.name,
+                    spec,
+                    subject=subject,
+                    content_type=getattr(uploaded, "type", None) or "application/octet-stream",
+                )
+                persist_client_to_session(st.session_state, client)
+                st.info(f"Trabalho aceito: {response.get('job_id')}. Recuperação pelo identificador, não pelo WebSocket.")
+                ws_url = os.environ.get("MODELA_WS_URL", "ws://127.0.0.1:8000/ws")
+                _maybe_listen_websocket(client.job_id, ws_url)
+                try:
+                    client.recover(client.job_id)
+                except (ApiConnectionError, ApiResponseError) as exc:
+                    st.warning(str(exc))
+                    st.info(f"Identificador preservado: {client.job_id}. Use Atualizar estado.")
+                persist_client_to_session(st.session_state, client)
+            except DuplicateExecutionError as exc:
+                st.error(str(exc))
+            except ApiConnectionError as exc:
+                st.error(str(exc))
+                if client.job_id:
+                    st.info(f"Identificador preservado: {client.job_id}")
+            except ApiResponseError as exc:
+                st.error(str(exc))
+                if client.job_id:
+                    st.info(f"Identificador preservado: {client.job_id}")
 
-        item_scores = val.get('item_scores', [])
-        if item_scores:
-            st.markdown("#### Detalhamento por Item (Tabela 1)")
-            table_rows = [
-                {
-                    "Item": it.get("item"),
-                    "Descrição": it.get("description"),
-                    "Grau Atingido": it.get("grau_achieved"),
-                    "Detalhe": it.get("detail"),
-                }
-                for it in item_scores
-            ]
-            st.dataframe(table_rows, use_container_width=True, hide_index=True)
+    if client.job_id and client.last_status is None:
+        try:
+            client.recover(client.job_id)
+            persist_client_to_session(st.session_state, client)
+        except (ApiConnectionError, ApiResponseError):
+            pass
 
-        # Colunas da planilha que não puderam tecnicamente virar variável de
-        # modelo (ex.: texto livre com muitos valores únicos, coluna 100%
-        # vazia), uma por uma com o motivo - o usuário precisa saber sempre
-        # que uma coluna trazida por ele não pôde ser usada, e por quê.
-        excluded_columns = res.get('excluded_columns', {}) or {}
-        if excluded_columns:
-            st.subheader("Colunas não utilizadas como variável")
-            for col, reason in excluded_columns.items():
-                st.info(f"**{col}**: {reason}")
+    snapshot = client.last_snapshot
+    if snapshot is None and client.last_status and client.last_status.get("result_available") and client.job_id:
+        try:
+            snapshot = client.get_result(client.job_id)
+            persist_client_to_session(st.session_state, client)
+        except (ApiConnectionError, ApiResponseError) as exc:
+            st.error(str(exc))
 
-        # Colunas que o usuário explicitamente pediu como candidatas mas que
-        # não puderam ser localizadas/usadas (nome incorreto, etc.).
-        candidate_warnings = res.get('candidate_warnings', [])
-        for w in candidate_warnings:
-            st.warning(w)
+    view = present_snapshot(snapshot, viewport_width=720)
+    render_snapshot_panel(view, fixture=False)
+    if snapshot:
+        render_snapshot_charts(snapshot)
+        legacy_charts = snapshot.get("charts") or {}
+        if legacy_charts and not (snapshot.get("model") or {}).get("charts"):
+            render_charts(legacy_charts)
 
-        # Observações da própria busca de variáveis/transformações (ex.:
-        # fallback por correlação, amostragem do histórico, ou variável(is)
-        # candidata(s) excluída(s) da busca por falta de valor do imóvel
-        # avaliando - ver OptimalCombinationFinder.find_best_model). Nunca
-        # deixar isso visível apenas nos logs do servidor ou só no PDF.
-        search_message = res.get('search_message')
-        if search_message:
-            st.warning(f"Observações da busca: {search_message}")
+    artifact_states = (client.last_status or {}).get("artifact_states") or {}
+    artifact_view = present_artifacts(artifact_states)
+    job_view = present_job_status(client.last_status if client.last_status else {
+        "job_id": client.job_id,
+        "state": None,
+        "result_available": snapshot is not None,
+    })
+    art_actions = render_artifact_panel(artifact_view, job_view, snapshot=snapshot)
 
-        # Avisos gerais de validação dos dados (ex.: tamanho de amostra).
-        data_warnings = res.get('data_warnings', [])
-        if data_warnings:
-            st.subheader("Avisos sobre os dados")
-            for w in data_warnings:
-                st.warning(w)
-
-        # Charts
-        render_charts(res.get('charts', {}))
-
-        # Validation (mensagens e avisos gerais)
-        if val:
-            st.subheader("Validação NBR 14653-2")
-            if val.get('is_valid'):
-                st.success("Modelo Atende aos Critérios Normativos")
-            else:
-                st.error("Modelo Não Atende a Todos os Critérios")
-
-            for msg in val.get('messages', []):
-                st.warning(msg)
-
-        # Laudo PDF (NBR 14653-2 §10.2)
-        if res.get('report_pdf_base64'):
+    if art_actions.get("download_named") and client.job_id:
+        try:
+            payload = client.get_artifact(art_actions["download_named"])
             st.download_button(
-                "Baixar Laudo (PDF)",
-                data=base64.b64decode(res['report_pdf_base64']),
-                file_name="laudo_avaliacao.pdf",
-                mime="application/pdf",
+                f"Transferência de {art_actions['download_named']}",
+                data=payload,
+                file_name=art_actions["download_named"],
             )
+        except (ApiConnectionError, ApiResponseError) as exc:
+            st.error(str(exc))
 
-if __name__ == "__main__":
+    if art_actions.get("save"):
+        project_id = side.get("project_id")
+        if not project_id:
+            st.error("Informe o identificador do projeto na barra lateral para salvar a revisão.")
+        elif snapshot is None:
+            st.error("Não há cálculo para salvar.")
+        else:
+            try:
+                saved = client.save_revision(
+                    project_id,
+                    {
+                        "job_id": client.job_id,
+                        "snapshot_ref": {"job_id": client.job_id},
+                        "request_spec": form.get("request_spec"),
+                    },
+                )
+                st.success(f"Revisão registrada: {saved.get('revision_id') or saved}")
+            except (ApiConnectionError, ApiResponseError) as exc:
+                st.error(str(exc))
+                st.caption("A interface não grava uma cópia paralela local do projeto.")
+
+    persist_client_to_session(st.session_state, client)
+
+
+if _should_run_ui():
     main()

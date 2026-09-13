@@ -34,29 +34,16 @@ class TestDataLoader:
         assert any("Insufficient samples" in w for w in result.validation.warnings)
 
     def test_high_cardinality_categorical_is_excluded_not_dropped_silently(self):
+        """C01 keeps high-cardinality text; it is never dropped silently.
+
+        One-hot capacity is a C02 concern. load_data must keep `endereco`,
+        not invent dummies, and warn that the limit is capacity, not an
+        impossibility.
         """
-        A categorical column with more unique values than
-        config.MAX_ONE_HOT_CATEGORIES (e.g. a free-text "Endereço" or
-        "Informante" column) is technically not one-hot-encodable. It must:
-          - NOT raise, and NOT affect the rest of the load (numeric columns
-            still load normally, sample survives);
-          - appear in excluded_columns with a documented reason;
-          - be surfaced as a warning in validation.warnings;
-          - have its ORIGINAL (untransformed) values preserved in
-            identification_df, aligned to the final dataframe's rows.
-        """
-        n = 30
-        # nunique = n > MAX_ONE_HOT_CATEGORIES (default 50 is >= n in some
-        # envs, so force nunique explicitly above the configured limit by
-        # using a value per row - each row is unique, guaranteeing
-        # nunique == n regardless of the configured threshold, as long as
-        # the threshold is below n... to be robust, build enough rows).
         limit = config.MAX_ONE_HOT_CATEGORIES
         n = limit + 20
         col1 = list(range(1, n + 1))
         col2 = [float(i) * 2.0 for i in range(1, n + 1)]
-        # One free-text value per row => nunique == n > limit, guaranteed
-        # to exceed MAX_ONE_HOT_CATEGORIES.
         endereco = [f"Rua Exemplo, {i}, Bairro {i}" for i in range(n)]
 
         df = pd.DataFrame({"col1": col1, "col2": col2, "endereco": endereco})
@@ -67,32 +54,15 @@ class TestDataLoader:
 
         assert result.success is True
         assert result.error is None
-
-        # Excluded with a documented reason, never silently dropped.
-        assert "endereco" in result.excluded_columns
-        reason = result.excluded_columns["endereco"]
-        assert "MAX_ONE_HOT_CATEGORIES" in reason or str(limit) in reason
-
-        # Surfaced as a warning.
-        assert any(
-            "endereco" in w and "excluída" in w.lower()
-            for w in result.validation.warnings
-        )
-
-        # Rest of the load is unaffected: numeric columns still present,
-        # sample size preserved.
+        assert "endereco" in result.dataframe.columns
+        assert "endereco" not in (result.excluded_columns or {})
+        assert not any(c.startswith("endereco_") for c in result.dataframe.columns)
         assert "col1" in result.dataframe.columns
         assert "col2" in result.dataframe.columns
-        assert "endereco" not in result.dataframe.columns
         assert len(result.dataframe) == n
-
-        # Original values preserved in identification_df, aligned to the
-        # surviving rows.
-        assert result.identification_df is not None
-        assert "endereco" in result.identification_df.columns
-        preserved = result.identification_df.loc[result.dataframe.index, "endereco"]
-        original_aligned = pd.Series(endereco, name="endereco").loc[result.dataframe.index]
-        assert list(preserved) == list(original_aligned)
+        warnings = result.validation.warnings or []
+        assert any("endereco" in w for w in warnings)
+        assert any("MAX_ONE_HOT" in w or "capacidade" in w.lower() for w in warnings)
 
     def test_numeric_text_column_is_converted_regardless_of_string_dtype(self):
         """
