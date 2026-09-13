@@ -38,6 +38,21 @@ em execução; não é encerramento, aceite final nem liberação comercial.
   submissão institucional ou aprovação profissional. Os dez estados continuam
   separados em [delivery.json](delivery.json); `COMMERCIAL_RELEASE_READY=false`.
 
+### Correção de origem do pacote — checkpoint posterior
+
+A3 atual limpa: `a884e62eb431adf47f670611a3063e6e59252bc2`, árvore
+`3a9bc7fd5f1c490e11399359eb0d98973be36131`. A composição incorpora essa A3
+por merge em `56ca08851cbea9de0b0ac5c2cda2dc4adc593449`.
+Os patches `9151565`, `5434b27` e `24f56c0` vinculam dados, helper, módulos
+próprios e metadados de runtime à fonte explícita. A revisão independente não
+manteve achados materiais; [64 testes passaram na composição](evidence-local-packaging-source.json).
+Isso não substitui o freeze real. Novo archive em
+`/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3sourcebound.14EXoN`,
+7.700.480 bytes, SHA-256
+`6df261f778ab0b0e2cec764e6387272b250f06b19b6bf206db6e4319b41f2f80`.
+Reconstrução autorizada após revisão; aguardar ciclo inicial/upgrade/restore e
+conferência física. Nenhum novo push foi feito neste checkpoint.
+
 ## Checkpoint histórico original — preservado
 
 Checkpoint observado em **2026-09-12, 20:30 UTC**. A sessão foi encerrada a pedido

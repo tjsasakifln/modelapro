@@ -1,0 +1,22 @@
+{
+  "scope": "LOCAL_PACKAGING_SOURCE_ORIGIN_NOT_FROZEN_RUNTIME_PROOF",
+  "source_tree": "e794707096b206938f8588dbaad6ba2adc5c0e08",
+  "invocation_source_sha": "fba688e80e3b31d6ad5bf1558b09dc3da73eea11",
+  "reported_exit_code": 0,
+  "junit": {
+    "path": "/tmp/c06-first-party-source-integrated2.xml",
+    "sha256": "0703ecac5ed9cfc2a8d3900941c1279f26eaa7e1dc0ff0a946730992d9d7a27e",
+    "size": 9738,
+    "tests": 64,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "reviewed_patch": "24f56c08c90661f058b58d00b9e35c5ec5ef8a77",
+  "source_binding": [
+    "source-selected package data and helper loaded by exact path",
+    "source-enumerated first-party hidden imports; root and scripts on Analysis path",
+    "runtime Name/Version metadata generated from source pyproject"
+  ],
+  "independent_review": "No material stale-origin findings; independent packaging+launcher 64 passed, focal spec 1 passed; real freeze still required."
+}
