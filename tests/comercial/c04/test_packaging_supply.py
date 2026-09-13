@@ -1274,6 +1274,11 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
     assert 'copy_metadata("streamlit", recursive=True)' in spec
     assert 'collect_data_files("streamlit")' in spec
     assert 'copy_metadata("modelapro")' not in spec
+    assert "filter_first_party_runtime_metadata" in spec
+    assert "packaging_datas = filter_first_party_runtime_metadata(root, a.datas, runtime_metadata)" in spec
+    assert "COLLECT(exe, a.binaries, a.zipfiles, packaging_datas, name=\"MODELA-PRO\")" in spec
+    assert "COLLECT(exe, a.binaries, a.zipfiles, a.datas, name=\"MODELA-PRO\")" not in spec
+    assert "Analysis-00.toc" in spec
     for package in ("backend", "frontend", "modules", "profiles"):
         assert f'collect_submodules("{package}")' not in spec
         assert f'source_submodules(root, "{package}")' in spec
@@ -1397,17 +1402,84 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
     monkeypatch.setitem(sys.modules, "PyInstaller.utils", pyinstaller_utils)
     monkeypatch.setitem(sys.modules, "PyInstaller.utils.hooks", hooks)
 
+    stale_first_party_files = (
+        "direct_url.json",
+        "top_level.txt",
+        "REQUESTED",
+        "entry_points.txt",
+        "INSTALLER",
+        "WHEEL",
+        "RECORD",
+    )
+
+    def expand_datas_to_toc(entries):
+        toc = []
+        for item in entries:
+            if len(item) >= 3:
+                toc.append((str(item[0]), str(item[1]), item[2]))
+                continue
+            source, destination = item
+            source_path = Path(source)
+            dest_prefix = str(destination).replace("\\", "/")
+            if source_path.is_dir():
+                for file in sorted(source_path.rglob("*")):
+                    if not file.is_file():
+                        continue
+                    relative = file.relative_to(source_path).as_posix()
+                    dest_name = (
+                        f"{dest_prefix}/{relative}" if dest_prefix not in {"", "."} else relative
+                    )
+                    toc.append((dest_name, str(file), "DATA"))
+            else:
+                dest_name = (
+                    f"{dest_prefix}/{source_path.name}"
+                    if dest_prefix not in {"", "."}
+                    else source_path.name
+                )
+                toc.append((dest_name, str(source), "DATA"))
+        return toc
+
+    collected = {}
+
     class FakeAnalysis(SimpleNamespace):
         def __init__(self, scripts, **kwargs):
+            toc = expand_datas_to_toc(kwargs["datas"])
+            dist_info = runtime_metadata.name
+            stale_root = (
+                r"C:\Users\tj_sa\AppData\Local\Temp\modelapro-c06-fixedsim.mTYdlZ"
+                rf"\install\{dist_info}"
+            )
+            stale_entries = [
+                (rf"{dist_info}\{filename}", rf"{stale_root}\{filename}", "DATA")
+                for filename in stale_first_party_files
+            ]
+            third_party = [
+                (
+                    "streamlit-1.30.0.dist-info/METADATA",
+                    r"C:\Python\Lib\site-packages\streamlit-1.30.0.dist-info\METADATA",
+                    "DATA",
+                ),
+                (
+                    "numpy-2.0.0.dist-info/RECORD",
+                    r"C:\Python\Lib\site-packages\numpy-2.0.0.dist-info\RECORD",
+                    "DATA",
+                ),
+            ]
             super().__init__(
                 scripts=scripts,
                 binaries=kwargs["binaries"],
-                datas=kwargs["datas"],
+                datas=toc + stale_entries + third_party + stale_entries,
                 hiddenimports=kwargs["hiddenimports"],
                 pathex=kwargs["pathex"],
                 pure=[],
                 zipfiles=[],
             )
+
+    def fake_collect(exe, binaries, zipfiles, packaging_datas, name="MODELA-PRO"):
+        collected["datas"] = list(packaging_datas)
+        collected["binaries"] = binaries
+        collected["name"] = name
+        return object()
 
     executed = runpy.run_path(
         str(root / "packaging" / "comercial" / "modelapro.spec"),
@@ -1416,7 +1488,7 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
             "Analysis": FakeAnalysis,
             "PYZ": lambda *_args, **_kwargs: object(),
             "EXE": lambda *_args, **_kwargs: object(),
-            "COLLECT": lambda *_args, **_kwargs: object(),
+            "COLLECT": fake_collect,
         },
     )
     project_data = {
@@ -1434,6 +1506,60 @@ def test_windows_spec_materializes_streamlit_sources_and_uses_onedir(
     assert "c15_local.launcher" in executed["a"].hiddenimports
     assert "backend.stale_only" not in executed["a"].hiddenimports
     assert executed["a"].pathex == [str(root), str(root / "scripts")]
+
+    own_unfiltered = source_helpers["first_party_dist_info_dest_names"](
+        executed["a"].datas, root
+    )
+    assert set(stale_first_party_files) <= set(own_unfiltered)
+    assert own_unfiltered.count("RECORD") >= 2
+    own_consumed = source_helpers["first_party_dist_info_dest_names"](
+        executed["packaging_datas"], root
+    )
+    assert own_consumed == ["METADATA"]
+    assert collected["datas"] == executed["packaging_datas"]
+    assert collected["datas"] is not executed["a"].datas
+    consumed_dests = [str(entry[0]).replace("\\", "/") for entry in collected["datas"]]
+    physical_own = [
+        dest.split("/")[-1]
+        for dest in consumed_dests
+        if f"{runtime_metadata.name}/" in dest or dest.endswith(runtime_metadata.name)
+    ]
+    assert physical_own == ["METADATA"]
+    assert "streamlit-1.30.0.dist-info/METADATA" in consumed_dests
+    assert "numpy-2.0.0.dist-info/RECORD" in consumed_dests
+    authorized = collected["datas"][-1]
+    assert authorized[0].replace("\\", "/") == f"{runtime_metadata.name}/METADATA"
+    assert Path(authorized[1]).read_bytes() == (runtime_metadata / "METADATA").read_bytes()
+    from importlib.metadata import PathDistribution
+
+    bundled = PathDistribution(Path(authorized[1]).parent)
+    expected_name, expected_version = source_helpers["validate_runtime_metadata"](
+        root, runtime_metadata
+    )
+    assert bundled.name == expected_name == "modelapro"
+    assert bundled.version == expected_version
+    own_src = []
+    for entry in collected["datas"]:
+        if not isinstance(entry, (tuple, list)) or len(entry) < 2:
+            continue
+        dest = str(entry[0]).replace("\\", "/")
+        src = str(entry[1]).replace("\\", "/")
+        if runtime_metadata.name in dest or runtime_metadata.name in src:
+            own_src.append(str(entry[1]))
+    assert own_src == [str(runtime_metadata / "METADATA")]
+    assert not any(
+        path.endswith((".py", ".pyc", ".toml")) or "site-packages" in path
+        for path in own_src
+    )
+    stale_install_marker = r"modelapro-c06-fixedsim.mTYdlZ"
+    assert any(stale_install_marker in str(entry[1]) for entry in executed["a"].datas)
+    assert not any(stale_install_marker in str(entry[1]) for entry in collected["datas"])
+    filter_fn = source_helpers["filter_first_party_runtime_metadata"]
+    second = filter_fn(root, executed["packaging_datas"], runtime_metadata)
+    third = filter_fn(root, second, runtime_metadata)
+    assert source_helpers["first_party_dist_info_dest_names"](second, root) == ["METADATA"]
+    assert second == third
+    assert second == executed["packaging_datas"]
 
 
 def test_windows_uninstall_preserves_whichever_profile_was_created() -> None:
