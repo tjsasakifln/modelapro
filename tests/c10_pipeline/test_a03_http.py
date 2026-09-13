@@ -29,7 +29,7 @@ def _post_job(client, tag="A", spec=None, subject=None):
     return client.post("/jobs", files=files, data=data)
 
 
-def test_post_jobs_202_and_get_recovers_result_twice():
+def test_post_jobs_202_and_get_recovers_result_twice(monkeypatch):
     for run in (1, 2):
         reset_runtime()
         store, _projects, runner, log, _peers = install_labeled_runtime(point=150000.0 + run)
@@ -65,6 +65,22 @@ def test_post_jobs_202_and_get_recovers_result_twice():
         assert snap["job_id"] == job_id
         assert runner.submitted == [job_id]
         assert "search_models" in log.names()
+
+    original_create = store.create
+
+    def create_without_capability(idempotency_key=None, project_id=None, payload=None):
+        created = original_create(
+            idempotency_key=idempotency_key,
+            project_id=project_id,
+            payload=payload,
+        )
+        created.pop("access_token", None)
+        return created
+
+    monkeypatch.setattr(store, "create", create_without_capability)
+    missing_token = _post_job(client, tag="MISSING-TOKEN", subject=subject_raw())
+    assert missing_token.status_code == 500
+    assert "did not return access_token" in missing_token.json()["detail"]
 
 
 def test_preview_does_not_invoke_search_or_write_revision():

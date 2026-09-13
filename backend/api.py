@@ -544,7 +544,9 @@ def _create_job_record(store, *, idempotency_key: str, project_id: Optional[str]
     if not isinstance(created, Mapping) or "job_id" not in created:
         raise HTTPException(status_code=500, detail="JobStore.create did not return job_id")
     job_id = created["job_id"]
-    if created.get("created") is False:
+    if created.get("created") is True:
+        is_new = True
+    elif created.get("created") is False:
         is_new = False
     elif job_id in RuntimeBindings.submission_index.values():
         is_new = False
@@ -554,15 +556,23 @@ def _create_job_record(store, *, idempotency_key: str, project_id: Optional[str]
         is_new = False
     else:
         is_new = True
+    access_token = created.get("access_token") if is_new else None
+    if is_new and (
+        not isinstance(access_token, str) or not access_token.strip()
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="JobStore.create did not return access_token for a new job",
+        )
     RuntimeBindings.submission_index[idempotency_key] = job_id
     return {
         "job_id": job_id,
         "state": created.get("state") or "queued",
         "created": is_new,
-        # A newly created job has no other authenticated way for its caller to
-        # learn this capability.  Replays deliberately use the guarded token
-        # recovery endpoint instead of returning the stored secret again.
-        "access_token": created.get("access_token") if is_new else None,
+        # Return the capability supplied by the store once for a newly created
+        # job.  Replays deliberately use the guarded token recovery endpoint
+        # instead of returning the stored secret again.
+        "access_token": access_token,
     }
 
 
