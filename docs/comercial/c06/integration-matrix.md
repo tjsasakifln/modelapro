@@ -1,5 +1,11 @@
 # C06 — matriz da composição, não dos componentes isolados
 
+Topo 2026-09-13: candidata A3 **`271b08d`** na #20. Windows PR
+**34733840472**/1 SUCCESS, `OPERATIONAL_SAME_TREE_ONLY`, ciclo instalado
+completo, ACL PASSED. C15 da A3 não fecha a composição B. Distribuição
+Windows entre árvores distintas e C15 final pertencem à publicação de B.
+`COMMERCIAL_RELEASE_READY` permanece falso.
+
 Retomada em trabalho em 2026-09-12. Última candidata publicada A2:
 `df6b7b786f91b7a545d4c925d954cbedb9fbdf17`, com C15 aprovado e Windows reprovado. Os commits posteriores da mesma PR
 precisam de execução própria antes de serem aprovados. Os oito aceites de cada

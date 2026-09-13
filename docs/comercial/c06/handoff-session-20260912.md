@@ -1,5 +1,20 @@
 # C06 — continuidade em nova sessão
 
+## Topo vigente — 2026-09-13, A3 operacional hospedada
+
+A3 **`271b08ddf412ceb733d98c3c6281b145289f5b18`** está na #20. Windows
+**34733840472** attempt 1 SUCCESS, escopo **OPERATIONAL_SAME_TREE_ONLY**.
+Filtro pós-Analysis deixou só `METADATA` próprio; ACL privada passou;
+initial/upgrade/restore/uninstall passaram. Não é migração entre árvores
+distintas nem instalador Inno aprovado como distribuição comercial.
+`COMMERCIAL_RELEASE_READY=false`. B local permanece à frente com UI/manual
+reais; publicar B por fast-forward na mesma #20.
+
+- PR #20: open, draft, `auto_merge=null`, base `6d54f902b85a5a37bfbf154d39f74cf854ff9b2b`
+- A3 obrigações: 1.822. B obrigações: 1.832
+- Instalador A3: `MODELA-PRO-0.1.0-c06.10-win64.exe` SHA-256
+  `73b768cc39eb19f811d4c8659aac8b6b70dc14aceb13063bb4129a11ef196ffc`
+
 ## Encerramento solicitado — 2026-09-13, 00:43 UTC (12/09, 21:43 BRT)
 
 **Este é o checkpoint vigente.** O usuário pediu handoff para continuidade posterior

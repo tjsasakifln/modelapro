@@ -13,7 +13,7 @@
     "NUMERIC_VERIFICATION": "CANDIDATE_CONFIRMATION_PENDING",
     "NORMATIVE_SCOPE_VERIFICATION": "CANDIDATE_CONFIRMATION_PENDING",
     "DOCUMENT_AND_SIGNATURE_FLOW": "CANDIDATE_CONFIRMATION_PENDING",
-    "WINDOWS_DISTRIBUTION_VERIFIED": "NOT_VERIFIED",
+    "WINDOWS_DISTRIBUTION_VERIFIED": "OPERATIONAL_SAME_TREE_ONLY",
     "SECURITY_AND_THIRD_PARTY_REVIEW": "IN_PROGRESS",
     "REAL_CASE_VALIDATION": "NOT_RUN_EXTERNAL",
     "INDEPENDENT_PROFESSIONAL_REVIEW": "NOT_RUN_EXTERNAL",
@@ -44,11 +44,14 @@
     "assinatura de laudo ou contrato em nome de pessoa"
   ],
   "published_candidate": {
-    "head_sha": "df6b7b786f91b7a545d4c925d954cbedb9fbdf17",
-    "role": "intermediate_windows_A2_not_final",
-    "c15_pr_run": "34721474693",
-    "c15_push_run": "34721472670",
-    "windows_run": "34721474609",
-    "status_at_recording": "C15_PR_AND_PUSH_SUCCESS_WINDOWS_FAILURE_NOT_FINAL"
+    "head_sha": "271b08ddf412ceb733d98c3c6281b145289f5b18",
+    "role": "A3_operational_same_tree_only_not_final_B",
+    "windows_run": "34733840472",
+    "windows_run_attempt": "1",
+    "windows_scope": "OPERATIONAL_SAME_TREE_ONLY",
+    "installer_sha256": "73b768cc39eb19f811d4c8659aac8b6b70dc14aceb13063bb4129a11ef196ffc",
+    "c15_pr_run": "pending_B_publication",
+    "c15_push_run": "pending_B_publication",
+    "status_at_recording": "A3_WINDOWS_SUCCESS_SAME_TREE_B_NOT_YET_PUBLISHED"
   }
 }
