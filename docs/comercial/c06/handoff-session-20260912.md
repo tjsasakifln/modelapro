@@ -20,11 +20,16 @@ em execução; não é encerramento, aceite final nem liberação comercial.
   passaram. Ver [matriz atual](integration-matrix.md),
   [prova do navegador](evidence-local-browser-71d549a.json) e
   [suíte ampla local e cinco correções](evidence-local-wide-661fc82.json).
-- Windows está reconstruindo A3 a partir de archive limpo em
-  `/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3tokenfix.DXILG5`.
-  Esta é uma prova local de onedir em Windows 11, sem Inno Setup, distinta do
-  workflow hospedado. Exigir término de initial/upgrade da mesma árvore/restore
-  e encerramento de todos os descendentes sem depender de fallback.
+- O preflight Windows da A3 em
+  `/mnt/c/Users/tj_sa/AppData/Local/Temp/modelapro-c06-a3tokenfix.DXILG5`
+  terminou `initial=FAILED`: cálculo concluído, mas geração documental recusou
+  template antigo coletado do pacote instalado, distinto do checkout fonte.
+  Os 2.811 arquivos (369.886.906 bytes) foram conferidos; encerramento dos filhos
+  e portas passou sem fallback. Ver
+  [evidência local da falha](evidence-local-windows-96975eb.json).
+  Corrigir seleção de dados no spec, revisar a origem de imports e reconstruir.
+  Esta prova local de onedir em Windows 11 não executa Inno Setup nem workflow
+  hospedado. Exigir término de initial/upgrade da mesma árvore/restore.
 - Após a prova local, publicar A3 na mesma #20, aguardar Windows hospedado
   operacional aprovado, e então publicar a composição B. Exigir atualização
   entre árvores distintas, novo job sem replay, artefatos vinculados e C15 PR/push

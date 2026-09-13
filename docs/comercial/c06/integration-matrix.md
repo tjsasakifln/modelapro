@@ -151,6 +151,13 @@ checkout limpo; as cinco causas e correções estão preservadas em
 [evidence-local-wide-661fc82.json](evidence-local-wide-661fc82.json). As correções
 passaram nos consumidores focados, mas a suíte ampla final continua pendente.
 
+O preflight local Windows da A3 `96975eb` terminou `initial=FAILED` após cálculo
+concluído: o spec coletou um template antigo do pacote instalado, e a geração
+recusou as representações divergentes. A correção da coleta de dados está em
+revisão. Os 2.811 arquivos foram conferidos; o encerramento passou sem fallback.
+A [evidência local](evidence-local-windows-96975eb.json) preserva a divergência
+fonte/pacote; não é resultado do instalador Inno nem do workflow hospedado.
+
 Permanecem obrigatórios a suíte ampla/agregador da candidata final, a confirmação
 das representações e guardas nos seus artefatos, o Windows instalado operacional
 e a atualização/restauração entre árvores distintas. A3 é a candidata operacional
