@@ -590,8 +590,6 @@ def _loopback_owner(host: str, port: int) -> Optional[tuple[int, str]]:
     """Return (pid, image) listening on host:port. Never uses netstat/tasklist."""
     if os.name != "nt":
         try:
-            import socket as _socket
-
             hex_port = f"{port:04X}"
             for table in ("/proc/net/tcp", "/proc/net/tcp6"):
                 try:

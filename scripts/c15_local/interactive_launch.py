@@ -130,7 +130,10 @@ def append_startup_log(stage: str, message: str) -> Optional[Path]:
         directory = bootstrap_log_dir()
         path = directory / "startup.log"
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(f"stage={stage} pid={os.getpid()} role={os.environ.get('MODELA_PROCESS_ROLE', '')} {message}\n")
+            role = os.environ.get("MODELA_PROCESS_ROLE", "")
+            handle.write(
+                f"stage={stage} pid={os.getpid()} role={role} {message}\n"
+            )
         return path
     except OSError:
         return None
