@@ -685,7 +685,58 @@ async def _on_startup():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    payload = {"status": "healthy"}
+    instance_id = os.environ.get("MODELA_INSTANCE_ID", "").strip()
+    if instance_id:
+        payload["instance_id"] = instance_id
+    return payload
+
+
+def _active_job_count() -> int:
+    store = get_job_store()
+    if store is None or not hasattr(store, "list_by_state"):
+        return 0
+    total = 0
+    for state in ("queued", "running"):
+        try:
+            total += len(store.list_by_state(state) or [])
+        except Exception:
+            continue
+    return total
+
+
+@app.get("/operations/runtime")
+async def runtime_status():
+    return {
+        "instance_id": os.environ.get("MODELA_INSTANCE_ID", "").strip(),
+        "role": os.environ.get("MODELA_PROCESS_ROLE", "").strip(),
+        "active_jobs": _active_job_count(),
+    }
+
+
+@app.post("/operations/stop")
+async def request_stop(request: Request):
+    from pathlib import Path
+
+    instance_id = os.environ.get("MODELA_INSTANCE_ID", "").strip()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    requested = str(body.get("instance_id") or instance_id)
+    if instance_id and requested and requested != instance_id:
+        raise HTTPException(409, "stop request instance mismatch")
+    payload = {
+        "schema_version": "MP-STOP-REQUEST/1",
+        "instance_id": instance_id or requested,
+        "pid": os.getpid(),
+        "active_jobs": _active_job_count(),
+    }
+    path = Path(config.DATA_DIR) / "stop-request.json"
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    return {"accepted": True, **payload}
 
 
 @app.get("/operations/license")

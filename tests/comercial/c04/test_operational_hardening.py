@@ -70,11 +70,14 @@ def test_ensure_local_directories_restricts_windows_runtime_root(tmp_path, monke
     root = tmp_path / "runtime"
     monkeypatch.setenv("MODELA_RUNTIME_ROOT", str(root))
     monkeypatch.setattr(launcher_module.os, "name", "nt")
+    from scripts.c15_local import interactive_launch as interactive_launch_module
+
+    monkeypatch.setattr(interactive_launch_module.os, "name", "nt")
     monkeypatch.setattr(launcher_module, "_windows_current_user_sid", lambda: "S-1-5-21-1-2-3-500")
     observed = []
 
-    def fake_run(command, **_kwargs):
-        observed.append(command)
+    def fake_run(command, **kwargs):
+        observed.append((command, kwargs))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(launcher_module.subprocess, "run", fake_run)
@@ -88,10 +91,29 @@ def test_ensure_local_directories_restricts_windows_runtime_root(tmp_path, monke
     )
     ensure_local_directories(cfg)
     assert observed
-    assert observed[0][1] == str(root)
-    assert all(item[2] == "/inheritance:r" for item in observed)
-    assert all("/grant:r" in item and "*S-1-5-32-545" not in item[item.index("/grant:r"):item.index("/remove:g")] for item in observed)
-    assert all(item.count("/remove:g") >= 1 and "*S-1-5-32-545" in item for item in observed)
+    commands = [item[0] for item in observed]
+    kwargs_list = [item[1] for item in observed]
+    from scripts.c15_local.interactive_launch import (
+        CREATE_NEW_CONSOLE,
+        CREATE_NO_WINDOW,
+        DETACHED_PROCESS,
+        windows_internal_console_creationflags,
+    )
+
+    assert commands[0][1] == str(root)
+    assert all(item[2] == "/inheritance:r" for item in commands)
+    assert all("/grant:r" in item and "*S-1-5-32-545" not in item[item.index("/grant:r"):item.index("/remove:g")] for item in commands)
+    assert all(item.count("/remove:g") >= 1 and "*S-1-5-32-545" in item for item in commands)
+    flags = windows_internal_console_creationflags()
+    assert flags == CREATE_NO_WINDOW
+    assert not flags & CREATE_NEW_CONSOLE
+    assert not flags & DETACHED_PROCESS
+    for kwargs in kwargs_list:
+        assert kwargs.get("creationflags") == flags
+        assert kwargs.get("stdin") is subprocess.DEVNULL
+        assert kwargs.get("stdout") is subprocess.PIPE
+        assert "capture_output" not in kwargs
+        assert kwargs.get("shell") not in {True, "True"}
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX chmod bits; Windows uses restrict_private_path")
