@@ -574,6 +574,31 @@ def sidebar() -> dict:
             value=os.environ.get("MODELA_API_URL", "http://127.0.0.1:8000"),
             help="Somente serviço local. Sem armazenamento paralelo nesta interface.",
         )
+        st.markdown("**Encerrar este aplicativo**")
+        st.caption(
+            "Fechar a aba do navegador não interrompe o cálculo. "
+            "Use Encerrar MODELA PRO para parar os serviços locais."
+        )
+        if st.button("Encerrar MODELA PRO"):
+            try:
+                ops = JobClient(api_url)
+                runtime = ops.operation("GET", "/operations/runtime").json()
+                active = int(runtime.get("active_jobs") or 0)
+                if active and not st.session_state.get("mp_confirm_stop"):
+                    st.warning(
+                        "Há cálculo em andamento. Fechar a aba não encerra o trabalho. "
+                        "Clique de novo em Encerrar MODELA PRO para confirmar a interrupção."
+                    )
+                    st.session_state["mp_confirm_stop"] = True
+                else:
+                    ops.operation(
+                        "POST",
+                        "/operations/stop",
+                        json={"instance_id": runtime.get("instance_id") or ""},
+                    )
+                    st.success("Pedido de encerramento enviado. Pode fechar esta janela.")
+            except (ApiConnectionError, ApiResponseError) as exc:
+                st.error(str(exc))
         reopen_job = st.text_input("Retomar trabalho pelo identificador", value="")
         project_id = st.text_input("Identificador do projeto", value="")
         if st.checkbox("Licença, cópia de segurança e restauração", value=False):

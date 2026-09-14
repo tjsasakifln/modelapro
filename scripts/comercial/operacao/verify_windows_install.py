@@ -474,7 +474,7 @@ def _start(executable: Path, log_path: Path) -> tuple[subprocess.Popen, Any]:
     log = log_path.open("wb")
     try:
         process = subprocess.Popen(
-            [str(executable), "--health-timeout", "120"],
+            [str(executable), "--health-timeout", "120", "--no-browser"],
             env=os.environ.copy(),
             stdout=log,
             stderr=subprocess.STDOUT,

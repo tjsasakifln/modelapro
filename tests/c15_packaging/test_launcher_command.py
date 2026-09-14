@@ -292,6 +292,29 @@ def test_entrypoint_persists_traceback_when_windowed_stderr_is_absent(
     assert "RuntimeError: windowed child failure" in detail
 
 
+def test_entrypoint_persists_without_runtime_root_when_stderr_is_none(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("MODELA_RUNTIME_ROOT", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("TEMP", str(tmp_path / "Temp"))
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "Temp"))
+    monkeypatch.setattr(launcher_module.sys, "stderr", None)
+
+    def fail():
+        raise RuntimeError("windowed child failure without runtime root")
+
+    assert _entrypoint(fail) == 1
+    matches = list((tmp_path / "Local" / "MODELAPro" / "logs").glob("frozen-child-error-*.log"))
+    matches += list((tmp_path / "xdg" / "modelapro" / "logs").glob("frozen-child-error-*.log"))
+    matches += list((tmp_path / "Temp" / "MODELAPro" / "logs").glob("frozen-child-error-*.log"))
+    assert matches, "diagnostic must persist without MODELA_RUNTIME_ROOT"
+    detail = matches[0].read_text(encoding="utf-8")
+    assert "windowed child failure without runtime root" in detail
+    assert "stage=entrypoint" in detail
+
+
 def test_parent_copies_frozen_child_diagnostic_into_product_log(tmp_path):
     from unittest.mock import Mock
 

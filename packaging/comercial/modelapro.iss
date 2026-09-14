@@ -33,3 +33,6 @@ Name: "{autodesktop}\MODELA PRO"; Filename: "{app}\MODELA-PRO.exe"; Tasks: deskt
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
+
+[Run]
+Filename: "{app}\MODELA-PRO.exe"; Description: "Abrir MODELA PRO"; Flags: nowait postinstall skipifsilent
