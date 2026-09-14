@@ -40,7 +40,6 @@ try:
         persist_launch_diagnostic,
         should_open_interactive_browser,
         ui_public_url,
-        windows_internal_child_popen_kwargs,
         windows_internal_console_run_kwargs,
     )
 except (ImportError, ValueError):
@@ -57,7 +56,6 @@ except (ImportError, ValueError):
         persist_launch_diagnostic,
         should_open_interactive_browser,
         ui_public_url,
-        windows_internal_child_popen_kwargs,
         windows_internal_console_run_kwargs,
     )
 
@@ -982,6 +980,7 @@ def _run_interactive_supervisor(cfg, args) -> int:
     instance_id = ""
     procs: list[subprocess.Popen] = []
     process_tree = None
+    child_logs: list = []
 
     def fail(stage: str, reason: str, exc: Optional[BaseException] = None) -> int:
         detail = traceback.format_exc() if exc else reason
@@ -1023,6 +1022,7 @@ def _run_interactive_supervisor(cfg, args) -> int:
             wait_for_ui(ui_url, timeout=min(args.health_timeout, 30.0))
             logger.info("Reusing instance %s health=%s", expected or payload, payload)
             if should_open_interactive_browser(args):
+                append_startup_log("browser", ui_url)
                 opened = open_product_browser(ui_url)
                 if not opened:
                     notify_browser_recovery(
@@ -1069,7 +1069,12 @@ def _run_interactive_supervisor(cfg, args) -> int:
         api_env["MODELA_PROCESS_ROLE"] = "api"
         ui_env = dict(env)
         ui_env["MODELA_PROCESS_ROLE"] = "frontend"
-        child_kwargs = windows_internal_child_popen_kwargs()
+        # Windowed children already have no console. CREATE_NO_WINDOW here
+        # makes stdout an invalid handle; Streamlit then dies in click.echo
+        # (OSError 22) while printing its URL. Log files, not unread pipes.
+        api_log = (Path(cfg.LOG_DIR) / "api-child.log").open("ab")
+        ui_log = (Path(cfg.LOG_DIR) / "frontend-child.log").open("ab")
+        child_logs = [api_log, ui_log]
         process_tree = _windows_process_tree()
         write_instance_lock(
             cfg,
@@ -1083,11 +1088,15 @@ def _run_interactive_supervisor(cfg, args) -> int:
                 "ui_url": ui_url,
             },
         )
-        backend = subprocess.Popen(backend_cmd, env=api_env, **child_kwargs)
+        backend = subprocess.Popen(
+            backend_cmd, env=api_env, stdout=api_log, stderr=subprocess.STDOUT
+        )
         procs.append(backend)
         if process_tree is not None:
             process_tree.add(backend)
-        frontend = subprocess.Popen(frontend_cmd, env=ui_env, **child_kwargs)
+        frontend = subprocess.Popen(
+            frontend_cmd, env=ui_env, stdout=ui_log, stderr=subprocess.STDOUT
+        )
         procs.append(frontend)
         if process_tree is not None:
             process_tree.add(frontend)
@@ -1106,6 +1115,7 @@ def _run_interactive_supervisor(cfg, args) -> int:
             print(f"UI:  {ui_url}")
             print("Encerre pelo controle Encerrar MODELA PRO na interface. Redis is not required.")
         if should_open_interactive_browser(args):
+            append_startup_log("browser", ui_url)
             opened = open_product_browser(ui_url)
             if not opened:
                 notify_browser_recovery(
@@ -1167,6 +1177,11 @@ def _run_interactive_supervisor(cfg, args) -> int:
         _terminate(procs)
         if process_tree is not None:
             process_tree.close()
+        for handle in child_logs:
+            try:
+                handle.close()
+            except OSError:
+                pass
         if instance_id:
             clear_instance_lock(cfg, instance_id)
         indicator.close()

@@ -284,8 +284,13 @@ def test_interactive_parent_opens_browser_only_after_instance_ready(tmp_path, mo
     assert opened == [expected]
     assert order[2][1] == expected
     assert popens
+    from c15_local.interactive_launch import CREATE_NO_WINDOW
+
     for _cmd, kwargs in popens:
-        assert kwargs.get("stdin") is subprocess.DEVNULL
+        flags = int(kwargs.get("creationflags") or 0)
+        assert not flags & CREATE_NO_WINDOW
+        assert kwargs.get("stdout") is not subprocess.PIPE
+        assert kwargs.get("stderr") is subprocess.STDOUT
 
 
 def test_no_browser_flag_does_not_open(tmp_path, monkeypatch):
