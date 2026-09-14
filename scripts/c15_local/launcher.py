@@ -787,16 +787,27 @@ def copy_text_to_clipboard(text: str) -> bool:
         return False
 
 
+def _interactive_desktop() -> bool:
+    if os.environ.get("CI", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return False
+    if os.environ.get("MODELA_NO_DIALOGS", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return False
+    return os.name == "nt"
+
+
 def notify_failure(title: str, message: str) -> None:
-    if os.name == "nt":
+    if _interactive_desktop():
         try:
             ctypes.windll.user32.MessageBoxW(None, message, title, 0x00000010 | 0x00010000)
             return
         except Exception:
             pass
     if sys.stderr is not None:
-        sys.stderr.write(f"{title}\n{message}\n")
-        sys.stderr.flush()
+        try:
+            sys.stderr.write(f"{title}\n{message}\n")
+            sys.stderr.flush()
+        except OSError:
+            pass
 
 
 def notify_browser_recovery(url: str, message: str) -> None:
@@ -844,7 +855,7 @@ class _StartupIndicator:
                 None,
             )
             if not hwnd:
-                ctypes.windll.user32.MessageBoxW(None, message, "MODELA PRO", 0x00000040)
+                append_startup_log("startup-indicator", "CreateWindowExW failed")
                 return
             self._hwnd = hwnd
             user32.SetWindowTextW(hwnd, message)
@@ -963,7 +974,10 @@ def _run_interactive_supervisor(cfg, args) -> int:
     os.environ.setdefault("MODELA_PROCESS_ROLE", "supervisor")
     log_hint = str(Path(cfg.LOG_DIR) / "startup.log")
     indicator = _StartupIndicator()
-    indicator.start("MODELA PRO está iniciando…")
+    if not getattr(args, "no_browser", False) and _interactive_desktop():
+        indicator.start("MODELA PRO está iniciando…")
+    else:
+        append_startup_log("startup", "MODELA PRO está iniciando…")
     our_executable = sys.executable
     instance_id = ""
     procs: list[subprocess.Popen] = []
@@ -972,10 +986,17 @@ def _run_interactive_supervisor(cfg, args) -> int:
     def fail(stage: str, reason: str, exc: Optional[BaseException] = None) -> int:
         detail = traceback.format_exc() if exc else reason
         path = persist_launch_diagnostic(stage=stage, detail=detail, returncode=1)
-        notify_failure(
-            "MODELA PRO",
-            format_failure_message(stage, reason, str(path or log_hint)),
-        )
+        if not getattr(args, "no_browser", False):
+            notify_failure(
+                "MODELA PRO",
+                format_failure_message(stage, reason, str(path or log_hint)),
+            )
+        elif sys.stderr is not None:
+            try:
+                sys.stderr.write(format_failure_message(stage, reason, str(path or log_hint)) + "\n")
+                sys.stderr.flush()
+            except OSError:
+                pass
         return 1
 
     try:
