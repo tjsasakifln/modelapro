@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +98,7 @@ def verify(url: str, evidence: Path, phase: str) -> dict[str, Any]:
         )
         page.on("pageerror", lambda error: result["page_errors"].append(str(error)))
         page.goto(url, wait_until="domcontentloaded", timeout=90000)
-        page.get_by_text("MODELA PRO", exact=True).first.wait_for(timeout=90000)
+        page.get_by_role("heading", name=re.compile(r"^Modela Pro$", re.IGNORECASE), level=1).wait_for(timeout=90000)
         page.get_by_role(
             "heading", name="1. Encomenda e perfil", exact=True
         ).wait_for(state="visible", timeout=60000)

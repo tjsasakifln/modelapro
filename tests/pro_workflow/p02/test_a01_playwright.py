@@ -175,7 +175,7 @@ def _drive_two_files(sync_playwright, ui_port: int, csv_path: Path, xlsx_path: P
         page = context.new_page()
         page.on("request", lambda req: request_log.append({"method": req.method, "url": req.url}) if "/jobs" in req.url or "/preview" in req.url else None)
         page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
-        page.get_by_text("MODELA PRO", exact=True).first.wait_for(
+        page.get_by_role("heading", name=re.compile(r"^Modela Pro$", re.IGNORECASE), level=1).wait_for(
             state="visible", timeout=45000
         )
         page.screenshot(path=str(shots / "desktop-empty.png"))
