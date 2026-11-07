@@ -422,6 +422,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     parser.add_argument("--internal-api", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--internal-frontend", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--public", action="store_true", help="Start the free personal source edition.")
     parser.add_argument("--api-only", action="store_true")
     parser.add_argument("--frontend-only", action="store_true")
     parser.add_argument(
@@ -436,6 +437,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     parser.add_argument("--health-timeout", type=float, default=45.0)
     args = parser.parse_args(list(argv) if argv is not None else None)
+
+    if args.public:
+        if is_frozen_product():
+            parser.error("--public is available in the public source distribution")
+        os.environ["MODELA_EDITION"] = "public"
 
     if args.internal_api:
         return main_api([])

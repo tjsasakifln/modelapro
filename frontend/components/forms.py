@@ -827,7 +827,7 @@ class JobClient:
     def _own_client(self) -> httpx.Client:
         if self._http is not None:
             return self._http
-        return httpx.Client(base_url=self.base_url, timeout=self.timeout)
+        return httpx.Client(base_url=self.base_url, timeout=self.timeout, trust_env=False)
 
     def _call(self, method: str, path: str, **kwargs) -> httpx.Response:
         url = path if path.startswith("http") else f"{self.base_url}{path}"
@@ -1883,7 +1883,7 @@ def render_professional_report_fields(
 
 def _encomenda_widgets() -> dict:
     """Opening of the professional order. Never auto-attests ART/inspection."""
-    st.subheader("1. Encomenda e perfil")
+    st.subheader("1. Encomenda e perfil", anchor="encomenda")
     st.caption(
         "Finalidade, bem, direitos, data-base, unidade, solicitante, destinatário "
         "e perfil versionado entram no pedido. Compatibilidade verificada não é "
@@ -2028,7 +2028,7 @@ def _encomenda_widgets() -> dict:
 
 
 def _vistoria_and_identity_widgets(*, ns: str, inspection_date: Optional[str]) -> dict:
-    st.subheader("3. Avaliando e vistoria")
+    st.subheader("3. Avaliando e vistoria", anchor="avaliando")
     st.caption(
         "Vistoria, documentos e identidade profissional com procedência. "
         "Campo com formato válido de ART/RRT não autentica o conselho. "
@@ -2193,9 +2193,8 @@ def upload_form(
     fica vinculado ao arquivo/esquema — outro arquivo não herda o imóvel anterior.
     """
     encomenda_state = _encomenda_widgets()
-    st.subheader("2. Amostra e evidências")
-    st.markdown("**1. Preparação da amostra**")
-    st.caption("A interpretação vem da prévia da API. Esta tela não relê a planilha.")
+    st.subheader("2. Amostra e evidências", anchor="amostra")
+    st.caption("Escolha a planilha de imóveis comparáveis. A prévia permite conferir as colunas e as unidades.")
     uploaded_file = st.file_uploader(
         "Arquivo de dados de mercado (CSV ou Excel)",
         type=["csv", "xlsx", "xls"],
@@ -2203,14 +2202,15 @@ def upload_form(
         key="p02_uploader",
     )
 
-    locale = st.selectbox(
-        "Formato numérico e de texto da planilha",
-        options=list(VALID_LOCALES),
-        index=0,
-        help="Enviado em import_options. A API interpreta; esta tela não relê o arquivo.",
-    )
-    delimiter = st.text_input("Separador (opcional)", value="", help="Vazio = detectar automaticamente.")
-    encoding = st.text_input("Codificação (opcional)", value="", help="Vazio = detectar automaticamente.")
+    with st.expander("Formato, separador e codificação da planilha"):
+        locale = st.selectbox(
+            "Formato numérico e de texto da planilha",
+            options=list(VALID_LOCALES),
+            index=0,
+            help="Enviado em import_options. A API interpreta; esta tela não relê o arquivo.",
+        )
+        delimiter = st.text_input("Separador (opcional)", value="", help="Vazio = detectar automaticamente.")
+        encoding = st.text_input("Codificação (opcional)", value="", help="Vazio = detectar automaticamente.")
 
     import_options = {
         "locale": locale,

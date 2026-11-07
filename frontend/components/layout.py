@@ -527,57 +527,40 @@ def load_css() -> None:
 
 
 def header() -> None:
-    st.title("MODELA PRO")
-    st.markdown(
-        '<p class="mp-subtitle">Encomenda, amostra, vistoria, modelagem e emissão revisada pelo responsável</p>',
-        unsafe_allow_html=True,
-    )
+    st.caption("CONFENGE  /  ENGENHARIA DE AVALIAÇÕES")
+    st.title("Modela Pro")
+    st.markdown('<p class="mp-subtitle">Avalie um imóvel pela amostra de mercado ou pelo custo de reedição. '
+                'Revise a memória de cálculo e prepare os documentos do trabalho.</p>', unsafe_allow_html=True)
 
 
 def sidebar() -> dict:
+    from importlib import resources
+    from modules.operacao_local.runtime import public_edition_enabled
+
     with st.sidebar:
-        st.header("Trabalho")
-        from importlib.metadata import PackageNotFoundError, version
-        from importlib.resources import files
-        try:
-            product_version = version("modelapro")
-        except PackageNotFoundError:
-            product_version = "checkout de desenvolvimento"
-        st.caption(f"MODELA PRO · {product_version}")
-        from modules.commercial_license import trust_anchor_metadata
-        anchor = trust_anchor_metadata()
-        if anchor.get("environment") == "synthetic_test":
-            st.warning(anchor["display_label"])
-        elif anchor.get("state") != "CONFIGURED":
-            st.caption("Âncora do titular não configurada neste artefato; cálculo não habilitado para venda.")
-        with st.expander("Ajuda e sobre esta instalação"):
-            manual = files("frontend").joinpath("assets/manual.md").read_text(encoding="utf-8")
-            st.markdown(manual)
-            st.download_button("Baixar manual desta instalação", manual, "MODELA-PRO-manual.md", "text/markdown")
-        st.caption(
-            "Percurso profissional. Use Tab e as setas. O estado também está escrito, "
-            "não só colorido. Duplo clique no disparo é bloqueado."
-        )
-        st.caption(BACKUP_NOTICE)
-        visual_fixture = st.checkbox(
-            "Tela de verificação visual (exemplo)",
-            value=False,
-            help=FIXTURE_SCREEN_NOTICE,
-        )
-        if visual_fixture:
-            st.warning(FIXTURE_SCREEN_NOTICE)
-        st.markdown("**Percurso**")
-        for heading in WORK_FLOW_HEADINGS:
-            st.markdown(f"- {heading}")
-        api_url = st.text_input(
-            "Endereço da API local",
-            value=os.environ.get("MODELA_API_URL", "http://127.0.0.1:8000"),
-            help="Somente serviço local. Sem armazenamento paralelo nesta interface.",
-        )
-        reopen_job = st.text_input("Retomar trabalho pelo identificador", value="")
+        st.header("Meu trabalho")
+        if public_edition_enabled():
+            st.caption("Edição pública da CONFENGE")
+        else:
+            from modules.commercial_license import trust_anchor_metadata
+            anchor = trust_anchor_metadata()
+            if anchor.get("environment") == "synthetic_test":
+                st.warning(anchor["display_label"])
+            elif anchor.get("state") != "CONFIGURED":
+                st.caption("Esta instalação requer a licença da edição comercial.")
+        st.markdown('[Abrir ferramenta no site da CONFENGE](https://confenge.com.br/avaliacao-imoveis-urbanos/inferencia/)')
         project_id = st.text_input("Identificador do projeto", value="")
-        if st.checkbox("Licença, cópia de segurança e restauração", value=False):
-            _render_local_operations(JobClient(api_url))
+        reopen_job = st.text_input("Retomar trabalho pelo identificador", value="")
+        with st.expander("Ajuda e exemplo"):
+            manual = resources.files("frontend").joinpath("assets/manual.md").read_text(encoding="utf-8")
+            visual_fixture = st.checkbox("Ver resultado fictício", value=False, help=FIXTURE_SCREEN_NOTICE)
+            st.download_button("Baixar manual", manual, "MODELA-PRO-manual.md", "text/markdown")
+            st.markdown(manual)
+        with st.expander("Configuração e cópias de segurança"):
+            api_url = st.text_input("Endereço da API local", value=os.environ.get("MODELA_API_URL", "http://127.0.0.1:8000"))
+            st.caption(BACKUP_NOTICE)
+            if st.checkbox("Licença, cópia de segurança e restauração", value=False):
+                _render_local_operations(JobClient(api_url))
         return {
             "visual_fixture": visual_fixture,
             "api_url": api_url,
@@ -636,7 +619,7 @@ def _issue_text(issue: Any) -> str:
 
 
 def render_snapshot_panel(view: Mapping[str, Any], *, fixture: bool = False) -> None:
-    st.subheader("4. Modelagem e revisão")
+    st.subheader("4. Modelagem e revisão", anchor="revisao")
     if fixture:
         st.warning(FIXTURE_SCREEN_NOTICE)
     if view.get("stale_reason"):
@@ -977,7 +960,7 @@ def render_artifact_panel(
     snapshot: Optional[Mapping[str, Any]] = None,
     delivery: Optional[Mapping[str, Any]] = None,
 ) -> dict:
-    st.subheader("5. Emissão e arquivo")
+    st.subheader("5. Emissão e arquivo", anchor="emissao")
     pressed = {"save": False, "download_calc": False, "download_named": None, "load_projects": False}
     delivery = delivery or present_delivery_state(job_view, artifact_view)
     st.markdown(f"**{delivery.get('headline')}**")

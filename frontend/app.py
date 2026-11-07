@@ -226,10 +226,10 @@ def main() -> None:
     import streamlit as st
 
     st.set_page_config(
-        page_title="MODELA PRO — avaliação para revisão profissional",
+        page_title="Modela Pro | Avaliações imobiliárias da CONFENGE",
         page_icon="🏢",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="auto",
     )
     load_css()
     header()
@@ -273,6 +273,13 @@ def main() -> None:
 
     cost_mode = st.radio("Percurso de cálculo", ["Amostra de mercado", "Quantificação de custo"],
                          horizontal=True, key="c06_calculation_path") == "Quantificação de custo"
+    if not cost_mode:
+        st.markdown(
+            '<nav class="mp-steps" aria-label="Etapas da avaliação">'
+            '<a href="#encomenda">Encomenda</a><a href="#amostra">Amostra</a>'
+            '<a href="#revisao">Revisão</a><a href="#emissao">Emissão</a></nav>',
+            unsafe_allow_html=True,
+        )
     form = _COMP["cost_form"]() if cost_mode else upload_form(preview_provider=_preview_provider_for(client))
     persist_client_to_session(st.session_state, client)
     if form.get("stale_reason"):
@@ -410,7 +417,7 @@ def main() -> None:
     )
     render_snapshot_panel(view, fixture=False)
     if snapshot:
-        with st.expander("Gráficos e equação (segundo nível)", expanded=False):
+        with st.expander("Ver gráficos e equação", expanded=False):
             render_snapshot_charts(snapshot)
             legacy_charts = snapshot.get("charts") or {}
             if legacy_charts and not (snapshot.get("model") or {}).get("charts"):

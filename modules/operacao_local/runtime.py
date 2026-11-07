@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import sys
 import tempfile
 
 from .security import LocalSecurityPolicy
@@ -78,8 +79,15 @@ def local_client_headers() -> dict[str, str]:
             "Origin": local_origin(), "X-Workspace-ID": os.environ.get("MODELA_WORKSPACE_ID", "local")}
 
 
+def public_edition_enabled() -> bool:
+    """Only the user-selected source distribution uses the public grant."""
+    return os.environ.get("MODELA_EDITION") == "public" and not getattr(sys, "frozen", False)
+
+
 def license_decision():
     from modules.commercial_license import LicenseDecision, load_license, trusted_vendor_public_key
+    if public_edition_enabled():
+        return LicenseDecision(False, False, None, frozenset({"calculate", "read", "export"}), "Edição pública CONFENGE")
     path = Path(os.environ.get("MODELA_LICENSE_PATH") or runtime_root() / "entitlement.json")
     try:
         return load_license(path, trusted_vendor_public_key())
