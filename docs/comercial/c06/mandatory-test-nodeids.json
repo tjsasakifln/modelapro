@@ -133,6 +133,7 @@
     "tests/c03_normative/test_assess_normative_contract.py::test_k_not_guessed_by_shape_minus_one",
     "tests/c03_normative/test_assess_normative_contract.py::test_unverified_rules_are_listed_not_claimed",
     "tests/c03_normative/test_composed_ols_callback.py::test_composed_ols_pipeline_original_unit_matches_analytical_a01",
+    "tests/c03_normative/test_public_source_edition.py::test_public_calculation_keeps_issuer_and_signature_independent",
     "tests/c04_fitting/test_a01_influence_exclusion.py::test_documented_exclusion_has_id_reason_author_and_separate_counts",
     "tests/c04_fitting/test_a01_influence_exclusion.py::test_evaluate_fitted_uses_same_ids_as_principal_fit",
     "tests/c04_fitting/test_a01_influence_exclusion.py::test_exploratory_without_observation_is_separate_from_principal",
