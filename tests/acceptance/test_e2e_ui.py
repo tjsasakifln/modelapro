@@ -143,7 +143,7 @@ class TestE2EUiStreamlit:
                 page.wait_for_selector("input[type=file]", state="attached", timeout=30000)
                 page.locator("input[type=file]").first.set_input_files(str(csv_path))
                 page.wait_for_selector("input[placeholder='ex.: 73,5']", timeout=45000)
-                page.wait_for_selector("text=1. Preparação da amostra", timeout=15000)
+                page.get_by_role("heading", name="2. Amostra e evidências", exact=True).wait_for(timeout=15000)
 
                 area = page.get_by_placeholder("ex.: 73,5")
                 assert area.count() >= 1, (
