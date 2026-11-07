@@ -122,7 +122,7 @@ def test_composed_browser_upload_preview_subject_result_pdf(tmp_path):
             context = browser.new_context(accept_downloads=True, viewport={"width": 1366, "height": 900})
             page = context.new_page()
             page.goto(f"http://127.0.0.1:{ui_port}", wait_until="networkidle", timeout=60000)
-            page.wait_for_selector("text=1. Preparação da amostra", timeout=45000)
+            page.get_by_role("heading", name="2. Amostra e evidências", exact=True).wait_for(timeout=45000)
             page.wait_for_selector("input[type=file]", state="attached", timeout=30000)
             page.locator("input[type=file]").first.set_input_files(str(csv_path))
             try:

@@ -174,10 +174,10 @@ def _drive_twice(sync_playwright, ui_port: int, csv_path: Path, *, api_port: int
         for run in (1, 2):
             page.goto(f"http://127.0.0.1:{ui_port}", wait_until="domcontentloaded", timeout=60000)
             try:
-                page.wait_for_selector("text=MODELA PRO", timeout=60000)
+                page.get_by_role("heading", level=1, name="Modela Pro", exact=True).wait_for(timeout=60000)
             except Exception:
                 page.reload(wait_until="domcontentloaded")
-                page.wait_for_selector("text=MODELA PRO", timeout=60000)
+                page.get_by_role("heading", level=1, name="Modela Pro", exact=True).wait_for(timeout=60000)
             page.get_by_role(
                 "heading", name="1. Encomenda e perfil", exact=True
             ).wait_for(state="visible", timeout=30000)

@@ -1,0 +1,13 @@
+{
+  "name": "Modela Pro | avaliação imobiliária",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "forwardPorts": [8501],
+  "portsAttributes": {
+    "8501": {"label": "Modela Pro", "onAutoForward": "openBrowser"},
+    "8000": {"label": "API local", "onAutoForward": "ignore"}
+  },
+  "otherPortsAttributes": {"onAutoForward": "ignore"},
+  "postCreateCommand": "bash .devcontainer/preparar.sh",
+  "postStartCommand": "bash .devcontainer/iniciar.sh",
+  "waitFor": "postCreateCommand"
+}

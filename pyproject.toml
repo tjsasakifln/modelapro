@@ -96,7 +96,7 @@ c15_local = "scripts/c15_local"
 
 [tool.setuptools.package-data]
 modules = ["templates/*.html"]
-frontend = ["assets/*.css", "assets/*.md"]
+frontend = ["assets/*.css", "assets/*.md", "assets/visual_fixture_snapshot.json"]
 "profiles.normative" = ["*.json"]
 "profiles.institutions" = ["*.json"]
 "modules.commercial_license" = ["trusted_vendor_anchor.json"]

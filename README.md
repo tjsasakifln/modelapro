@@ -1,5 +1,22 @@
 # CONFENGE MODELA PRO
 
+## Usar a edição pública
+
+Abra o [Modela Pro na CONFENGE](https://confenge.com.br/avaliacao-imoveis-urbanos/inferencia/) para calcular com a planilha no próprio navegador.
+
+Para usar o sistema integral, com projetos, revisão, quantificação de custo e emissão de documentos, abra uma [instância pessoal no GitHub Codespaces](https://codespaces.new/tjsasakifln/modelapro?quickstart=1). Entre com sua conta, confirme a criação e aguarde a instalação. Na aba **Portas**, abra a porta **8501** em outra guia. Mantenha a visibilidade privada. A planilha e os projetos ficam nessa instância da sua conta. As cotas de uso do GitHub se aplicam. Ao terminar, exporte o trabalho e interrompa a instância.
+
+Para executar no próprio computador com Python 3.12 e as bibliotecas de PDF instaladas, abra um terminal na pasta extraída. No Linux, o comando abaixo cria o ambiente, instala o sistema e inicia a edição pública.
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -c constraints/linux-py3.txt -e .
+modelapro --public
+```
+
+Abra **http://127.0.0.1:8501** no navegador. A API fica em loopback e usa credenciais locais criadas na primeira execução. Para gerar PDF no Debian ou Ubuntu, instale também `libpango-1.0-0`, `libpangocairo-1.0-0`, `libgdk-pixbuf-2.0-0`, `shared-mime-info` e uma fonte como `fonts-dejavu-core`. A configuração do Codespaces já instala essas bibliotecas.
+
 Sistema local de avaliação imobiliária por dados de mercado. O lote MP-20260911
 compõe o contrato MP/1: ingestão → esquema → busca → snapshot → persistência →
 PDF/dossiê. O grau de fundamentação/precisão é **calculado e rastreado**, não
