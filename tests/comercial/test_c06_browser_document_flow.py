@@ -246,11 +246,29 @@ def _multiselect(page, label: str, options: tuple[str, ...]) -> None:
     assert widget.count(), f"UI multiselect not found: {label}"
     control = widget.first.get_by_role("combobox")
     assert control.count(), f"UI multiselect control not found: {label}"
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
     for option in options:
-        control.click()
-        choice = page.get_by_role("option", name=option, exact=True)
-        choice.wait_for(state="visible", timeout=10000)
-        choice.click()
+        # A clicked list option is not yet an applied form value. Wait for the
+        # selected chip inside this widget, outside the detached option list.
+        chip = widget.first.get_by_text(option, exact=True)
+        for attempt in range(3):
+            if chip.count() and chip.first.is_visible():
+                break
+            control.click()
+            choice = page.get_by_role("option", name=option, exact=True)
+            choice.wait_for(state="visible", timeout=10000)
+            choice.click()
+            try:
+                chip.first.wait_for(state="visible", timeout=3000)
+                break
+            except PlaywrightTimeout:
+                if attempt == 2:
+                    raise
+                page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    for option in options:
+        widget.first.get_by_text(option, exact=True).first.wait_for(state="visible")
 
 
 def _expand(page, title: str) -> None:
@@ -549,15 +567,12 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                         "Descrição do documento/anexo",
                         "SYNTHETIC_TEST: registro integral que explicita a cobertura dos três requisitos selecionados",
                     )
-                    _multiselect(
-                        page,
-                        "Requisitos comprovados pelo arquivo",
-                        (
-                            "parte1.6.3.vistoria",
-                            "8.2.1.5.2.campo_suficiente",
-                            "10.1.laudo_completo",
-                        ),
+                    required_evidence = (
+                        "parte1.6.3.vistoria",
+                        "8.2.1.5.2.campo_suficiente",
+                        "10.1.laudo_completo",
                     )
+                    _multiselect(page, "Requisitos comprovados pelo arquivo", required_evidence)
                     page.get_by_text(
                         "Tenho autorização para incluir estes bytes no laudo e dossiê",
                         exact=True,
@@ -566,6 +581,15 @@ def test_browser_completes_test_report_review_and_external_signature(tmp_path):
                     page.wait_for_selector(
                         "text=Bytes arquivados com hash", state="attached", timeout=30000
                     )
+
+                    registry = _wait_json(
+                        job_dir / "artifacts" / "document_attachments.json",
+                        lambda value: any(item.get("authorized_for_report") for item in value.get("items", [])),
+                    )
+                    assert any(
+                        item.get("authorized_for_report") and set(item.get("requirement_ids", [])) == set(required_evidence)
+                        for item in registry["items"]
+                    ), "The submitted attachment must cover all three selected requirements"
 
                     _expand(page, "Completar conteúdo e anexos do laudo")
                     for label, value in (
