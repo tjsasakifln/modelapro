@@ -1,3 +1,19 @@
+# Modela Pro | Real Estate Valuation Software
+
+**Python | FastAPI | Streamlit | Statistics | Local-first workflows**
+
+Modela Pro is an engineering software project for organizing property valuation evidence, evaluating statistical models and generating traceable outputs. It is designed around Brazilian valuation practice and the NBR 14653 context. **The software does not certify compliance with the standard or replace a qualified professional's judgment.**
+
+**Explore:** [Technical case study](docs/portfolio/CASE_STUDY.md) · [Backend](backend/) · [Core modules](modules/) · [Tests](tests/) · [Security and deployment boundaries](SECURITY.md) · [Public web edition](https://confenge.com.br/avaliacao-imoveis-urbanos/inferencia/)
+
+The repository includes a local FastAPI service, a Streamlit interface, model search and assessment modules, snapshot-based result persistence, PDF generation and acceptance-test assets. The [project metadata](pyproject.toml) identifies the package as **alpha**. Its local deployment constraints, dependency requirements and remaining verification gaps are documented below. The public web edition is a separate interface; it should not be taken as evidence that the complete local workflow is publicly deployed.
+
+**For international reviewers:** this is an engineering-led software project. Review the implementation, tests and stated limits rather than treating normative or numerical claims as independent certification. [Maintainer's selected work](https://github.com/tjsasakifln/devflow/blob/main/PORTFOLIO.md).
+
+---
+
+## Documentação em português
+
 # CONFENGE MODELA PRO
 
 ## Usar a edição pública
