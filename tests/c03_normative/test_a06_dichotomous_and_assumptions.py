@@ -89,13 +89,59 @@ def test_quantitative_axis_keeps_measure_window():
     assert item4["calculation"]["measure"]["area"]["kind"] == "quantitative"
 
 
-def test_ni_per_dichotomous_level_is_checked():
-    ok = _assess(_sample(), {"area": 120.0, "piscina": 1.0}).normative["micronumerosidade"]
-    assert ok["status"] == "ok"
-    assert ok["checked_characteristics"] == ["piscina=0.0", "piscina=1.0"]
+def test_ni_shortfall_of_a_dichotomous_level_is_a_violation():
     # n = 60 -> n_i >= 6 (Anexo A.2 a); three data without pool violate it.
     bad = _assess(_sample(pool_zero=3), {"area": 120.0, "piscina": 1.0}).normative["micronumerosidade"]
     assert any(v.get("characteristic") == "piscina=0.0" for v in bad["violations"])
+
+
+def test_ni_without_proven_shortfall_stays_pending_not_ok():
+    # Codes and text categories are not all countable here: no false "ok".
+    micro = _assess(_sample(), {"area": 120.0, "piscina": 1.0}).normative["micronumerosidade"]
+    assert micro["status"] == "pending"
+
+
+def _vagas_sample(n=40, seed=3):
+    rng = np.random.default_rng(seed)
+    area = rng.uniform(50, 200, n)
+    vagas = rng.integers(1, 3, n)  # observed only at 1 and 2
+    preco = 3000 * area + 20000 * vagas + rng.normal(0, 15000, n)
+    frame = pd.DataFrame({"preco": preco, "area": area, "vagas": vagas})
+    frame.insert(0, "row_id", [str(i + 1) for i in range(n)])
+    return frame
+
+
+def test_numeric_variable_observed_at_two_other_values_stays_quantitative():
+    features = ["area", "vagas"]
+    spec = {
+        "schema_version": "MP/1",
+        "target_col": "preco",
+        "candidate_cols": features,
+        "roles": {k: "predictor" for k in features},
+        "kinds": {k: "numeric" for k in features},
+        "missing_policy": {"target": "never_impute", "predictors": "complete_case"},
+        "outlier_policy": {"mode": "report_only", "scenario": "principal"},
+    }
+    prepared = fit_dataset({"parsed_frame": _vagas_sample()}, spec)
+    fit = fit_candidate(
+        prepared,
+        CandidateSpec(candidate_id="vagas", features=features, base_variables=features,
+                      feature_groups={}, x_transformations={}, y_transformation="identity", intercept=True),
+        spec,
+    )
+    design = transform_subject({"area": 120.0, "vagas": 3.0}, prepared.feature_schema, prepared.encoder_state)
+    item4 = _item4(evaluate_fitted(fit, design, spec))
+    assert item4["calculation"]["measure"]["vagas"]["kind"] == "quantitative"
+    assert "vagas" in item4["calculation"]["extrapolated"]
+
+
+def test_membership_compares_numeric_values_not_raw_types():
+    from modules.normative_rules import _qualitative_membership
+
+    axis = {"kind": "dichotomous", "sample_values": [0.0, 1.0]}
+    assert _qualitative_membership(axis, "1")[0] == "in_sample"
+    assert _qualitative_membership(axis, 1)[0] == "in_sample"
+    assert _qualitative_membership(axis, "0,5")[0] == "forbidden"
 
 
 def test_homoscedasticity_and_normality_receive_cited_test_pvalues():
@@ -115,3 +161,16 @@ def test_white_matches_statsmodels_on_full_rank_design_and_survives_dummies():
     with_dummy = sm.OLS(frame["preco"], sm.add_constant(frame[["area", "piscina"]])).fit()
     p = _white_test_pvalue(np.asarray(with_dummy.resid), np.asarray(with_dummy.model.exog))
     assert p is not None and 0.0 <= p <= 1.0
+
+
+def test_white_without_intercept_is_not_spuriously_significant():
+    rng = np.random.default_rng(11)
+    rejections = 0
+    for _ in range(200):
+        x = rng.uniform(1, 10, 80)
+        y = 5 * x + rng.normal(0, 3, 80)
+        model = sm.OLS(y, x.reshape(-1, 1)).fit()
+        p = _white_test_pvalue(np.asarray(model.resid), np.asarray(model.model.exog))
+        rejections += p <= 0.10
+    # Homoscedastic data: rejection rate near the nominal 10%, not ~100%.
+    assert rejections / 200 < 0.2

@@ -35,6 +35,7 @@ from .influence_policy import (
 )
 from .logging_manager import logger
 from .nbr14653_validation import NBRValidator
+from .normative_rules import minimum_ni
 from .results import ModelMetrics, ModelResult
 from .transformations import Transformer
 
@@ -1472,10 +1473,12 @@ def _axes_from_effective_sample(candidate_fit: CandidateFit, subject_raw: Mappin
             "n": int(finite.shape[0]),
         }
         levels = sorted({float(v) for v in finite.tolist()})
-        if len(levels) == 2:
-            # NBR 14653-2:2011 Anexo A.5: a variable that takes only two values
-            # is dichotomous; extrapolation and interpolation are forbidden, so
-            # the 0.5*min..2*max measure window of Tabela 1 item 4 never applies.
+        if levels == [0.0, 1.0]:
+            # NBR 14653-2:2011 Anexo A.5: a variable that can take only two
+            # values is dichotomous, "usually 0 and 1"; extrapolation and
+            # interpolation are forbidden, so the 0.5*min..2*max window of
+            # Tabela 1 item 4 never applies. A numeric variable merely observed
+            # at two other values (e.g. vagas 1/2) stays quantitative.
             axis["kind"] = "dichotomous"
             axis["sample_values"] = levels
             axis["level_counts"] = {
@@ -1485,19 +1488,29 @@ def _axes_from_effective_sample(candidate_fit: CandidateFit, subject_raw: Mappin
     return axes
 
 
-def _category_counts_from_axes(axes: Sequence[Mapping[str, Any]]) -> Optional[Dict[str, int]]:
-    """Anexo A.2 a) n_i: data per characteristic of each dichotomous variable.
+def _category_counts_from_axes(
+    axes: Sequence[Mapping[str, Any]], n: Any
+) -> Optional[Dict[str, int]]:
+    """Anexo A.2 a) n_i: only proven shortfalls of dichotomous levels.
 
-    Returns None when the model has no dichotomous axis, so the n_i leg is
-    reported exactly as before (pending) for models without such variables.
+    Allocated codes and text categories cannot all be identified here, so a
+    full count set would claim compliance it did not check. The counts are
+    passed only when a dichotomous level is below the n_i minimum; otherwise
+    the per-characteristic leg stays pending, as before ("absence is not
+    conformity").
     """
+    minimum = minimum_ni(n)
+    if minimum is None:
+        return None
     counts: Dict[str, int] = {}
     for axis in axes:
         if axis.get("kind") != "dichotomous":
             continue
         for level, count in (axis.get("level_counts") or {}).items():
             counts[f"{axis.get('name')}={level}"] = int(count)
-    return counts or None
+    if any(count < minimum for count in counts.values()):
+        return counts
+    return None
 
 
 def _white_test_pvalue(resid: np.ndarray, exog: np.ndarray) -> Optional[float]:
@@ -1507,8 +1520,10 @@ def _white_test_pvalue(resid: np.ndarray, exog: np.ndarray) -> Optional[float]:
     dichotomous regressor (d**2 == d) does not inflate the degrees of freedom.
     """
     n = resid.shape[0]
-    cols = [exog[:, j] for j in range(exog.shape[1])]
-    k = len(cols)
+    # The auxiliary regression always carries a constant, so R² is centered
+    # and df = rank - 1 holds even for a candidate fitted without intercept.
+    cols = [np.ones(n)] + [exog[:, j] for j in range(exog.shape[1])]
+    k = exog.shape[1]
     for i in range(k):
         for j in range(i, k):
             cols.append(exog[:, i] * exog[:, j])
@@ -1532,8 +1547,8 @@ def _assumption_test_blocks(model: Any) -> Dict[str, Dict[str, Any]]:
     """p-values for Anexo A.2 c) and d) with tests the norm cites.
 
     A.2.1.3 b) cites the White test (homoscedasticity); A.2.1.2 e) cites
-    Jarque-Bera (normality). A.2.1.2 c) frequencies are attached as evidence.
-    A test that cannot run leaves the block without p_value (stays pending).
+    Jarque-Bera (normality). A test that cannot run leaves the block without
+    p_value, so the assumption stays pending.
     """
     blocks: Dict[str, Dict[str, Any]] = {}
     if model is None:
@@ -1555,22 +1570,8 @@ def _assumption_test_blocks(model: Any) -> Dict[str, Dict[str, Any]]:
         from statsmodels.stats.stattools import jarque_bera
 
         jb_p = float(jarque_bera(resid)[1])
-        scale = float(np.sqrt(getattr(model, "scale", np.nan)))
-        frequencies = None
-        if np.isfinite(scale) and scale > 0:
-            z = np.abs(resid / scale)
-            frequencies = {
-                "[-1;+1]": float(np.mean(z <= 1.0)),
-                "[-1,64;+1,64]": float(np.mean(z <= 1.64)),
-                "[-1,96;+1,96]": float(np.mean(z <= 1.96)),
-                "reference": {"[-1;+1]": 0.68, "[-1,64;+1,64]": 0.90, "[-1,96;+1,96]": 0.95},
-            }
         if np.isfinite(jb_p):
-            blocks["anexoA.2.d.normalidade"] = {
-                "p_value": jb_p,
-                "method": "Jarque-Bera (A.2.1.2 e)",
-                "standardized_residual_frequencies": frequencies,
-            }
+            blocks["anexoA.2.d.normalidade"] = {"p_value": jb_p, "method": "Jarque-Bera (A.2.1.2 e)"}
     except Exception:
         pass
     return blocks
@@ -1886,7 +1887,7 @@ def evaluate_fitted(
             **_assumption_test_blocks(candidate_fit.model_object),
             **copy.deepcopy(candidate_fit.diagnostics or {}),
         },
-        "category_counts": _category_counts_from_axes(axes),
+        "category_counts": _category_counts_from_axes(axes, n),
         "pvalues": {rec["name"]: rec.get("pvalue") for rec in candidate_fit.coefficient_records},
         "f_pvalue": (candidate_fit.diagnostics or {}).get("f_pvalue"),
         "value": {key: copy.deepcopy(value[key]) for key in _empty_value()},

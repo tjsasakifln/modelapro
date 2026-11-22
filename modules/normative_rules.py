@@ -313,7 +313,11 @@ def _qualitative_membership(axis: Mapping[str, Any], value: Any) -> Tuple[str, s
         )
 
     observed_list = list(observed)
-    if value in observed_list:
+    numeric_value = as_float(value)
+    numeric_levels = [as_float(v) for v in observed_list]
+    if value in observed_list or (
+        numeric_value is not None and numeric_value in [v for v in numeric_levels if v is not None]
+    ):
         return "in_sample", "valor presente no conjunto amostral observado"
 
     if kind == KIND_ADJUSTED_CODE:
